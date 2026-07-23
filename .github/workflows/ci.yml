@@ -1,0 +1,41 @@
+# CI for Zephyr. The repo is local-only right now — this workflow activates
+# automatically on the first push to GitHub. Builds unsigned (no Local.xcconfig
+# on CI), runs the ZephyrKit unit tests, and verifies the app bundle layout.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      # The runner image's default Xcode may lag the 26.6 this project is
+      # developed with. If this exact path ever disappears from the image,
+      # list the installed versions with `ls /Applications | grep Xcode` and
+      # pick the closest 26.x.
+      - name: Select Xcode 26.6
+        run: sudo xcode-select -s /Applications/Xcode_26.6.app
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build app (unsigned)
+        run: >
+          xcodebuild -project Zephyr.xcodeproj -scheme Zephyr
+          -configuration Debug -derivedDataPath build
+          build CODE_SIGNING_ALLOWED=NO
+
+      - name: Run ZephyrKit tests
+        run: cd ZephyrKit && swift test
+
+      - name: Verify bundle layout
+        run: sh scripts/verify-bundle.sh

@@ -1,0 +1,10 @@
+// Shared.xcconfig — committed build settings shared by every machine (referenced
+// from project.yml via configFiles).
+//
+// Why the split: the Apple Development team ID is machine-/owner-specific and must
+// never be committed, so it lives in Local.xcconfig next to this file, which is
+// gitignored. Create it once with scripts/set-team.sh. The #include? directive is
+// OPTIONAL — on CI Local.xcconfig does not exist and the build runs unsigned
+// (CODE_SIGNING_ALLOWED=NO), which is exactly what we want.
+
+#include? "Local.xcconfig"

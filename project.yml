@@ -1,0 +1,97 @@
+# project.yml — XcodeGen spec; the gitignored Zephyr.xcodeproj is generated from this file.
+#
+# Workflow: edit THIS file, then run `xcodegen generate`. Never change build settings,
+# schemes, or file membership in the Xcode GUI — regeneration silently wipes GUI edits.
+# Signing (DEVELOPMENT_TEAM) lives only in the gitignored Configs/Local.xcconfig,
+# pulled in via Configs/Shared.xcconfig; CI builds with CODE_SIGNING_ALLOWED=NO.
+
+name: Zephyr
+
+options:
+  bundleIdPrefix: io.github.thijsvos
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+configFiles:
+  Debug: Configs/Shared.xcconfig
+  Release: Configs/Shared.xcconfig
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+
+packages:
+  ZephyrKit:
+    path: ZephyrKit
+
+targets:
+  # Root LaunchDaemon helper (SMAppService). Plain executable ("tool"), embedded
+  # into Zephyr.app/Contents/MacOS by the app target's dependency below.
+  ZephyrHelper:
+    type: tool
+    platform: macOS
+    sources: [ZephyrHelper]
+    dependencies:
+      - package: ZephyrKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.thijsvos.zephyr.helper
+        SKIP_INSTALL: YES
+        # Daemon code must never be MainActor-bound by default.
+        SWIFT_DEFAULT_ACTOR_ISOLATION: nonisolated
+
+  # The menu-bar app (LSUIElement — no Dock icon).
+  Zephyr:
+    type: application
+    platform: macOS
+    sources:
+      - path: Zephyr
+      # The launchd plist must land in Contents/Library/LaunchDaemons (where
+      # SMAppService looks for it), NOT in Resources — hence the explicit
+      # per-file copyFiles build phase overriding the default for this file.
+      - path: Zephyr/Support/io.github.thijsvos.zephyr.helper.plist
+        buildPhase:
+          copyFiles:
+            destination: wrapper
+            subpath: Contents/Library/LaunchDaemons
+    info:
+      path: Zephyr/Info.plist
+      properties:
+        LSUIElement: true
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        NSHumanReadableCopyright: "MIT — github.com/thijsvos"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.thijsvos.zephyr
+        # UI code defaults to the main actor; helper/kit stay nonisolated.
+        SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+        SWIFT_APPROACHABLE_CONCURRENCY: YES
+    dependencies:
+      - package: ZephyrKit
+      # embed + copy to executables puts the signed helper binary at
+      # Zephyr.app/Contents/MacOS/ZephyrHelper (required by the launchd plist's
+      # BundleProgram path). Copy-phase code signing defaults to on.
+      - target: ZephyrHelper
+        embed: true
+        copy:
+          destination: executables
+
+# Schemes are generated from here so they are versioned (no .xcuserdatad needed).
+schemes:
+  Zephyr:
+    build:
+      targets:
+        Zephyr: all
+    run:
+      config: Debug
+  "Zephyr (Simulated)":
+    build:
+      targets:
+        Zephyr: all
+    run:
+      config: Debug
+      environmentVariables:
+        ZEPHYR_SIMULATED: "1"
