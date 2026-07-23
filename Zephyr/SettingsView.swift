@@ -65,7 +65,6 @@ struct SettingsSection: View {
         case .notRegistered: "not registered"
         case .requiresApproval: "waiting for approval"
         case .enabled: "enabled"
-        case .notFound: "not found in bundle"
         }
         let connection = switch state.helper.connection {
         case .disconnected: "disconnected"

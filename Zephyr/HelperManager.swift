@@ -20,8 +20,6 @@ final class HelperManager {
         /// Registered; the user must approve it in System Settings.
         case requiresApproval
         case enabled
-        /// The plist/binary is missing from the bundle — a build problem.
-        case notFound
     }
 
     /// The XPC channel's state, including the version handshake result.
@@ -68,7 +66,10 @@ final class HelperManager {
         case .notRegistered: .notRegistered
         case .requiresApproval: .requiresApproval
         case .enabled: .enabled
-        case .notFound: .notFound
+        // .notFound is ALSO what a never-registered daemon reports on a fresh
+        // machine — it does not mean the bundle is broken. Treat it as "not
+        // registered"; a genuinely broken bundle surfaces as a register() error.
+        case .notFound: .notRegistered
         @unknown default: .unknown
         }
     }

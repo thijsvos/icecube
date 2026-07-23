@@ -47,13 +47,6 @@ struct FanControlSection: View {
             onboarding
         case .requiresApproval:
             approvalPrompt
-        case .notFound:
-            Label(
-                "Helper missing from this build — rebuild the app (XCODE_GUIDE §4).",
-                systemImage: "exclamationmark.triangle"
-            )
-            .font(.caption)
-            .foregroundStyle(.orange)
         case .enabled:
             enabledContent
         }
