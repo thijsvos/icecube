@@ -92,6 +92,25 @@ public struct SMCSnapshot: Sendable, Codable, Equatable {
     public var hottest: SensorReading? {
         temperatures.max { $0.celsius < $1.celsius }
     }
+
+    /// The hottest sensor **with flicker hysteresis** for UI labels.
+    ///
+    /// Near-equal cores trade the top spot every tick, which makes a label
+    /// that names the hottest sensor rewrite itself constantly. This variant
+    /// keeps the previously shown sensor in the title as long as it stays
+    /// within `hysteresis` °C of the true maximum — the displayed *value* is
+    /// still that sensor's current reading, so the UI never lies by more
+    /// than the hysteresis band.
+    public func hottest(stickingTo previousKey: String?, hysteresis: Double = 1.0) -> SensorReading? {
+        guard let top = hottest else { return nil }
+        guard let previousKey,
+              let previous = temperatures.first(where: { $0.key == previousKey }),
+              top.celsius - previous.celsius < hysteresis
+        else {
+            return top
+        }
+        return previous
+    }
 }
 
 /// The control configuration the app sends to the helper daemon over XPC (Phase 3+).

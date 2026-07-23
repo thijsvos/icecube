@@ -20,6 +20,9 @@ public actor SystemSMCProvider: SMCProviding {
     /// Resolved once on first use.
     private var discoveredFans: [FanDescriptor]?
     private var discoveredSensors: [SMCKeyMaps.SensorDescriptor]?
+    /// Last plausible value per sensor key — what a glitched read falls back
+    /// to so the sensor list never shrinks (see `SensorStabilizer`).
+    private var lastGoodTemperatures: [String: Double] = [:]
 
     /// What we remember about one fan after discovery.
     private struct FanDescriptor {
@@ -69,14 +72,21 @@ public actor SystemSMCProvider: SMCProviding {
     }
 
     public func temperatures() async throws -> [SensorReading] {
-        var readings: [SensorReading] = []
-        for sensor in try await sensorDescriptors() {
-            // A sensor that fails or reads implausibly this tick is skipped,
-            // not removed — it may recover next poll.
-            guard let value = try? await connection.readDouble(sensor.key),
-                  SMCKeyMaps.isPlausibleTemperature(value) else { continue }
-            readings.append(SensorReading(key: sensor.key, label: sensor.label, celsius: value))
+        // The list is STATIC after discovery: every discovered sensor appears
+        // every tick, in the same order. A read that fails or comes back
+        // implausible holds the sensor's last good value instead of dropping
+        // the row — vanishing rows made the popover resize every second.
+        let sensors = try await sensorDescriptors()
+        var fresh: [String: Double] = [:]
+        for sensor in sensors {
+            if let value = try? await connection.readDouble(sensor.key) {
+                fresh[sensor.key] = value
+            }
         }
+        let (readings, cache) = SensorStabilizer.stabilize(
+            sensors: sensors, freshValues: fresh, lastGood: lastGoodTemperatures
+        )
+        lastGoodTemperatures = cache
         return readings
     }
 
@@ -161,7 +171,14 @@ public actor SystemSMCProvider: SMCProviding {
         }
         var resolved: [SMCKeyMaps.SensorDescriptor] = []
         if let curated = SMCKeyMaps.curatedSensors(forModel: HostInfo.modelIdentifier()) {
-            for sensor in curated where await connection.hasKey(sensor.key) {
+            // Admission requires a plausible first READ, not mere existence:
+            // a key that exists but reads 0 (dead/unpopulated sensor) would
+            // otherwise become a permanent junk row. The read also seeds the
+            // hold-last-good cache, so membership never changes afterwards.
+            for sensor in curated {
+                guard let value = try? await connection.readDouble(sensor.key),
+                      SMCKeyMaps.isPlausibleTemperature(value) else { continue }
+                lastGoodTemperatures[sensor.key] = value
                 resolved.append(sensor)
             }
         }
@@ -185,6 +202,7 @@ public actor SystemSMCProvider: SMCProviding {
                   info.type == SMCDataType.float.rawValue,
                   let value = try? await connection.readDouble(key),
                   SMCKeyMaps.isPlausibleTemperature(value) else { continue }
+            lastGoodTemperatures[key] = value // seed the hold-last-good cache
             found.append(SMCKeyMaps.SensorDescriptor(key: key, label: key))
         }
         return found

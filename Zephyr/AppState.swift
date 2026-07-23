@@ -17,6 +17,12 @@ import ZephyrKit
 final class AppState {
     /// The most recent successful reading, or `nil` before the first one lands.
     private(set) var snapshot: SMCSnapshot?
+    /// The hottest sensor as shown in UI — updated with hysteresis so the
+    /// badge doesn't flip between near-equal cores every second.
+    private(set) var hottest: SensorReading?
+    /// Consecutive failed polls; the error row only appears at 3+ so a single
+    /// transient miss can't flash a caption in and out of the layout.
+    @ObservationIgnored private var consecutiveFailures = 0
     /// True when running against `MockSMCProvider` — the UI shows a badge so
     /// simulated numbers are never mistaken for real hardware.
     let isSimulated: Bool
@@ -54,11 +60,18 @@ final class AppState {
                 switch event {
                 case let .snapshot(new):
                     snapshot = new
+                    hottest = new.hottest(stickingTo: hottest?.key)
+                    consecutiveFailures = 0
                     errorMessage = nil
                 case let .failure(message):
-                    // Keep the last good snapshot on screen; a transient miss
-                    // becomes a caption, never a blank popover.
-                    errorMessage = message
+                    // Keep the last good snapshot on screen. One transient
+                    // miss is silent; only a persistent failure (3+ ticks)
+                    // earns the error row — appearing/disappearing captions
+                    // are exactly the layout jump we forbid.
+                    consecutiveFailures += 1
+                    if consecutiveFailures >= 3 {
+                        errorMessage = message
+                    }
                 }
             }
         }
@@ -105,14 +118,10 @@ final class AppState {
         snapshot?.temperatures ?? []
     }
 
-    /// The hottest sensor right now, if any — drives the badge and tinting.
-    var hottest: SensorReading? {
-        snapshot?.hottest
-    }
-
     /// The menu bar readout, e.g. `"62°"`; `"--°"` before the first reading.
+    /// Uses the hysteresis-stabilized `hottest` so label and badge agree.
     var hottestText: String {
-        guard let hottest = snapshot?.hottest else { return "--°" }
+        guard let hottest else { return "--°" }
         return "\(Int(hottest.celsius.rounded()))°"
     }
 }

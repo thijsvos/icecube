@@ -160,3 +160,90 @@ struct DiagnosticsTests {
         }
     }
 }
+
+@Suite("SensorStabilizer — the list never jumps")
+struct SensorStabilizerTests {
+    private let sensors = [
+        SMCKeyMaps.SensorDescriptor(key: "Tp01", label: "CPU P-core 1"),
+        SMCKeyMaps.SensorDescriptor(key: "Tg0f", label: "GPU 1"),
+        SMCKeyMaps.SensorDescriptor(key: "TB1T", label: "Battery 1"),
+    ]
+
+    @Test("A glitched read holds the last good value instead of dropping the row")
+    func holdsLastGoodOnGlitch() {
+        let seeded = ["Tp01": 55.0, "Tg0f": 48.0, "TB1T": 33.0]
+        // Tick: Tp01 missing entirely, Tg0f implausible (0), TB1T fresh.
+        let (readings, cache) = SensorStabilizer.stabilize(
+            sensors: sensors,
+            freshValues: ["Tg0f": 0.0, "TB1T": 34.0],
+            lastGood: seeded
+        )
+        #expect(readings.map(\.key) == ["Tp01", "Tg0f", "TB1T"], "full list, stable order")
+        #expect(readings.map(\.celsius) == [55.0, 48.0, 34.0], "held, held, fresh")
+        #expect(cache == ["Tp01": 55.0, "Tg0f": 48.0, "TB1T": 34.0])
+    }
+
+    @Test("List length and order are identical across good and bad ticks")
+    func stableAcrossTicks() {
+        var cache = ["Tp01": 55.0, "Tg0f": 48.0, "TB1T": 33.0]
+        var lengths: Set<Int> = []
+        var orders: Set<[String]> = []
+        let ticks: [[String: Double]] = [
+            ["Tp01": 60, "Tg0f": 50, "TB1T": 33], // all fresh
+            ["Tp01": 61], // two missing
+            [:], // everything missing
+            ["Tp01": 0, "Tg0f": 130, "TB1T": 33.5], // two implausible
+        ]
+        for fresh in ticks {
+            let result = SensorStabilizer.stabilize(sensors: sensors, freshValues: fresh, lastGood: cache)
+            cache = result.lastGood
+            lengths.insert(result.readings.count)
+            orders.insert(result.readings.map(\.key))
+        }
+        #expect(lengths == [3], "every tick publishes all 3 sensors")
+        #expect(orders.count == 1, "order never changes")
+    }
+
+    @Test("Fresh plausible values always win over the cache")
+    func freshWins() {
+        let (readings, _) = SensorStabilizer.stabilize(
+            sensors: sensors,
+            freshValues: ["Tp01": 70, "Tg0f": 65, "TB1T": 35],
+            lastGood: ["Tp01": 55, "Tg0f": 48, "TB1T": 33]
+        )
+        #expect(readings.map(\.celsius) == [70, 65, 35])
+    }
+}
+
+@Suite("Sticky hottest — the badge doesn't flicker")
+struct StickyHottestTests {
+    private func snapshot(_ values: [(String, Double)]) -> SMCSnapshot {
+        SMCSnapshot(
+            date: Date(timeIntervalSince1970: 1_753_000_000),
+            fans: [],
+            temperatures: values.map { SensorReading(key: $0.0, label: $0.0, celsius: $0.1) }
+        )
+    }
+
+    @Test("Within the hysteresis band the previous sensor keeps the title")
+    func sticksWithinBand() {
+        let snap = snapshot([("Tp01", 65.4), ("Tp09", 65.9)])
+        let shown = snap.hottest(stickingTo: "Tp01")
+        #expect(shown?.key == "Tp01")
+        #expect(shown?.celsius == 65.4, "the value shown is the sticky sensor's real reading")
+    }
+
+    @Test("A decisively hotter sensor takes over")
+    func switchesBeyondBand() {
+        let snap = snapshot([("Tp01", 60.0), ("Tg0f", 75.0)])
+        #expect(snap.hottest(stickingTo: "Tp01")?.key == "Tg0f")
+    }
+
+    @Test("No previous sensor, or a vanished one, falls back to the true max")
+    func fallsBackToTrueMax() {
+        let snap = snapshot([("Tp01", 60.0), ("Tg0f", 61.0)])
+        #expect(snap.hottest(stickingTo: nil)?.key == "Tg0f")
+        #expect(snap.hottest(stickingTo: "Txxx")?.key == "Tg0f")
+        #expect(snapshot([]).hottest(stickingTo: "Tp01") == nil)
+    }
+}
