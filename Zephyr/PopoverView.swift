@@ -31,12 +31,21 @@ struct PopoverView: View {
                 Divider()
                 DashboardView(state: state)
             }
+            if showsSettings {
+                Divider()
+                SettingsSection(state: state)
+            }
             Divider()
             footer
         }
         .padding(14)
         .frame(width: 380)
     }
+
+    /// Whether the inline settings section is expanded. Settings live inside
+    /// the popover on purpose: clicking options in a separate window counts
+    /// as "outside" and macOS dismisses the popover — the disappearing-UI bug.
+    @State private var showsSettings = false
 
     // MARK: - Header
 
@@ -141,10 +150,10 @@ struct PopoverView: View {
                 WindowOpener.open(WindowOpener.ID.sensors, using: openWindow)
             }
             .help("Browse every SMC key and export a diagnostics report")
-            Button("Settings…") {
-                WindowOpener.open(WindowOpener.ID.settings, using: openWindow)
+            Button(showsSettings ? "Hide Settings" : "Settings…") {
+                showsSettings.toggle()
             }
-            .help("Menu bar display options")
+            .help("Menu bar display options — shown right here so the popover stays open")
             Button("Open Zephyr") {
                 // Phase 2: opens the main window (charts, presets).
             }

@@ -31,10 +31,12 @@ struct ZephyrApp: App {
             HStack(spacing: 3) {
                 Image(systemName: "fanblades")
                     .renderingMode(.template)
-                if let text = appState.menuBarText {
-                    Text(text)
-                        .monospacedDigit()
-                }
+                // The Text is ALWAYS present (empty when icon-only) — the
+                // label's view structure never changes. Structurally removing
+                // views from a MenuBarExtra label is a known way to glitch
+                // the status item on macOS.
+                Text(appState.menuBarText ?? "")
+                    .monospacedDigit()
             }
             .accessibilityLabel("Zephyr, hottest sensor \(appState.hottestText)")
         }
@@ -42,16 +44,11 @@ struct ZephyrApp: App {
 
         // The SMC key browser + diagnostics export. Opened from the popover
         // via WindowOpener (LSUIElement apps need the explicit activation).
+        // Settings deliberately have NO window: they render inline in the
+        // popover (see SettingsSection) so choosing an option can't dismiss it.
         Window("SMC Sensors", id: WindowOpener.ID.sensors) {
             SensorsBrowserView(state: appState)
         }
         .defaultSize(width: 560, height: 480)
-
-        // App settings — a plain Window (not the Settings scene, which focuses
-        // unreliably from LSUIElement menu bar apps; see WindowOpener).
-        Window("Zephyr Settings", id: WindowOpener.ID.settings) {
-            SettingsView(state: appState)
-        }
-        .windowResizability(.contentSize)
     }
 }
