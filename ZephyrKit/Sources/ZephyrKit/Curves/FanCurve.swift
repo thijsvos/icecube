@@ -97,21 +97,25 @@ public struct FanCurve: Sendable, Codable, Equatable {
 
     // MARK: - Built-in curves (the Quiet/Balanced/Max presets)
 
-    /// Silent until warm; only reaches full speed near the top.
+    /// Silent at idle, but doesn't tolerate real heat: fans from 60 °C,
+    /// full speed already at 90 °C (tuned cooler per owner preference —
+    /// the die should not live in the high 80s).
     public static let quiet = FanCurve(points: [
-        CurvePoint(celsius: 65, fraction: 0),
-        CurvePoint(celsius: 75, fraction: 0.25),
-        CurvePoint(celsius: 85, fraction: 0.55),
-        CurvePoint(celsius: 95, fraction: 1),
+        CurvePoint(celsius: 60, fraction: 0),
+        CurvePoint(celsius: 70, fraction: 0.3),
+        CurvePoint(celsius: 80, fraction: 0.6),
+        CurvePoint(celsius: 90, fraction: 1),
     ])
 
-    /// The all-rounder — close to the daemon's guardian behavior.
+    /// The cool-running all-rounder: airflow starts in the mid-40s and the
+    /// fans are at full speed by 85 °C — trades some noise for a machine
+    /// that stays comfortable to the touch.
     public static let balanced = FanCurve(points: [
-        CurvePoint(celsius: 55, fraction: 0),
-        CurvePoint(celsius: 65, fraction: 0.2),
-        CurvePoint(celsius: 75, fraction: 0.45),
-        CurvePoint(celsius: 85, fraction: 0.7),
-        CurvePoint(celsius: 95, fraction: 1),
+        CurvePoint(celsius: 45, fraction: 0),
+        CurvePoint(celsius: 55, fraction: 0.25),
+        CurvePoint(celsius: 65, fraction: 0.5),
+        CurvePoint(celsius: 75, fraction: 0.75),
+        CurvePoint(celsius: 85, fraction: 1),
     ])
 
     /// Full speed always (flat at 1.0).

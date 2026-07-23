@@ -64,9 +64,10 @@ struct FanCurveTests {
             #expect(curve.isUsable)
         }
         #expect(FanCurve.quiet.fraction(at: 50) == 0, "quiet is silent when cool")
-        #expect(FanCurve.quiet.fraction(at: 95) == 1)
+        #expect(FanCurve.quiet.fraction(at: 90) == 1, "quiet hits full speed by 90 °C")
         #expect(FanCurve.max.fraction(at: 35) == 1, "max is always full speed")
-        #expect(FanCurve.balanced.fraction(at: 75) == 0.45)
+        #expect(FanCurve.balanced.fraction(at: 75) == 0.75)
+        #expect(FanCurve.balanced.fraction(at: 85) == 1, "balanced is flat-out by 85 °C")
     }
 }
 
