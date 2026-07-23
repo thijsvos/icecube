@@ -29,7 +29,7 @@ struct IceCubeApp: App {
             // Template rendering is mandatory-and-correct on the macOS 26
             // transparent menu bar: the system re-tints the glyph for us.
             HStack(spacing: 3) {
-                Image(systemName: "fanblades")
+                Image(systemName: "cube.transparent")
                     .renderingMode(.template)
                 // The Text is ALWAYS present (empty when icon-only) — the
                 // label's view structure never changes. Structurally removing
