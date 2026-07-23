@@ -156,8 +156,15 @@ struct PopoverView: View {
 
     // MARK: - Footer
 
+    /// Needed to open the sensors window scene from inside the popover.
+    @Environment(\.openWindow) private var openWindow
+
     private var footer: some View {
         HStack {
+            Button("Sensors…") {
+                WindowOpener.open(WindowOpener.ID.sensors, using: openWindow)
+            }
+            .help("Browse every SMC key and export a diagnostics report")
             Button("Open Zephyr") {
                 // Phase 2: opens the main window (charts, presets).
             }

@@ -21,6 +21,12 @@ public protocol SMCProviding: Sendable {
 
     /// All monitored temperature sensors, in degrees Celsius.
     func temperatures() async throws -> [SensorReading]
+
+    /// Every SMC key this machine exposes, with metadata and a best-effort
+    /// decoded value — the raw material of the sensors browser and the
+    /// diagnostics report. Expensive (thousands of reads on real hardware):
+    /// call on demand, never from the polling loop.
+    func keyDump() async throws -> [SMCKeyDump]
 }
 
 public extension SMCProviding {

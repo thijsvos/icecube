@@ -134,8 +134,8 @@ struct MockSMCProviderTests {
             let fans = try await provider.fans()
             #expect(fans.map(\.id) == [0, 1])
             #expect(fans.map(\.name) == ["Left", "Right"])
-            #expect(fans.map(\.minRPM) == [1339, 1231])
-            #expect(fans.map(\.maxRPM) == [6446, 5936])
+            #expect(fans.map(\.minRPM) == [2317, 2317])
+            #expect(fans.map(\.maxRPM) == [6800, 6800])
             for fan in fans {
                 #expect(fan.mode == .system)
                 #expect(fan.actualRPM >= fan.minRPM && fan.actualRPM <= fan.maxRPM)

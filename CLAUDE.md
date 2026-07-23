@@ -37,7 +37,10 @@ Zephyr.xcodeproj
 ├── ZephyrHelper      Root LaunchDaemon (SMAppService): owns ALL SMC writes,
 │                     runs the fan-curve control loop, enforces safety
 └── ZephyrKit         Local Swift package (no UI, no root): SMC key parsing,
-                      encodings, curve math, models, XPC protocol, mock provider
+                      encodings, curve math, models, XPC protocol, mock provider,
+                      read-only SMC access (SMCConnection/SystemSMCProvider —
+                      reads need no root; there is deliberately NO write method),
+                      plus the `zephyr-diag` CLI (swift run zephyr-diag)
                       → this is where unit tests live
 ```
 

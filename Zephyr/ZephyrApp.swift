@@ -37,5 +37,12 @@ struct ZephyrApp: App {
             .accessibilityLabel("Zephyr, hottest sensor \(appState.hottestText)")
         }
         .menuBarExtraStyle(.window)
+
+        // The SMC key browser + diagnostics export. Opened from the popover
+        // via WindowOpener (LSUIElement apps need the explicit activation).
+        Window("SMC Sensors", id: WindowOpener.ID.sensors) {
+            SensorsBrowserView(state: appState)
+        }
+        .defaultSize(width: 560, height: 480)
     }
 }

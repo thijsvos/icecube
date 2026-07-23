@@ -194,11 +194,12 @@ Work in order. Each phase ends with its acceptance criteria demonstrably true (s
 - **Accept:** a definitive answer — free-ID path confirmed, or the fallback adopted and documented.
 
 ### Phase 1 — Real SMC reads & sensors browser
-- [ ] `SMCConnection` (IOKit param-struct calls) using the Phase 0 `SMCKeyCodec`; key-info cache, index enumeration.
-- [ ] `SystemSMCProvider` (read-only) behind the protocol; provider chosen at composition root by env/arg.
-- [ ] Fan discovery (`FNum`, per-fan Ac/Mn/Mx), temp discovery via curated map + fallback filter (§3.3).
-- [ ] Sensors browser window + JSON diagnostics export.
-- [ ] `SMCPollingActor` publishing snapshots at 1 s; menu bar shows real values. **[HW]**
+- [x] `SMCConnection` (IOKit param-struct calls) using the Phase 0 `SMCKeyCodec`; key-info cache, index enumeration.
+- [x] `SystemSMCProvider` (read-only) behind the protocol; provider chosen at composition root by env/arg.
+- [x] Fan discovery (`FNum`, per-fan Ac/Mn/Mx), temp discovery via curated map + fallback filter (§3.3).
+- [x] Sensors browser window + JSON diagnostics export.
+- [x] `SMCPollingActor` publishing snapshots at 1 s; menu bar shows real values. **[HW]**
+- Note (2026-07-23): done as planned, plus a `zephyr-diag` CLI (SPM executable in ZephyrKit) that prints the diagnostics summary/JSON without the app — verified on the owner's Mac14,9: 2169 keys, 2 fans (F{i}Mn 2317 / F{i}Mx 6800), all 20 curated M2 sensors resolved with plausible values. Mock fan ranges corrected to the measured ones.
 - **Accept:** on owner's Mac, real RPMs/temps visible and plausible; `FNum ≥ 1` confirmed (if it's 0 the machine is fanless — e.g. MacBook Air — and the control phases need a different test Mac; monitoring still works); diagnostics export produces a valid report; all codec tests pass.
 
 ### Phase 2 — Dashboard & charts

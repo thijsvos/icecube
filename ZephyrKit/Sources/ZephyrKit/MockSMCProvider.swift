@@ -53,6 +53,43 @@ public actor MockSMCProvider: SMCProviding {
     public func temperatures() async throws -> [SensorReading] {
         Self.temperatures(at: now().timeIntervalSince1970)
     }
+
+    /// A miniature key dump mirroring what the real provider reports for the
+    /// same values, so the sensors browser and diagnostics export are fully
+    /// demonstrable in simulated mode. (A simulated report is marked as such
+    /// by `DiagnosticsReport.simulated` — it can never pass as a machine map.)
+    public func keyDump() async throws -> [SMCKeyDump] {
+        let t = now().timeIntervalSince1970
+        var dump: [SMCKeyDump] = [
+            entry(key: "#KEY", type: .uint32, value: Double(2 + Self.fanSpecs.count * 5 + Self.sensorSpecs.count)),
+            entry(key: "FNum", type: .uint8, value: Double(Self.fanSpecs.count)),
+        ]
+        for fan in Self.fans(at: t) {
+            dump.append(entry(key: "F\(fan.id)Ac", type: .float, value: fan.actualRPM))
+            dump.append(entry(key: "F\(fan.id)Tg", type: .float, value: fan.targetRPM))
+            dump.append(entry(key: "F\(fan.id)Mn", type: .float, value: fan.minRPM))
+            dump.append(entry(key: "F\(fan.id)Mx", type: .float, value: fan.maxRPM))
+            dump.append(entry(key: "F\(fan.id)Md", type: .uint8, value: Double(fan.mode.rawValue)))
+        }
+        for reading in Self.temperatures(at: t) {
+            dump.append(entry(key: reading.key, type: .float, value: reading.celsius))
+        }
+        return dump
+    }
+
+    /// Builds one dump row with honest wire bytes (encoded exactly as the
+    /// real SMC would report the value).
+    private func entry(key: String, type: SMCDataType, value: Double) -> SMCKeyDump {
+        let bytes = (try? SMCKeyCodec.encode(value, as: type)) ?? []
+        return SMCKeyDump(
+            key: key,
+            type: type.rawValue,
+            size: type.byteCount,
+            value: (try? SMCKeyCodec.decodeDouble(bytes, as: type)) ?? value,
+            text: nil,
+            bytesHex: bytes.map { String(format: "%02X", $0) }.joined()
+        )
+    }
 }
 
 // MARK: - The simulation model
@@ -86,10 +123,11 @@ extension MockSMCProvider {
         let spikeGain: Double
     }
 
-    /// The two fans of a 14" M2 Pro MacBook Pro.
+    /// The two fans of a 14" M2 Pro MacBook Pro (ranges read from the real
+    /// Mac14,9 via `zephyr-diag`: both report `F{i}Mn` 2317, `F{i}Mx` 6800).
     static let fanSpecs: [FanSpec] = [
-        FanSpec(id: 0, name: "Left", minRPM: 1339, maxRPM: 6446),
-        FanSpec(id: 1, name: "Right", minRPM: 1231, maxRPM: 5936),
+        FanSpec(id: 0, name: "Left", minRPM: 2317, maxRPM: 6800),
+        FanSpec(id: 1, name: "Right", minRPM: 2317, maxRPM: 6800),
     ]
 
     /// Six M2-generation sensors. Keys match what the real SMC exposes.
