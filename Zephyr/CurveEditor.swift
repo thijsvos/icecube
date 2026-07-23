@@ -318,13 +318,20 @@ struct CurveEditorView: View {
     private var footer: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 14) {
+                // Fixed-width, monospaced value labels: a label that widens
+                // mid-drag re-lays-out the row and shifts the slider under
+                // the cursor — the exact jumping-UI glitch this app forbids.
                 Text("Hysteresis \(model.hysteresis, specifier: "%.0f")°")
                     .font(.caption)
+                    .monospacedDigit()
+                    .frame(width: 84, alignment: .leading)
                 Slider(value: $model.hysteresis, in: 0 ... 8, step: 1)
                     .frame(width: 110)
                     .controlSize(.mini)
                 Text("Ramp \(Int(model.ramp * 100))%/tick")
                     .font(.caption)
+                    .monospacedDigit()
+                    .frame(width: 92, alignment: .leading)
                 Slider(value: $model.ramp, in: 0.02 ... 0.3)
                     .frame(width: 110)
                     .controlSize(.mini)
@@ -332,6 +339,7 @@ struct CurveEditorView: View {
                 Toggle("Keep running when app quits", isOn: $persistCurve)
                     .font(.caption)
                     .toggleStyle(.checkbox)
+                    .fixedSize()
             }
             HStack(spacing: 8) {
                 TextField("Preset name", text: $presetName)

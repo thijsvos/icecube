@@ -56,5 +56,9 @@ struct ZephyrApp: App {
             CurveEditorView(state: appState)
         }
         .defaultSize(width: 620, height: 460)
+        // The user resizes the window; content changes never do. Without
+        // this, label-width changes while sliding could grow the window —
+        // a resize feedback loop that glitches the whole canvas mid-drag.
+        .windowResizability(.contentMinSize)
     }
 }
