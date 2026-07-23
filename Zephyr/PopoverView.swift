@@ -29,13 +29,13 @@ struct PopoverView: View {
             } else {
                 fanSection
                 Divider()
-                temperatureSection
+                DashboardView(state: state)
             }
             Divider()
             footer
         }
         .padding(14)
-        .frame(width: 320)
+        .frame(width: 380)
     }
 
     // MARK: - Header
@@ -111,30 +111,6 @@ struct PopoverView: View {
         return min(max(fraction, 0), 1)
     }
 
-    // MARK: - Temperatures
-
-    private var temperatureSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(state.temperatures) { reading in
-                temperatureRow(reading, isHottest: reading.id == state.hottest?.id)
-            }
-        }
-    }
-
-    private func temperatureRow(_ reading: SensorReading, isHottest: Bool) -> some View {
-        HStack {
-            Text(reading.label)
-                .font(.callout)
-                .foregroundStyle(isHottest ? AnyShapeStyle(.orange) : AnyShapeStyle(.primary))
-            Spacer()
-            Text("\(Int(reading.celsius.rounded()))°")
-                .font(.callout)
-                .monospacedDigit()
-                .foregroundStyle(isHottest ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
-                .accessibilityLabel("\(reading.label): \(Int(reading.celsius.rounded())) degrees Celsius")
-        }
-    }
-
     // MARK: - Waiting / error states
 
     private var waitingRow: some View {
@@ -165,6 +141,10 @@ struct PopoverView: View {
                 WindowOpener.open(WindowOpener.ID.sensors, using: openWindow)
             }
             .help("Browse every SMC key and export a diagnostics report")
+            Button("Settings…") {
+                WindowOpener.open(WindowOpener.ID.settings, using: openWindow)
+            }
+            .help("Menu bar display options")
             Button("Open Zephyr") {
                 // Phase 2: opens the main window (charts, presets).
             }

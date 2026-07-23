@@ -1,0 +1,164 @@
+// ChartStore.swift — accumulates snapshot history into fixed chart rows, downsampled off the main actor.
+
+import Foundation
+
+/// Ingests one ``SMCSnapshot`` per second and serves the dashboard's chart
+/// rows for any time window, already downsampled to the point budget.
+///
+/// Being an actor puts ring-buffer upkeep and downsampling **off the main
+/// actor** (a PLAN.md §1.2 requirement) — the UI awaits ready-to-render rows.
+///
+/// Anti-jump rules: the row set is fixed after the first ingest (CPU row iff
+/// any `Tp*` sensor exists, GPU row iff any `Tg*`, one row per fan), and each
+/// row carries a **fixed y-axis domain** so axes never rescale mid-glance.
+public actor ChartStore {
+    /// 1 sample/s × 3600 = the 60-minute maximum window.
+    public static let capacity = 3600
+    /// Hard visible-point budget per series (PLAN.md §1.2).
+    public static let pointBudget = 600
+    /// The selectable windows, in seconds: 1 / 5 / 15 / 60 minutes.
+    public static let windows: [TimeInterval] = [60, 300, 900, 3600]
+
+    /// One renderable series: a band (bucket min…max) plus its average line.
+    public struct Series: Sendable, Equatable, Identifiable {
+        public let id: String
+        public let label: String
+        /// Secondary series (fan target) render thinner/grayer than primary.
+        public let isSecondary: Bool
+        public let buckets: [ChartBucket]
+        public let stats: SeriesStats?
+    }
+
+    /// One chart row of the dashboard: title, unit, fixed y domain, series.
+    public struct Row: Sendable, Equatable, Identifiable {
+        public let id: String
+        public let title: String
+        /// Displayed unit, `"°C"` or `"RPM"`.
+        public let unit: String
+        /// Fixed axis range — never rescales while you watch (anti-jump).
+        public let yDomainMin: Double
+        public let yDomainMax: Double
+        public let series: [Series]
+    }
+
+    private var cpuMax = RingBuffer<ChartSample>(capacity: ChartStore.capacity)
+    private var cpuAvg = RingBuffer<ChartSample>(capacity: ChartStore.capacity)
+    private var gpuMax = RingBuffer<ChartSample>(capacity: ChartStore.capacity)
+    private var fanActual: [Int: RingBuffer<ChartSample>] = [:]
+    private var fanTarget: [Int: RingBuffer<ChartSample>] = [:]
+
+    /// Fixed after the first ingest — the anti-jump row contract.
+    private var hasCPU = false
+    private var hasGPU = false
+    private var fanMeta: [(id: Int, name: String, maxRPM: Double)] = []
+    private var didDiscoverRows = false
+    private var lastIngest: Date?
+
+    public init() {}
+
+    // MARK: - Ingest (1 Hz)
+
+    public func ingest(_ snapshot: SMCSnapshot) {
+        let cpuValues = snapshot.temperatures.filter { $0.key.hasPrefix("Tp") }.map(\.celsius)
+        let gpuValues = snapshot.temperatures.filter { $0.key.hasPrefix("Tg") }.map(\.celsius)
+
+        if !didDiscoverRows {
+            hasCPU = !cpuValues.isEmpty
+            hasGPU = !gpuValues.isEmpty
+            fanMeta = snapshot.fans.map { ($0.id, $0.name, $0.maxRPM) }
+            didDiscoverRows = true
+        }
+
+        let t = snapshot.date
+        if let top = cpuValues.max() {
+            cpuMax.append(ChartSample(time: t, value: top))
+            cpuAvg.append(ChartSample(time: t, value: cpuValues.reduce(0, +) / Double(cpuValues.count)))
+        }
+        if let top = gpuValues.max() {
+            gpuMax.append(ChartSample(time: t, value: top))
+        }
+        for fan in snapshot.fans {
+            fanActual[fan.id, default: RingBuffer(capacity: Self.capacity)]
+                .append(ChartSample(time: t, value: fan.actualRPM))
+            fanTarget[fan.id, default: RingBuffer(capacity: Self.capacity)]
+                .append(ChartSample(time: t, value: fan.targetRPM))
+        }
+        lastIngest = t
+    }
+
+    // MARK: - Rows for rendering
+
+    /// The dashboard rows for the trailing `window` seconds, downsampled to
+    /// the point budget. The x range ends at the latest ingested sample.
+    public func rows(window: TimeInterval, budget: Int = ChartStore.pointBudget) -> [Row] {
+        guard let end = lastIngest else { return [] }
+        let start = end.addingTimeInterval(-window)
+
+        var rows: [Row] = []
+        if hasCPU {
+            rows.append(Row(
+                id: "cpu", title: "CPU", unit: "°C", yDomainMin: 20, yDomainMax: 110,
+                series: [
+                    series(id: "cpu.max", label: "Hottest", from: cpuMax, start: start, end: end, budget: budget),
+                    series(
+                        id: "cpu.avg",
+                        label: "Average",
+                        from: cpuAvg,
+                        start: start,
+                        end: end,
+                        budget: budget,
+                        secondary: true
+                    ),
+                ]
+            ))
+        }
+        if hasGPU {
+            rows.append(Row(
+                id: "gpu", title: "GPU", unit: "°C", yDomainMin: 20, yDomainMax: 110,
+                series: [
+                    series(id: "gpu.max", label: "Hottest", from: gpuMax, start: start, end: end, budget: budget),
+                ]
+            ))
+        }
+        for fan in fanMeta {
+            rows.append(Row(
+                id: "fan.\(fan.id)", title: "\(fan.name) Fan", unit: "RPM",
+                yDomainMin: 0, yDomainMax: fan.maxRPM > 0 ? fan.maxRPM * 1.05 : 7000,
+                series: [
+                    series(
+                        id: "fan.\(fan.id).actual",
+                        label: "Actual",
+                        from: fanActual[fan.id],
+                        start: start,
+                        end: end,
+                        budget: budget
+                    ),
+                    series(
+                        id: "fan.\(fan.id).target",
+                        label: "Target",
+                        from: fanTarget[fan.id],
+                        start: start,
+                        end: end,
+                        budget: budget,
+                        secondary: true
+                    ),
+                ]
+            ))
+        }
+        return rows
+    }
+
+    private func series(
+        id: String, label: String, from buffer: RingBuffer<ChartSample>?,
+        start: Date, end: Date, budget: Int, secondary: Bool = false
+    ) -> Series {
+        let samples = buffer?.elements ?? []
+        return Series(
+            id: id,
+            label: label,
+            isSecondary: secondary,
+            buckets: ChartDownsampler.downsample(samples, from: start, to: end, budget: budget),
+            stats: ChartDownsampler.stats(samples, from: start, to: end)
+        )
+    }
+}

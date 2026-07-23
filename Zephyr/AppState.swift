@@ -30,6 +30,34 @@ final class AppState {
     /// when the latest poll succeeded.
     private(set) var errorMessage: String?
 
+    // MARK: - Charts (Phase 2)
+
+    /// The dashboard's chart rows for the selected window, ready to render.
+    private(set) var chartRows: [ChartStore.Row] = []
+    /// Index into `ChartStore.windows` (1 / 5 / 15 / 60 min). Default 5 min.
+    var selectedWindowIndex = 1 {
+        didSet { refreshCharts() }
+    }
+
+    /// Frozen display (recording continues; see `togglePaused`).
+    private(set) var isPaused = false
+    /// The shared x axis for all chart rows: trailing `window`, ending at the
+    /// newest sample — every row scrolls in lockstep.
+    private(set) var chartXDomain: ClosedRange<Date> = Date.distantPast ... Date.distantFuture
+
+    /// What text accompanies the menu bar icon; persisted across launches.
+    var menuBarDisplay: MenuBarDisplayMode {
+        didSet { UserDefaults.standard.set(menuBarDisplay.rawValue, forKey: Self.menuBarDisplayKey) }
+    }
+
+    private static let menuBarDisplayKey = "menuBarDisplay"
+    @ObservationIgnored private let chartStore = ChartStore()
+    private var chartWindow: TimeInterval {
+        ChartStore.windows[selectedWindowIndex]
+    }
+
+    // MARK: - Wiring
+
     /// Where readings come from. Injected so tests and simulated mode swap freely.
     private let provider: any SMCProviding
     /// Wraps `provider` in the 1 Hz snapshot stream (`SMCPollEvent`s).
@@ -41,6 +69,9 @@ final class AppState {
         self.provider = provider
         self.isSimulated = isSimulated
         poller = SMCPollingActor(provider: provider)
+        menuBarDisplay = MenuBarDisplayMode(
+            rawValue: UserDefaults.standard.string(forKey: Self.menuBarDisplayKey) ?? ""
+        ) ?? .temperature
     }
 
     deinit {
@@ -63,6 +94,13 @@ final class AppState {
                     hottest = new.hottest(stickingTo: hottest?.key)
                     consecutiveFailures = 0
                     errorMessage = nil
+                    // History records even while the display is paused —
+                    // pause freezes the picture, not the recording.
+                    await chartStore.ingest(new)
+                    if !isPaused {
+                        chartRows = await chartStore.rows(window: chartWindow)
+                        chartXDomain = new.date.addingTimeInterval(-chartWindow) ... new.date
+                    }
                 case let .failure(message):
                     // Keep the last good snapshot on screen. One transient
                     // miss is silent; only a persistent failure (3+ ticks)
@@ -81,6 +119,49 @@ final class AppState {
     func stop() {
         pollTask?.cancel()
         pollTask = nil
+    }
+
+    // MARK: - Chart controls
+
+    /// Pause freezes the rendered rows; ingest continues so nothing is lost.
+    /// Resuming immediately re-renders the live window.
+    func togglePaused() {
+        isPaused.toggle()
+        if !isPaused {
+            refreshCharts()
+        }
+    }
+
+    /// Re-renders rows for the current window (window change or unpause).
+    private func refreshCharts() {
+        guard !isPaused else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            let rows = await chartStore.rows(window: chartWindow)
+            if let end = rows.first?.series.first?.buckets.last?.time ?? snapshot?.date {
+                chartXDomain = end.addingTimeInterval(-chartWindow) ... end
+            }
+            chartRows = rows
+        }
+    }
+
+    // MARK: - Menu bar text
+
+    /// The text beside the menu bar icon, per the user's display setting;
+    /// `nil` for icon-only.
+    var menuBarText: String? {
+        switch menuBarDisplay {
+        case .iconOnly: nil
+        case .temperature: hottestText
+        case .fanSpeed: fanRPMText
+        case .both: "\(hottestText) \(fanRPMText)"
+        }
+    }
+
+    /// The fastest fan's speed, compact: `"5.0k"` above 1000 RPM.
+    private var fanRPMText: String {
+        guard let top = fans.map(\.actualRPM).max() else { return "--" }
+        return top >= 1000 ? String(format: "%.1fk", top / 1000) : String(Int(top.rounded()))
     }
 
     // MARK: - Sensors browser & diagnostics

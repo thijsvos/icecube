@@ -203,10 +203,10 @@ Work in order. Each phase ends with its acceptance criteria demonstrably true (s
 - **Accept:** on owner's Mac, real RPMs/temps visible and plausible; `FNum ≥ 1` confirmed (if it's 0 the machine is fanless — e.g. MacBook Air — and the control phases need a different test Mac; monitoring still works); diagnostics export produces a valid report; all codec tests pass.
 
 ### Phase 2 — Dashboard & charts
-- [ ] `ChartStore` ring buffers (per-series, 3600 samples) + **hard downsampling budget: ≤ ~600 visible points per series** (min-max or LTTB, computed off the main actor) — see §1.2; raw 60-min windows are in Swift Charts' documented degradation zone.
-- [ ] Stacked Swift Charts rows with gradient fills, window switcher, pause, hover crosshair, min/avg/max; **no implicit animations on live marks; hover state scoped per chart row**.
-- [ ] Menu bar display options (icon/temp/RPM/combo) in Settings.
-- [ ] Dark-first visual polish pass; 60 fps scrolling verified with Instruments in simulated mode.
+- [x] `ChartStore` ring buffers (per-series, 3600 samples) + **hard downsampling budget: ≤ ~600 visible points per series** (min-max or LTTB, computed off the main actor) — see §1.2; raw 60-min windows are in Swift Charts' documented degradation zone. *(min-max bucketing; budget + spike-survival unit-tested)*
+- [x] Stacked Swift Charts rows with gradient fills, window switcher, pause, hover crosshair, min/avg/max; **no implicit animations on live marks; hover state scoped per chart row**. *(CPU/GPU/per-fan rows, fixed y domains; hover readout swaps in the header — fixed layout slots)*
+- [x] Menu bar display options (icon/temp/RPM/combo) in Settings. *(plain Window scene, not the Settings scene — LSUIElement focus reliability)*
+- [ ] Dark-first visual polish pass; 60 fps scrolling verified with Instruments in simulated mode. *(2026-07-23: materials-based, fixed domains, ~1% CPU with ingest running; the Instruments/eyeball pass needs the owner — implementation done)*
 - **Accept:** popover dashboard looks and feels Afterburner-grade in simulated mode; no dropped frames on an idle machine with the point budget enforced.
 
 ### Phase 3 — Helper, XPC, manual control **[HW]**

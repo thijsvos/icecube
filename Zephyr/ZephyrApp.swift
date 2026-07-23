@@ -31,8 +31,10 @@ struct ZephyrApp: App {
             HStack(spacing: 3) {
                 Image(systemName: "fanblades")
                     .renderingMode(.template)
-                Text(appState.hottestText)
-                    .monospacedDigit()
+                if let text = appState.menuBarText {
+                    Text(text)
+                        .monospacedDigit()
+                }
             }
             .accessibilityLabel("Zephyr, hottest sensor \(appState.hottestText)")
         }
@@ -44,5 +46,12 @@ struct ZephyrApp: App {
             SensorsBrowserView(state: appState)
         }
         .defaultSize(width: 560, height: 480)
+
+        // App settings — a plain Window (not the Settings scene, which focuses
+        // unreliably from LSUIElement menu bar apps; see WindowOpener).
+        Window("Zephyr Settings", id: WindowOpener.ID.settings) {
+            SettingsView(state: appState)
+        }
+        .windowResizability(.contentSize)
     }
 }
