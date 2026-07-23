@@ -201,35 +201,71 @@ actor DaemonCore {
 
     // MARK: - Auto-mode safety net
 
-    /// Consecutive ticks with a wrongly-stopped fan.
+    /// Consecutive ticks with a cool orphaned fan (gentle ladder debounce).
     private var deadFanTicks = 0
-    /// Escalation stage: 0 = none, 1 = hand-back retried, 2 = holding floor.
+    /// Escalation stage of the gentle ladder.
     private var recoveryStage = 0
-    /// Die temps at or above this with stopped fans = nobody is cooling.
-    private static let deadFanDieCeiling = 92.0
+    /// Consecutive ticks of hot-and-stopped (emergency debounce).
+    private var deadHotTicks = 0
+    /// True while the daemon has seized the fans because macOS was not cooling.
+    private var emergencyCooling = false
+    /// Stopped fans at/above this die temperature = nobody is cooling.
+    private static let emergencyDieCelsius = 92.0
+    /// Emergency ends (hand-back retried) below this die temperature.
+    private static let emergencyReleaseCelsius = 80.0
 
-    /// FIELD CORRECTION (2026-07-23): defense in depth for "fans stopped when
-    /// they must not be". Two wrong states, learned on Mac14,9:
-    /// - mode 0 ("auto") with fans stopped: nobody is driving — always wrong
-    ///   on a fan with a non-zero minimum.
-    /// - mode 3 ("system") with fans stopped is NORMAL while cool (14" MBPs
-    ///   run fanless at idle) but wrong once die temps reach ~92 °C — the
-    ///   system should be cooling by then; if it isn't, it never got control
-    ///   back properly.
-    /// Escalation after 3 confirming ticks: (1) re-park targets, re-hand-back,
-    /// reset the SMC connection; (2) hold the fans at their minimum ourselves
-    /// — spinning at the floor beats silence, and the 104 °C ceiling override
-    /// still escalates to maximum above that.
+    /// FIELD CORRECTION (2026-07-23, hardened the same day after the die
+    /// reached ~100 °C with stopped fans and macOS never intervened):
+    /// defense in depth for "fans stopped when they must not be".
+    /// - EMERGENCY: die ≥ 92 °C with stopped fans (any mode we don't hold) →
+    ///   after 2 confirming ticks (~4 s) the daemon seizes the fans at a
+    ///   heat-scaled speed (92 °C → ~60 %, 97 °C+ → maximum) and keeps
+    ///   cooling until the die is back under 80 °C, then hands back — and
+    ///   re-triggers if macOS drops the ball again.
+    /// - Cool orphan (mode 0, stopped, any temperature): the gentle ladder —
+    ///   re-park at minimum + hand back + connection reset, then hold the
+    ///   floor ourselves.
     private func autoSafetyNet() async {
         guard let fans = try? await readFans() else { return }
         let dieHot = await (try? readTemperatures())?
             .filter { r in ["Tp", "Tg", "Te", "Tf", "Tc"].contains(where: r.key.hasPrefix) }
             .map(\.celsius).max() ?? 0
-        let dead = fans.filter { fan in
-            guard fan.actualRPM < 100, fan.minRPM > 0 else { return false }
-            return fan.mode == .auto || (fan.mode == .system && dieHot >= Self.deadFanDieCeiling)
+
+        // Maintain or end an active emergency takeover.
+        if emergencyCooling {
+            if dieHot < Self.emergencyReleaseCelsius {
+                emergencyCooling = false
+                record("SAFETY: emergency cooling done (die \(Int(dieHot)) °C) — handing fans back to the system")
+                try? await sequencer.revertAllAuto(fans: fans)
+                await port.reset()
+            } else {
+                _ = try? await sequencer.engageManual(
+                    targets: emergencyTargets(for: fans, dieHot: dieHot), fans: fans
+                )
+            }
+            return
         }
-        guard !dead.isEmpty else {
+
+        let stopped = fans.filter { $0.actualRPM < 100 && $0.minRPM > 0 && $0.mode != .forced }
+
+        // EMERGENCY: hot machine, nothing spinning, nobody cooling.
+        if !stopped.isEmpty, dieHot >= Self.emergencyDieCelsius {
+            deadHotTicks += 1
+            if deadHotTicks >= 2 {
+                deadHotTicks = 0
+                emergencyCooling = true
+                record("SAFETY: EMERGENCY — die \(Int(dieHot)) °C with fans stopped; daemon is taking over cooling")
+                _ = try? await sequencer.engageManual(
+                    targets: emergencyTargets(for: fans, dieHot: dieHot), fans: fans
+                )
+            }
+            return
+        }
+        deadHotTicks = 0
+
+        // Cool orphan: mode 0 with stopped fans — always wrong, never urgent.
+        let orphaned = stopped.filter { $0.mode == .auto }
+        guard !orphaned.isEmpty else {
             deadFanTicks = 0
             recoveryStage = 0
             return
@@ -239,10 +275,8 @@ actor DaemonCore {
         deadFanTicks = 0
         recoveryStage += 1
         if recoveryStage == 1 {
-            record(
-                "SAFETY: fan(s) wrongly stopped (die \(Int(dieHot)) °C) — re-parking, handing back, resetting SMC connection"
-            )
-            for fan in dead {
+            record("SAFETY: fan(s) orphaned in mode 0 — re-parking, handing back, resetting SMC connection")
+            for fan in orphaned {
                 try? await port.writeDouble("F\(fan.id)Tg", value: fan.minRPM, as: .float)
                 for suffix in ["Md", "md"] where await port.hasKey("F\(fan.id)\(suffix)") {
                     try? await port.writeDouble("F\(fan.id)\(suffix)", value: 3, as: .uint8)
@@ -251,10 +285,19 @@ actor DaemonCore {
             }
             await port.reset()
         } else {
-            record("SAFETY: system did not resume cooling — holding fans at minimum RPM ourselves")
+            record("SAFETY: system did not resume control — holding fans at minimum RPM ourselves")
             let floors = Dictionary(uniqueKeysWithValues: fans.map { ($0.id, $0.minRPM) })
             _ = try? await sequencer.engageManual(targets: floors, fans: fans)
         }
+    }
+
+    /// Heat-scaled emergency speed: ~60 % of each fan's range at 92 °C,
+    /// maximum from 97 °C up. Monotone in temperature, never below minimum.
+    private func emergencyTargets(for fans: [Fan], dieHot: Double) -> [Int: Double] {
+        let fraction = min(1.0, max(0.5, (dieHot - 85.0) / 12.0))
+        return Dictionary(uniqueKeysWithValues: fans.map { fan in
+            (fan.id, fan.minRPM + fraction * (fan.maxRPM - fan.minRPM))
+        })
     }
 
     // MARK: - Hardware reads (the daemon trusts only its own readings)

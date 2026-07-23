@@ -21,7 +21,7 @@ actor SMCWritePort: SMCControlPort {
     private let log = Logger(subsystem: "io.github.thijsvos.zephyr", category: "smc")
 
     init() throws {
-        try openConnection()
+        connection = try Self.openSMCConnection()
     }
 
     deinit {
@@ -45,7 +45,9 @@ actor SMCWritePort: SMCControlPort {
         log.notice("SMC connection reset (will reopen on next use)")
     }
 
-    private func openConnection() throws {
+    /// Static so it is callable from the (nonisolated) actor init and from
+    /// isolated methods alike.
+    private static func openSMCConnection() throws -> io_connect_t {
         let service = IOServiceGetMatchingService(
             kIOMainPortDefault, IOServiceMatching("AppleSMC")
         )
@@ -58,7 +60,7 @@ actor SMCWritePort: SMCControlPort {
         guard kr == kIOReturnSuccess, conn != 0 else {
             throw ZephyrError.smcConnectionFailed(kernReturn: kr)
         }
-        connection = conn
+        return conn
     }
 
     // MARK: - SMCControlPort
@@ -116,7 +118,7 @@ actor SMCWritePort: SMCControlPort {
 
     private func call(_ input: inout SMCParamStruct, key: String) throws -> SMCParamStruct {
         if connection == 0 {
-            try openConnection() // lazily reopen after reset()
+            connection = try Self.openSMCConnection() // lazily reopen after reset()
         }
         var output = SMCParamStruct()
         var outputSize = MemoryLayout<SMCParamStruct>.stride

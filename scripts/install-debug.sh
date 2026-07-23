@@ -14,12 +14,23 @@ echo "==> Generating project"
 xcodegen generate
 
 echo "==> Building (signed, Debug)"
-xcodebuild -project Zephyr.xcodeproj -scheme Zephyr -configuration Debug \
-    -derivedDataPath build build | grep -E "error:|warning: code sign|BUILD" || true
+BUILD_LOG=$(mktemp)
+if ! xcodebuild -project Zephyr.xcodeproj -scheme Zephyr -configuration Debug \
+    -derivedDataPath build build > "$BUILD_LOG" 2>&1; then
+    # NEVER install a stale artifact: a failed build must abort loudly
+    # (a leftover app bundle from an earlier build would pass a mere
+    # existence check and silently ship old code).
+    echo "error: BUILD FAILED — first errors:" >&2
+    grep -E " error:" "$BUILD_LOG" | head -10 >&2
+    rm -f "$BUILD_LOG"
+    exit 1
+fi
+grep -E "warning: code sign" "$BUILD_LOG" || true
+rm -f "$BUILD_LOG"
 
 APP="build/Build/Products/Debug/Zephyr.app"
 if [ ! -d "$APP" ]; then
-    echo "error: build failed — open Zephyr.xcodeproj in Xcode and check Signing (XCODE_GUIDE §2)." >&2
+    echo "error: build reported success but no app bundle exists." >&2
     exit 1
 fi
 
