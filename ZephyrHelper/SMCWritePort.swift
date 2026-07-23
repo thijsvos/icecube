@@ -21,6 +21,31 @@ actor SMCWritePort: SMCControlPort {
     private let log = Logger(subsystem: "io.github.thijsvos.zephyr", category: "smc")
 
     init() throws {
+        try openConnection()
+    }
+
+    deinit {
+        if connection != 0 {
+            IOServiceClose(connection)
+        }
+    }
+
+    /// FIELD CORRECTION (2026-07-23): thermalmonitord only reliably resumes
+    /// driving the fans when the controlling process's SMC connection goes
+    /// away (observed on Mac14,9: a daemon bounce restored system control;
+    /// an in-place mode hand-back did not). Dropping and lazily reopening
+    /// the connection after a revert reproduces that release without
+    /// restarting the daemon.
+    func reset() {
+        if connection != 0 {
+            IOServiceClose(connection)
+            connection = 0
+        }
+        keyInfoCache.removeAll()
+        log.notice("SMC connection reset (will reopen on next use)")
+    }
+
+    private func openConnection() throws {
         let service = IOServiceGetMatchingService(
             kIOMainPortDefault, IOServiceMatching("AppleSMC")
         )
@@ -34,12 +59,6 @@ actor SMCWritePort: SMCControlPort {
             throw ZephyrError.smcConnectionFailed(kernReturn: kr)
         }
         connection = conn
-    }
-
-    deinit {
-        if connection != 0 {
-            IOServiceClose(connection)
-        }
     }
 
     // MARK: - SMCControlPort
@@ -96,6 +115,9 @@ actor SMCWritePort: SMCControlPort {
     }
 
     private func call(_ input: inout SMCParamStruct, key: String) throws -> SMCParamStruct {
+        if connection == 0 {
+            try openConnection() // lazily reopen after reset()
+        }
         var output = SMCParamStruct()
         var outputSize = MemoryLayout<SMCParamStruct>.stride
         let kr = IOConnectCallStructMethod(

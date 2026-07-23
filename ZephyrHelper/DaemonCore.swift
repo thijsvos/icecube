@@ -188,6 +188,9 @@ actor DaemonCore {
     private func revertEverything(reason: String) async {
         let fans = await (try? readFans()) ?? []
         try? await sequencer.revertAllAuto(fans: fans)
+        // Release the SMC connection: thermalmonitord reliably resumes fan
+        // control only once the writer's connection is gone (field-observed).
+        await port.reset()
         config = .auto
         coolingOverride = false
         verifyFailures = 0
@@ -198,32 +201,59 @@ actor DaemonCore {
 
     // MARK: - Auto-mode safety net
 
-    /// Consecutive ticks with a stopped fan in auto mode.
+    /// Consecutive ticks with a wrongly-stopped fan.
     private var deadFanTicks = 0
+    /// Escalation stage: 0 = none, 1 = hand-back retried, 2 = holding floor.
+    private var recoveryStage = 0
+    /// Die temps at or above this with stopped fans = nobody is cooling.
+    private static let deadFanDieCeiling = 92.0
 
-    /// FIELD CORRECTION (2026-07-23): after a revert, macOS may fail to
-    /// reclaim the fans, leaving them stopped (observed on Mac14,9). A fan
-    /// with a non-zero reported minimum should never sit at 0 RPM — if that
-    /// state persists for 3 ticks, park its target at the minimum and try
-    /// handing it to the system (mode 3). Runs every tick in auto mode:
-    /// defense in depth, whatever caused the dead-stop.
+    /// FIELD CORRECTION (2026-07-23): defense in depth for "fans stopped when
+    /// they must not be". Two wrong states, learned on Mac14,9:
+    /// - mode 0 ("auto") with fans stopped: nobody is driving — always wrong
+    ///   on a fan with a non-zero minimum.
+    /// - mode 3 ("system") with fans stopped is NORMAL while cool (14" MBPs
+    ///   run fanless at idle) but wrong once die temps reach ~92 °C — the
+    ///   system should be cooling by then; if it isn't, it never got control
+    ///   back properly.
+    /// Escalation after 3 confirming ticks: (1) re-park targets, re-hand-back,
+    /// reset the SMC connection; (2) hold the fans at their minimum ourselves
+    /// — spinning at the floor beats silence, and the 104 °C ceiling override
+    /// still escalates to maximum above that.
     private func autoSafetyNet() async {
         guard let fans = try? await readFans() else { return }
-        let dead = fans.filter { $0.mode == .auto && $0.actualRPM < 100 && $0.minRPM > 0 }
+        let dieHot = await (try? readTemperatures())?
+            .filter { r in ["Tp", "Tg", "Te", "Tf", "Tc"].contains(where: r.key.hasPrefix) }
+            .map(\.celsius).max() ?? 0
+        let dead = fans.filter { fan in
+            guard fan.actualRPM < 100, fan.minRPM > 0 else { return false }
+            return fan.mode == .auto || (fan.mode == .system && dieHot >= Self.deadFanDieCeiling)
+        }
         guard !dead.isEmpty else {
             deadFanTicks = 0
+            recoveryStage = 0
             return
         }
         deadFanTicks += 1
         guard deadFanTicks >= 3 else { return }
         deadFanTicks = 0
-        record("SAFETY: fan(s) stopped in auto mode — parking at minimum and handing back to the system")
-        for fan in dead {
-            try? await port.writeDouble("F\(fan.id)Tg", value: fan.minRPM, as: .float)
-            for suffix in ["Md", "md"] where await port.hasKey("F\(fan.id)\(suffix)") {
-                try? await port.writeDouble("F\(fan.id)\(suffix)", value: 3, as: .uint8)
-                break
+        recoveryStage += 1
+        if recoveryStage == 1 {
+            record(
+                "SAFETY: fan(s) wrongly stopped (die \(Int(dieHot)) °C) — re-parking, handing back, resetting SMC connection"
+            )
+            for fan in dead {
+                try? await port.writeDouble("F\(fan.id)Tg", value: fan.minRPM, as: .float)
+                for suffix in ["Md", "md"] where await port.hasKey("F\(fan.id)\(suffix)") {
+                    try? await port.writeDouble("F\(fan.id)\(suffix)", value: 3, as: .uint8)
+                    break
+                }
             }
+            await port.reset()
+        } else {
+            record("SAFETY: system did not resume cooling — holding fans at minimum RPM ourselves")
+            let floors = Dictionary(uniqueKeysWithValues: fans.map { ($0.id, $0.minRPM) })
+            _ = try? await sequencer.engageManual(targets: floors, fans: fans)
         }
     }
 
