@@ -1,85 +1,105 @@
 # Zephyr
 
-Zephyr is an open-source menu-bar app for fan control and thermal monitoring on
-Apple Silicon MacBooks. It aims to combine live stacked temperature/RPM charts, a
-draggable fan-curve editor, and presets with a hardened privilege split: the app
-only ever *reads* sensors, while a tiny root helper daemon owns every fan write
-and enforces safety limits that the UI cannot override. Zero third-party
-dependencies; small footprint is a core goal.
+An open-source menu-bar fan controller and thermal monitor for **Apple Silicon
+MacBooks**. Live stacked temperature/RPM charts, a draggable fan-curve editor,
+one-click presets — built on a hardened privilege split: the app only ever
+*reads* sensors, while a tiny root helper daemon owns every fan write and
+enforces safety limits the UI cannot override. **Zero third-party
+dependencies**; small footprint is a design goal, not an accident.
 
-## Status: pre-alpha (Phase 0)
+> **Status: beta.** Fully functional — monitoring, manual control, curves,
+> presets, boot persistence — developed and tested on a MacBook Pro 14" M2 Pro
+> (Mac14,9) under macOS 26. Other Apple Silicon Macs should work for
+> monitoring out of the box; fan-control write paths for M3/M4 (`Ftst`
+> unlock) and M5 are implemented from community research but unverified —
+> reports welcome (see below).
 
-**This does not control fans yet.** The current scaffold runs entirely on
-simulated data — a mock SMC provider feeding the menu-bar UI. Real sensor reads,
-the helper daemon, and actual fan control land in later phases. Do not expect
-anything useful as an end user yet.
+## Features
 
-## Planned features
-
-| Feature | Status |
+| Feature | |
 | --- | --- |
-| Menu-bar popover with live temp + fan RPM charts | in progress (simulated data) |
-| Fan-curve editor (draggable points, hysteresis, per-fan or linked) | planned |
-| Presets: Auto / Quiet / Balanced / Max / Custom | planned |
-| Manual fan speed (watchdogged, never persisted) | planned |
-| Curve keeps running at boot, without the app open | planned |
-| Sensors browser + diagnostics export (to support new Mac models) | planned |
-| History with CSV export, notifications, launch at login | planned |
-| Update check via GitHub Releases (link only, no auto-install) | planned |
+| Menu-bar popover with live stacked charts (CPU, GPU, per-fan RPM) | ✅ |
+| 1/5/15/60-min windows, pause, hover crosshair, min/avg/max | ✅ |
+| Fan-curve editor: drag points, double-click add, keyboard nudge, live marker | ✅ |
+| Presets: Auto · Quiet · Balanced · Cold · Max + your own | ✅ |
+| Manual per-fan sliders (watchdogged, never persisted) | ✅ |
+| Curve keeps running at boot, app closed — daemon-side | ✅ |
+| Sensors browser (every SMC key, live) + JSON diagnostics export | ✅ |
+| CSV history export, temperature alerts, launch at login, °C/°F | ✅ |
+| Update check via GitHub Releases (link only, never auto-install) | ✅ |
 
-## Safety
+## Safety design
 
-Safety is a headline feature, enforced in the daemon where the UI cannot reach
-it. All fan writes happen daemon-side and are clamped to each fan's
-firmware-reported `[min, max]` range — firmware treats those limits as advisory
-(it can accept 0 RPM), so our clamp is *the* guard, not belt-and-braces. A
-temperature ceiling overrides any user curve: if monitored sensors cross it, the
-daemon forces cooling regardless of configuration. Manual (fixed-RPM) mode is
-always covered by a 15-second heartbeat watchdog and is never persisted — if the
-app disappears, fans revert to system automatic control. Every write is verified
-by read-back and audit-logged.
+Fan control can cook a machine when done carelessly. Zephyr's rules are
+enforced **in the root daemon**, where the UI (or a bug in it) cannot reach:
+
+- Every RPM write is clamped to the fan's firmware-reported safe range — and
+  because Apple Silicon firmware treats those limits as *advisory* (it will
+  happily accept 0 RPM), the daemon's clamp is the real guard. A 0-RPM target
+  is never written, not even while releasing control.
+- A temperature ceiling (die 104 °C / others 95 °C, debounced) overrides any
+  user setting with maximum cooling until things cool down.
+- Manual mode is always watchdogged: if the app stops heartbeating for 15 s,
+  fans revert to automatic. Only curve mode may run app-less, and only when
+  you opt in.
+- Every write is verified by read-back and audit-logged (`log stream
+  --predicate 'subsystem == "io.github.thijsvos.zephyr"'`).
+- **The guardian**: we found during development that macOS 26 does not
+  reliably resume fan management after *any* fan app releases control (fans
+  can sit stopped while the die climbs past 90 °C). Zephyr therefore never
+  assumes macOS took the wheel back: if the machine is warm and nothing is
+  cooling it, the daemon drives the fans itself along a built-in curve and
+  hands back only when it's genuinely cool.
 
 ## Why a root helper?
 
-Writing SMC fan keys on Apple Silicon is firmware-restricted to root;
-unprivileged writes fail, while sensor *reads* need no privileges at all. So the
-app stays unprivileged and a minimal LaunchDaemon (installed via `SMAppService`,
-approved by you in System Settings) is the only component that can write — it
-clamps, verifies, and logs every command the app sends it over XPC.
+Writing fan speeds on Apple Silicon requires root — that's firmware-enforced,
+not a choice. Zephyr keeps that surface tiny: a single daemon (registered via
+`SMAppService`, approved once by you in System Settings) that speaks a
+five-method XPC protocol, pinned to the app's code signature in both
+directions. The app itself contains **no fan-write code at all**.
 
-## Building
+## Install
 
-Requires macOS 14+, Xcode 26.6, and Homebrew. The Xcode project is generated
-from `project.yml` — never edit build settings in the Xcode GUI.
+Zephyr is not in the App Store (sandboxed apps cannot touch the SMC) and
+release builds are not yet notarized. Building from source:
 
-```sh
-brew bundle                # installs xcodegen + swiftformat
-xcodegen generate          # creates the gitignored Zephyr.xcodeproj
-xcodebuild -project Zephyr.xcodeproj -scheme Zephyr -configuration Debug \
-  -derivedDataPath build build CODE_SIGNING_ALLOWED=NO
-(cd ZephyrKit && swift test)
-sh scripts/verify-bundle.sh
-
-# Run with simulated data (no hardware access):
-ZEPHYR_SIMULATED=1 build/Build/Products/Debug/Zephyr.app/Contents/MacOS/Zephyr
+```bash
+git clone https://github.com/thijsvos/zephyr && cd zephyr
+brew bundle              # xcodegen + swiftformat
+xcodegen generate
+sh scripts/set-team.sh YOURTEAMID   # your Apple Development team (free ID works)
+sh scripts/install-debug.sh          # builds, installs to /Applications, launches
 ```
 
-To build signed (needed later for the real helper), write your team ID once with
-`scripts/set-team.sh <TEAM_ID>` — it lands in the gitignored
-`Configs/Local.xcconfig`.
+Then: menu-bar fan icon → **Enable Fan Control** → approve in System
+Settings. Monitoring works without any of that; only control needs the helper.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit together.
+## Uninstall
 
-## Non-goals
+1. Zephyr popover → Settings… → Helper daemon → **Unregister** (returns fans
+   to macOS and removes the daemon).
+2. Quit Zephyr, delete `/Applications/Zephyr.app`.
+3. Optional leftovers: `~/Library/Application Support/Zephyr` (your presets)
+   and `sudo rm -rf "/Library/Application Support/Zephyr"` (the daemon's
+   persisted config).
 
-- **Intel fan control.** v1 is Apple-Silicon-only. The `SMCProviding` seam is
-  kept clean so the community can port the Intel write path — contributions
-  welcome.
-- **Overclocking / voltage / power limits.** macOS does not expose this;
-  "fan curves like Afterburner" means the monitoring and curves, not the OC panel.
-- **Mac App Store.** SMC writes and a root daemon are incompatible with the App
-  Sandbox. Distribution will be notarized GitHub releases.
+## Supporting a new Mac model
+
+Temperature-sensor keys change with every Apple SoC generation. If your model
+shows few or oddly-labeled sensors: popover → **Sensors…** → **Export
+Diagnostics…**, then open a "New Mac model report" issue with the JSON
+attached. That file is exactly what's needed to add a curated mapping.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). The short version: `swift test` must
+stay green, SwiftFormat clean, the safety invariants are non-negotiable, and
+everything must work in simulated mode (`ZEPHYR_SIMULATED=1`) — CI has no
+fans.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). Not affiliated with Apple. Use at your own
+risk; the safety systems are engineered carefully, but you are pointing
+software at your own hardware.

@@ -236,10 +236,12 @@ Work in order. Each phase ends with its acceptance criteria demonstrably true (s
 - **Accept:** run through a "new user" script end-to-end without touching the mouse for core flows; VoiceOver can read the dashboard.
 
 ### Phase 6 — Open source & releases
+
+- Note (2026-07-23): community docs (README/CONTRIBUTING/CODE_OF_CONDUCT/SECURITY, issue + PR templates), docs/ (SMC-KEYS with field findings, RELEASING, CREDITS, ARCHITECTURE updated), uninstall documented, in-app GitHub-releases update checker (Settings → Updates) all done. REMAINING, owner-gated: (1) publish the repo (`gh repo create` — owner's explicit call), after which CI activates; (2) notarized public release — paid Apple account.
 **Gate:** signing/notarization tasks require a paid Apple Developer account. Until the owner upgrades, do everything else in this phase and distribute unsigned tester builds (XCODE_GUIDE §8 item 4).
 - [ ] README (screenshots, feature table, safety section, "why root helper" FAQ, uninstall section — unregister daemon + remove files), CONTRIBUTING, CODE_OF_CONDUCT, SECURITY.md, issue templates (bug + "new Mac model report" using diagnostics JSON), PR template. (LICENSE landed in Phase 0.)
-- [ ] docs/: ARCHITECTURE.md, SMC-KEYS.md (living key map), RELEASING.md, CREDITS.md.
-- [ ] Update check: tiny hand-rolled GitHub Releases API version check — compare tags, link to the releases page, **no auto-install, no Sparkle, zero dependencies**. Note: replacing the app replaces the embedded helper; the version handshake (§4.2) detects mismatch and prompts re-register.
+- [x] docs/: ARCHITECTURE.md, SMC-KEYS.md (living key map), RELEASING.md, CREDITS.md.
+- [x] Update check: tiny hand-rolled GitHub Releases API version check — compare tags, link to the releases page, **no auto-install, no Sparkle, zero dependencies**. Note: replacing the app replaces the embedded helper; the version handshake (§4.2) detects mismatch and prompts re-register.
 - [ ] Release workflow: tag → GitHub Actions builds, signs (Developer ID — pinning switches to the RELEASE requirement, §4.2), notarizes (`notarytool`), staples, produces DMG (secrets: cert p12, notary API key) — see XCODE_GUIDE §8.
 - **Accept:** a clean Mac can download the DMG, pass Gatekeeper, approve helper, and control fans; `v0.1.0` public.
 

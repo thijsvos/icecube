@@ -68,3 +68,18 @@ the exact bundle paths SMAppService needs.
 - [PLAN.md](../PLAN.md) — the phased roadmap and SMC technical reference.
 - [CLAUDE.md](../CLAUDE.md) — ground rules for contributors and coding agents.
 - [XCODE_GUIDE.md](../XCODE_GUIDE.md) — the human-only Xcode/signing steps.
+
+## Phase 4–5 additions (2026-07-23)
+
+- **Curve pipeline**: `FanCurve` (normalized, monotone) + `CurveFollower`
+  (hysteresis + ramp) in ZephyrKit; the daemon's control loop evaluates the
+  hottest die sensor per 2 s tick and writes quantized targets with read-back
+  verification. Persistent curve configs live root-owned at
+  `/Library/Application Support/Zephyr/config.json` and resume at boot.
+- **The guardian**: in auto mode the daemon watches for "warm machine,
+  nothing cooling" (macOS 26 does not reliably resume fan management after a
+  fan app releases control — field-verified) and drives the fans itself along
+  a built-in curve until things are genuinely cool.
+- **App-side stores**: presets (`~/Library/Application Support/Zephyr/
+  presets.json`), settings (UserDefaults), chart history (60 min ring
+  buffers, CSV-exportable), update checker (GitHub releases/latest).

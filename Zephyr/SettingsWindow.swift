@@ -11,6 +11,24 @@ struct SettingsWindowView: View {
     @AppStorage("persistCurve") private var persistCurve = false
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var loginItemError: String?
+    @State private var updates = UpdateChecker()
+
+    @ViewBuilder
+    private var updateStatusView: some View {
+        switch updates.status {
+        case .idle:
+            EmptyView()
+        case .checking:
+            ProgressView().controlSize(.small)
+        case .upToDate:
+            Text("Up to date").font(.caption).foregroundStyle(.secondary)
+        case let .available(version, url):
+            Link("v\(version) available — open release page", destination: url)
+                .font(.caption)
+        case let .failed(message):
+            Text(message).font(.caption).foregroundStyle(.orange)
+        }
+    }
 
     var body: some View {
         Form {
@@ -62,6 +80,16 @@ struct SettingsWindowView: View {
                     Text("Notifications are denied — allow Zephyr in System Settings → Notifications.")
                         .font(.caption)
                         .foregroundStyle(.orange)
+                }
+            }
+            Section("Updates") {
+                LabeledContent("Version", value: UpdateChecker.currentVersion)
+                HStack(spacing: 8) {
+                    Button("Check for Updates…") {
+                        Task { await updates.check() }
+                    }
+                    .controlSize(.small)
+                    updateStatusView
                 }
             }
             Section("Helper daemon") {
