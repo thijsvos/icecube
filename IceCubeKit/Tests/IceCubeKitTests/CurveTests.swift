@@ -68,8 +68,12 @@ struct FanCurveTests {
         #expect(FanCurve.max.fraction(at: 35) == 1, "max is always full speed")
         #expect(FanCurve.balanced.fraction(at: 75) == 0.75)
         #expect(FanCurve.balanced.fraction(at: 85) == 1, "balanced is flat-out by 85 °C")
-        #expect(FanCurve.cold.fraction(at: 55) == 1, "cold is flat-out by 55 °C")
-        #expect(FanCurve.cold.fraction(at: 30) == 0.15, "cold always keeps air moving")
+        // Cold keeps a strong steady speed across the idle band (no steep knee
+        // there to hunt on) and reaches full speed only under real load.
+        #expect(FanCurve.cold.fraction(at: 30) == 0.5, "cold always moves air firmly")
+        #expect(FanCurve.cold.fraction(at: 80) == 1, "cold is flat-out by 80 °C")
+        let idleBandSwing = FanCurve.cold.fraction(at: 55) - FanCurve.cold.fraction(at: 35)
+        #expect(idleBandSwing < 0.2, "cold's idle band (35–55 °C) is flat-ish, so fans don't hunt")
     }
 }
 
@@ -80,9 +84,15 @@ struct CurveFollowerTests {
         CurvePoint(celsius: 100, fraction: 1),
     ])
 
+    /// A follower with smoothing/asymmetry disabled, to test the deadband and
+    /// ramp stages in isolation.
+    private func plainFollower(hysteresis: Double, ramp: Double) -> CurveFollower {
+        CurveFollower(hysteresisCelsius: hysteresis, rampUpPerTick: ramp, rampDownPerTick: ramp, smoothingAlpha: 1)
+    }
+
     @Test("Hysteresis: wiggles below the deadband do not move the output")
     func hysteresisDeadband() {
-        var follower = CurveFollower(hysteresisCelsius: 3, rampPerTick: 1)
+        var follower = plainFollower(hysteresis: 3, ramp: 1)
         let base = follower.step(dieCelsius: 80, curve: curve)
         #expect(follower.step(dieCelsius: 81.5, curve: curve) == base, "+1.5 °C ignored")
         #expect(follower.step(dieCelsius: 78.6, curve: curve) == base, "−1.4 °C ignored")
@@ -91,9 +101,8 @@ struct CurveFollowerTests {
 
     @Test("Ramp limiting: a demand jump arrives in bounded steps, up and down")
     func rampLimiting() {
-        var follower = CurveFollower(hysteresisCelsius: 0, rampPerTick: 0.1)
+        var follower = plainFollower(hysteresis: 0, ramp: 0.1)
         #expect(follower.step(dieCelsius: 60, curve: curve) == 0)
-        // Jump to 100 °C: demand 1.0, delivered 0.1 per tick.
         #expect(abs(follower.step(dieCelsius: 100, curve: curve) - 0.1) < 0.0001)
         #expect(abs(follower.step(dieCelsius: 100, curve: curve) - 0.2) < 0.0001)
         var value = 0.2
@@ -101,19 +110,49 @@ struct CurveFollowerTests {
             value = follower.step(dieCelsius: 100, curve: curve)
         }
         #expect(abs(value - 1.0) < 0.0001, "converges to the demand")
-        // Back down: same bounded steps.
-        #expect(abs(follower.step(dieCelsius: 60, curve: curve) - 0.9) < 0.0001)
+        #expect(abs(follower.step(dieCelsius: 60, curve: curve) - 0.9) < 0.0001, "steps down too")
+    }
+
+    @Test("Asymmetric ramp: fans rise faster than they fall (anti-hunting)")
+    func asymmetricRamp() {
+        var follower = CurveFollower(
+            hysteresisCelsius: 0, rampUpPerTick: 0.2, rampDownPerTick: 0.05, smoothingAlpha: 1
+        )
+        _ = follower.step(dieCelsius: 60, curve: curve) // start at 0
+        let up = follower.step(dieCelsius: 100, curve: curve) // demand 1.0
+        #expect(abs(up - 0.2) < 0.0001, "rises by the up rate")
+        let down = follower.step(dieCelsius: 60, curve: curve) // demand 0.0
+        #expect(abs(up - down - 0.05) < 0.0001, "falls by the smaller down rate")
+    }
+
+    @Test("EMA smoothing swallows a brief spike but tracks a sustained rise")
+    func smoothing() {
+        // No deadband, instant ramp — isolate the EMA stage.
+        var follower = CurveFollower(
+            hysteresisCelsius: 0, rampUpPerTick: 1, rampDownPerTick: 1, smoothingAlpha: 0.2
+        )
+        _ = follower.step(dieCelsius: 60, curve: curve) // settle at 60 °C → 0
+        // A single 100 °C spike: smoothed temp only moves ~0.2 of the way,
+        // so the output barely twitches (nowhere near full).
+        let afterSpike = follower.step(dieCelsius: 100, curve: curve)
+        #expect(afterSpike < 0.3, "one spike barely moves the smoothed input")
+        // A sustained 100 °C load: the average climbs to it over several ticks.
+        var value = afterSpike
+        for _ in 0 ..< 30 {
+            value = follower.step(dieCelsius: 100, curve: curve)
+        }
+        #expect(value > 0.95, "a sustained rise is tracked fully")
     }
 
     @Test("First tick starts at the curve's demand (no artificial spin-up from zero)")
     func firstTick() {
-        var follower = CurveFollower(hysteresisCelsius: 3, rampPerTick: 0.05)
+        var follower = CurveFollower(hysteresisCelsius: 4, rampUpPerTick: 0.05, smoothingAlpha: 0.2)
         #expect(follower.step(dieCelsius: 100, curve: curve) == 1.0)
     }
 
     @Test("Non-finite temperatures are ignored; output stays finite and clamped")
     func nonFiniteInput() {
-        var follower = CurveFollower(hysteresisCelsius: 3, rampPerTick: 1)
+        var follower = plainFollower(hysteresis: 3, ramp: 1)
         let base = follower.step(dieCelsius: 80, curve: curve)
         let next = follower.step(dieCelsius: .nan, curve: curve)
         #expect(next == base, "NaN reading keeps the last accepted state")
@@ -130,7 +169,7 @@ struct FanConfigCurveTests {
         #expect(config.mode == .manual)
         #expect(config.manualTargets == [0: 4000])
         #expect(config.sharedCurve == nil)
-        #expect(config.hysteresisCelsius == 3)
+        #expect(config.hysteresisCelsius == 4, "missing field decodes to the current default")
     }
 
     @Test("Curve resolution: per-fan override wins, shared curve is the fallback")

@@ -29,8 +29,16 @@ struct PopoverView: View {
             } else {
                 fanSection
                 FanControlSection(helper: state.helper, fans: state.fans)
-                Divider()
-                DashboardView(state: state)
+                if state.chartSettings.showCharts {
+                    Divider()
+                    DashboardView(state: state)
+                } else {
+                    compactTemperatureLine
+                }
+                if state.chartSettings.showTemperatureList {
+                    Divider()
+                    temperatureListSection
+                }
             }
             Divider()
             footer
@@ -110,6 +118,46 @@ struct PopoverView: View {
         guard fan.maxRPM > fan.minRPM else { return 0 }
         let fraction = (fan.actualRPM - fan.minRPM) / (fan.maxRPM - fan.minRPM)
         return min(max(fraction, 0), 1)
+    }
+
+    // MARK: - Minimalist temperature views (when charts are hidden)
+
+    /// A single compact line summarizing the hottest sensor — the whole
+    /// temperature story for someone running the minimalist menu.
+    private var compactTemperatureLine: some View {
+        HStack {
+            Image(systemName: "thermometer.medium")
+                .foregroundStyle(.secondary)
+            if let hottest = state.hottest {
+                Text("\(hottest.label): \(state.temperatureUnit.text(hottest.celsius))")
+                    .font(.callout)
+            } else {
+                Text("—")
+            }
+            Spacer()
+        }
+        .font(.callout)
+    }
+
+    /// The full per-sensor list — opt-in for people who want every reading in
+    /// the menu (the Sensors window always has the exhaustive view).
+    private var temperatureListSection: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(state.temperatures) { reading in
+                HStack {
+                    Text(reading.label)
+                        .font(.caption)
+                        .foregroundStyle(reading.id == state.hottest?
+                            .id ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                    Spacer()
+                    Text(state.temperatureUnit.text(reading.celsius))
+                        .font(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(reading.id == state.hottest?
+                            .id ? AnyShapeStyle(.orange) : AnyShapeStyle(.primary))
+                }
+            }
+        }
     }
 
     // MARK: - Waiting / error states

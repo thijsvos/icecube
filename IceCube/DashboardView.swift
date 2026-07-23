@@ -14,7 +14,8 @@ struct DashboardView: View {
     /// The shared observable state; owned by `IceCubeApp`.
     @Bindable var state: AppState
 
-    private static let windowTitles = ["1 min", "5 min", "15 min", "1 hr"]
+    /// Human labels for the windows, indexed like `ChartStore.windows`.
+    static let windowTitles = ["1 min", "5 min", "15 min", "1 hr"]
 
     /// CSV export flow state.
     @State private var isExportingCSV = false
@@ -33,26 +34,34 @@ struct DashboardView: View {
                 collectingPlaceholder
             } else {
                 ForEach(state.chartRows) { row in
-                    ChartRowView(row: row, xDomain: state.chartXDomain, unit: state.temperatureUnit)
+                    ChartRowView(
+                        row: row,
+                        xDomain: state.chartXDomain,
+                        unit: state.temperatureUnit,
+                        options: state.chartSettings
+                    )
                 }
             }
         }
+        // The window and row-visibility live in Settings now; re-render when
+        // any of them changes so the popover reflects the new choice at once.
+        .onChange(of: state.chartSettings.windowIndex) { state.refreshCharts() }
+        .onChange(of: chartFilterSignature) { state.refreshCharts() }
     }
 
-    // MARK: - Controls
+    /// A value that changes whenever a row-visibility toggle flips — cheaper
+    /// than observing each Bool separately.
+    private var chartFilterSignature: [Bool] {
+        [state.chartSettings.showCPU, state.chartSettings.showGPU, state.chartSettings.showFans]
+    }
+
+    // MARK: - Controls (live actions only — settings moved to the Settings window)
 
     private var controls: some View {
         HStack(spacing: 8) {
-            Picker("Chart window", selection: $state.selectedWindowIndex) {
-                ForEach(0 ..< Self.windowTitles.count, id: \.self) { index in
-                    Text(Self.windowTitles[index]).tag(index)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .controlSize(.small)
-            .disabled(state.isPaused) // switching windows would contradict the freeze
-            .frame(maxWidth: 240)
+            Text("\(Self.windowTitles[min(state.chartSettings.windowIndex, Self.windowTitles.count - 1)]) history")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Spacer()
             Button {
                 Task {

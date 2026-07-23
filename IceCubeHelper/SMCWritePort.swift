@@ -84,6 +84,12 @@ actor SMCWritePort: SMCControlPort {
 
     func writeDouble(_ key: String, value: Double, as type: SMCDataType) async throws {
         let bytes = try SMCKeyCodec.encode(value, as: type)
+        // Defense in depth: the 32-byte wire buffer can't be overrun (the
+        // encoder only yields ≤4-byte payloads today), but assert it so a
+        // future type can never silently write past the tuple.
+        guard bytes.count <= 32 else {
+            throw IceCubeError.smcEncodingFailed(type: type.name, value: value)
+        }
         // Audit BEFORE the attempt so rejected writes are visible too.
         log.info("SMC write \(key, privacy: .public) = \(value, privacy: .public) (\(type.name, privacy: .public))")
         var input = SMCParamStruct()

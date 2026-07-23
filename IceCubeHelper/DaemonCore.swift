@@ -242,14 +242,19 @@ actor DaemonCore {
         // Sensor blindness is handled by the SafetyMonitor (revert after 3
         // failed ticks) — a single missing reading just skips this tick.
         guard let dieHot = await (try? readTemperatures())?
-            .filter({ r in ["Tp", "Tg", "Te", "Tf", "Tc"].contains(where: r.key.hasPrefix) })
+            .filter(\.isDieSensor)
             .map(\.celsius).max() else { return }
 
         var targets: [Int: Double] = [:]
         for fan in fans {
             guard let curve = config.curve(for: fan.id) else { continue }
+            // SAFETY: a fan whose [Mn,Mx] range didn't read (both 0) must be
+            // skipped, never driven — mapping fraction into a 0…0 range would
+            // command 0 RPM, which is forbidden everywhere in Ice Cube.
+            guard fan.maxRPM > fan.minRPM else { continue }
             var follower = followers[fan.id] ?? CurveFollower(
-                hysteresisCelsius: config.hysteresisCelsius, rampPerTick: config.rampPerTick
+                hysteresisCelsius: config.hysteresisCelsius,
+                rampUpPerTick: config.rampPerTick
             )
             let fraction = follower.step(dieCelsius: dieHot, curve: curve)
             followers[fan.id] = follower
@@ -321,7 +326,7 @@ actor DaemonCore {
     private func autoSafetyNet() async {
         guard let fans = try? await readFans() else { return }
         let dieHot = await (try? readTemperatures())?
-            .filter { r in ["Tp", "Tg", "Te", "Tf", "Tc"].contains(where: r.key.hasPrefix) }
+            .filter(\.isDieSensor)
             .map(\.celsius).max() ?? 0
 
         if guardianActive {

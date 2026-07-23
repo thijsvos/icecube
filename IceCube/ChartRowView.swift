@@ -17,9 +17,16 @@ struct ChartRowView: View {
     let xDomain: ClosedRange<Date>
     /// Display unit for temperature rows (RPM rows ignore it).
     var unit: TemperatureUnit = .celsius
+    /// User chart preferences (band, secondary line, height).
+    var options: ChartSettings
 
     /// The crosshair position while the pointer is over this row's plot.
     @State private var hoverDate: Date?
+
+    /// The series to draw — the secondary (average/target) line is optional.
+    private var visibleSeries: [ChartStore.Series] {
+        options.showSecondary ? row.series : row.series.filter { !$0.isSecondary }
+    }
 
     /// Whether this row's values get unit-converted for display.
     private var convertsUnit: Bool {
@@ -116,11 +123,12 @@ struct ChartRowView: View {
 
     private var chart: some View {
         Chart {
-            ForEach(row.series) { series in
+            ForEach(visibleSeries) { series in
                 ForEach(series.buckets, id: \.time) { bucket in
                     // The min–max band: only for the primary series (the
-                    // secondary target/average line stays a clean dash).
-                    if !series.isSecondary {
+                    // secondary target/average line stays a clean dash), and
+                    // only when the user wants it.
+                    if !series.isSecondary, options.showBand {
                         AreaMark(
                             x: .value("Time", bucket.time),
                             yStart: .value("Min", displayValue(bucket.min)),
@@ -173,7 +181,7 @@ struct ChartRowView: View {
                     }
             }
         }
-        .frame(height: 64)
+        .frame(height: options.height.points)
     }
 
     private var bandGradient: LinearGradient {

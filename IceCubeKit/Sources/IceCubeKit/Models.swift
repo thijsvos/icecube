@@ -74,6 +74,13 @@ public struct SensorReading: Identifiable, Sendable, Codable, Equatable {
         self.label = label
         self.celsius = celsius
     }
+
+    /// Whether this is a die-class (CPU/GPU silicon) sensor — the input the
+    /// fan curve follows and the safety ceiling classifies. See
+    /// ``SMCKeyMaps/isDieKey(_:)`` (the single source of truth).
+    public var isDieSensor: Bool {
+        SMCKeyMaps.isDieKey(key)
+    }
 }
 
 /// One timestamped reading of all fans and sensors — what polling publishes.
@@ -151,7 +158,7 @@ public struct FanConfig: Sendable, Codable, Equatable {
         persistsWithoutApp: Bool = false,
         sharedCurve: FanCurve? = nil,
         perFanCurves: [Int: FanCurve] = [:],
-        hysteresisCelsius: Double = 3,
+        hysteresisCelsius: Double = 4,
         rampPerTick: Double = 0.1
     ) {
         self.mode = mode
@@ -173,7 +180,7 @@ public struct FanConfig: Sendable, Codable, Equatable {
         persistsWithoutApp = try c.decodeIfPresent(Bool.self, forKey: .persistsWithoutApp) ?? false
         sharedCurve = try c.decodeIfPresent(FanCurve.self, forKey: .sharedCurve)
         perFanCurves = try c.decodeIfPresent([Int: FanCurve].self, forKey: .perFanCurves) ?? [:]
-        hysteresisCelsius = try c.decodeIfPresent(Double.self, forKey: .hysteresisCelsius) ?? 3
+        hysteresisCelsius = try c.decodeIfPresent(Double.self, forKey: .hysteresisCelsius) ?? 4
         rampPerTick = try c.decodeIfPresent(Double.self, forKey: .rampPerTick) ?? 0.1
     }
 

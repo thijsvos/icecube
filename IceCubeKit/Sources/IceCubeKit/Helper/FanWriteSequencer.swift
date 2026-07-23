@@ -71,7 +71,11 @@ public actor FanWriteSequencer {
         var allVerified = true
 
         for fan in fans {
-            guard let requested = targets[fan.id] else { continue }
+            guard let requested = targets[fan.id], requested.isFinite else { continue }
+            // SAFETY: a fan whose [Mn,Mx] range didn't read (both 0, or
+            // inverted) is SKIPPED — clamping into a 0…0 range would command
+            // 0 RPM, the one thing Ice Cube must never write.
+            guard fan.maxRPM > fan.minRPM else { continue }
             let target = Self.clamp(requested, to: fan)
             clamped[fan.id] = target
             let modeKey = "F\(fan.id)\(suffix)"
@@ -162,8 +166,13 @@ public actor FanWriteSequencer {
     // MARK: - The clamp (the real guard — firmware limits are advisory)
 
     /// Clamps a requested RPM into the fan's reported `[minRPM, maxRPM]`.
+    ///
+    /// A non-finite request collapses to the minimum (never NaN on the wire);
+    /// callers must additionally skip fans with an unreadable range so this
+    /// never has to invent a value for a `0…0` range (see `engageManual`).
     public static func clamp(_ requested: Double, to fan: Fan) -> Double {
         guard fan.maxRPM > fan.minRPM else { return fan.maxRPM }
-        return Swift.min(Swift.max(requested, fan.minRPM), fan.maxRPM)
+        guard requested.isFinite else { return fan.minRPM }
+        return requested.clamped(to: fan.minRPM ... fan.maxRPM)
     }
 }

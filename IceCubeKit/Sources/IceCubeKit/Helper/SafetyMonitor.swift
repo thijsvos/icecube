@@ -46,8 +46,6 @@ public struct SafetyMonitor: Sendable {
     }
 
     /// Die-class sensor key prefixes (higher ceiling).
-    private static let diePrefixes = ["Tp", "Tg", "Te", "Tf", "Tc"]
-
     private let limits: Limits
     private var overCeilingTicks = 0
     private var coolingActive = false
@@ -134,6 +132,6 @@ public struct SafetyMonitor: Sendable {
     }
 
     private func ceiling(for key: String) -> Double {
-        Self.diePrefixes.contains(where: key.hasPrefix) ? limits.dieCeiling : limits.otherCeiling
+        SMCKeyMaps.isDieKey(key) ? limits.dieCeiling : limits.otherCeiling
     }
 }

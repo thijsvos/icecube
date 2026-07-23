@@ -67,12 +67,12 @@ struct SMCKeyMapsTests {
     }
 }
 
-@Suite("SMCPollingActor")
-struct SMCPollingActorTests {
+@Suite("SMCPoller")
+struct SMCPollerTests {
     @Test("The stream delivers snapshots immediately and keeps delivering")
     func deliversSnapshots() async {
         let provider = MockSMCProvider(now: { Date(timeIntervalSince1970: 1_753_000_000) })
-        let poller = SMCPollingActor(provider: provider, interval: .milliseconds(5))
+        let poller = SMCPoller(provider: provider, interval: .milliseconds(5))
         var received: [SMCPollEvent] = []
         for await event in poller.events() {
             received.append(event)
@@ -94,7 +94,7 @@ struct SMCPollingActorTests {
     @Test("Breaking out of the loop tears the polling task down (no runaway)")
     func terminationStopsPolling() async throws {
         let provider = MockSMCProvider(now: { Date(timeIntervalSince1970: 1_753_000_000) })
-        let poller = SMCPollingActor(provider: provider, interval: .milliseconds(1))
+        let poller = SMCPoller(provider: provider, interval: .milliseconds(1))
         var count = 0
         for await _ in poller.events() {
             count += 1

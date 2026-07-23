@@ -23,6 +23,8 @@ public actor SystemSMCProvider: SMCProviding {
     /// Last plausible value per sensor key — what a glitched read falls back
     /// to so the sensor list never shrinks (see `SensorStabilizer`).
     private var lastGoodTemperatures: [String: Double] = [:]
+    /// All SMC key names, enumerated once (immutable for a boot).
+    private var cachedKeyNames: [String]?
 
     /// What we remember about one fan after discovery.
     private struct FanDescriptor {
@@ -91,14 +93,15 @@ public actor SystemSMCProvider: SMCProviding {
     }
 
     public func keyDump() async throws -> [SMCKeyDump] {
-        let count = try await connection.keyCount()
+        // Key NAMES and the #KEY count are immutable for a boot; only values
+        // change. Enumerate the names once (skipping unprintable oddities),
+        // then every refresh only re-reads values — the Sensors window polls
+        // this every 2 s, so this halves the syscall load on the heavy path.
+        let keys = try await enumeratedKeyNames()
         var dump: [SMCKeyDump] = []
-        dump.reserveCapacity(count)
-        for index in 0 ..< count {
-            // Skip keys with unprintable names or unreadable metadata — rare
-            // firmware oddities that would otherwise abort the whole dump.
-            guard let key = try? await connection.key(atIndex: index),
-                  let (bytes, info) = try? await connection.readBytes(key) else { continue }
+        dump.reserveCapacity(keys.count)
+        for key in keys {
+            guard let (bytes, info) = try? await connection.readBytes(key) else { continue }
             var value: Double?
             var text: String?
             if let type = SMCDataType(rawValue: info.type) {
@@ -121,6 +124,24 @@ public actor SystemSMCProvider: SMCProviding {
             ))
         }
         return dump
+    }
+
+    /// Every SMC key name, enumerated once and cached (names don't change
+    /// for a boot). Unprintable/garbage names are skipped.
+    private func enumeratedKeyNames() async throws -> [String] {
+        if let cachedKeyNames {
+            return cachedKeyNames
+        }
+        let count = try await connection.keyCount()
+        var names: [String] = []
+        names.reserveCapacity(count)
+        for index in 0 ..< count {
+            if let key = try? await connection.key(atIndex: index) {
+                names.append(key)
+            }
+        }
+        cachedKeyNames = names
+        return names
     }
 
     // MARK: - Discovery (cached)

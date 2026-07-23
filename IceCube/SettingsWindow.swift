@@ -31,7 +31,9 @@ struct SettingsWindowView: View {
     }
 
     var body: some View {
-        Form {
+        // Local @Bindable so bindings reach the nested @Observable directly.
+        @Bindable var chart = state.chartSettings
+        return Form {
             Section("General") {
                 Toggle("Launch Ice Cube at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, enabled in
@@ -65,6 +67,32 @@ struct SettingsWindowView: View {
                         Text(mode.title).tag(mode)
                     }
                 }
+            }
+            Section("Charts") {
+                Toggle("Show live charts in the menu", isOn: $chart.showCharts)
+                Text("Off gives a minimal menu — fans, controls, and a compact temperature line only.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if chart.showCharts {
+                    Picker("Default time window", selection: $chart.windowIndex) {
+                        ForEach(Array(DashboardView.windowTitles.enumerated()), id: \.offset) { index, title in
+                            Text(title).tag(index)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    Toggle("CPU temperature graph", isOn: $chart.showCPU)
+                    Toggle("GPU temperature graph", isOn: $chart.showGPU)
+                    Toggle("Fan RPM graphs", isOn: $chart.showFans)
+                    Toggle("Min/max range band", isOn: $chart.showBand)
+                    Toggle("Average / target line", isOn: $chart.showSecondary)
+                    Picker("Graph height", selection: $chart.height) {
+                        ForEach(ChartHeight.allCases) { h in
+                            Text(h.title).tag(h)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                Toggle("Show full temperature list in the menu", isOn: $chart.showTemperatureList)
             }
             Section("Alerts") {
                 Picker("Notify when hottest sensor reaches", selection: alertBinding) {

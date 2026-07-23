@@ -31,7 +31,11 @@ enum ConfigStore {
             return
         }
         do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o755] // root-owned, not group/other-writable
+            )
             let data = try JSONEncoder().encode(Envelope(schemaVersion: 1, config: config))
             // Atomic: write a temp file, then rename over the target.
             let temp = directory.appendingPathComponent("config.json.tmp")
@@ -45,7 +49,19 @@ enum ConfigStore {
     }
 
     /// The persisted config, or `nil` when absent/invalid (auto is the answer).
+    ///
+    /// SECURITY: this runs as root at boot, before the app exists, so it will
+    /// not trust a file that isn't root-owned and locked-down. On a machine
+    /// where an admin loosened `/Library/Application Support` to group-writable,
+    /// a non-root user could otherwise plant a config the daemon runs at boot.
+    /// (The blast radius is bounded anyway — a poisoned curve still can't
+    /// exceed the clamp or the ceiling — but flying-blind-trust is avoidable.)
     static func load() -> FanConfig? {
+        guard isTrustworthy(file) else {
+            log.error("persisted config is not root-owned / is writable by others — ignoring it")
+            clear()
+            return nil
+        }
         guard let data = try? Data(contentsOf: file) else { return nil }
         guard let envelope = try? JSONDecoder().decode(Envelope.self, from: data),
               envelope.schemaVersion == 1,
@@ -63,5 +79,20 @@ enum ConfigStore {
     /// Removes the persisted config (revert-to-auto, unregister, corruption).
     static func clear() {
         try? FileManager.default.removeItem(at: file)
+    }
+
+    /// True only if `url` and its parent directory are owned by root (uid 0)
+    /// and carry no group/other write bits — i.e. no non-root user could have
+    /// tampered with what we're about to trust as root.
+    private static func isTrustworthy(_ url: URL) -> Bool {
+        func ok(_ path: String) -> Bool {
+            guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+                  let owner = attrs[.ownerAccountID] as? NSNumber,
+                  let perms = attrs[.posixPermissions] as? NSNumber else { return false }
+            return owner.intValue == 0 && (perms.int16Value & 0o022) == 0
+        }
+        // Missing file is fine (→ no config); only a *present* file must be safe.
+        guard FileManager.default.fileExists(atPath: url.path) else { return true }
+        return ok(url.path) && ok(url.deletingLastPathComponent().path)
     }
 }

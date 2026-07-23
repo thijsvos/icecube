@@ -9,7 +9,7 @@ import SwiftUI
 final class CurveEditorModel {
     var points: [CurvePoint]
     var selected: Int?
-    var hysteresis: Double = 3
+    var hysteresis: Double = 4
     var ramp: Double = 0.1
 
     /// Preview follower so the "applied" marker shows hysteresis + ramp even
@@ -73,7 +73,8 @@ final class CurveEditorModel {
     func updatePreview(die: Double) {
         var follower = preview
         follower.hysteresisCelsius = hysteresis
-        follower.rampPerTick = ramp
+        follower.rampUpPerTick = ramp
+        follower.rampDownPerTick = ramp * 0.5
         previewFraction = follower.step(dieCelsius: die, curve: curve)
         preview = follower
     }

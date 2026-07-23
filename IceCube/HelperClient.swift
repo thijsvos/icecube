@@ -57,59 +57,30 @@ final class HelperClient {
     // MARK: - Protocol calls (async wrappers)
 
     func version() async throws -> String {
-        let proxy = try proxy()
-        return try await withCheckedThrowingContinuation { continuation in
-            let once = OnceResumer(continuation: continuation)
-            (proxy as? HelperProtocol)?.getVersion { version in
-                once.resume(.success(version))
-            }
-        }
+        try await call { proxy, done in proxy.getVersion { done(.success($0)) } }
     }
 
     func apply(_ config: FanConfig) async throws {
         let data = try JSONEncoder().encode(config)
-        let proxy = try proxy()
-        return try await withCheckedThrowingContinuation { continuation in
-            let once = OnceResumer(continuation: continuation)
-            (proxy as? HelperProtocol)?.apply(configData: data) { error in
-                if let error {
-                    once.resume(.failure(error))
-                } else {
-                    once.resume(.success(()))
-                }
-            }
+        try await call { proxy, done in
+            proxy.apply(configData: data) { error in done(error.map { .failure($0) } ?? .success(())) }
         }
     }
 
     func setAllAuto() async throws {
-        let proxy = try proxy()
-        return try await withCheckedThrowingContinuation { continuation in
-            let once = OnceResumer(continuation: continuation)
-            (proxy as? HelperProtocol)?.setAllAuto { error in
-                if let error {
-                    once.resume(.failure(error))
-                } else {
-                    once.resume(.success(()))
-                }
-            }
+        try await call { proxy, done in
+            proxy.setAllAuto { error in done(error.map { .failure($0) } ?? .success(())) }
         }
     }
 
     func heartbeat() {
-        (try? proxy()).flatMap { ($0 as? HelperProtocol)?.heartbeat() }
+        // Fire-and-forget: no reply, so a dead connection simply does nothing.
+        (connection?.remoteObjectProxy as? HelperProtocol)?.heartbeat()
     }
 
     func status() async throws -> HelperStatus {
-        let proxy = try proxy()
-        return try await withCheckedThrowingContinuation { continuation in
-            let once = OnceResumer(continuation: continuation)
-            (proxy as? HelperProtocol)?.getStatus { data in
-                do {
-                    try once.resume(.success(HelperStatus.decode(data)))
-                } catch {
-                    once.resume(.failure(error))
-                }
-            }
+        try await call { proxy, done in
+            proxy.getStatus { data in done(Result { try HelperStatus.decode(data) }) }
         }
     }
 
@@ -117,12 +88,25 @@ final class HelperClient {
 
     private struct NotConnected: Error {}
 
-    private func proxy() throws -> Any {
+    /// Runs one XPC call inside a single continuation. The proxy's error
+    /// handler resumes the SAME `OnceResumer` — so a connection that dies
+    /// mid-call fails the `await` instead of leaking the continuation and
+    /// hanging forever (which is what happens if only the reply block can
+    /// resume it). `OnceResumer` guarantees exactly one of the two fires.
+    private func call<T: Sendable>(
+        _ body: @Sendable (HelperProtocol, @escaping @Sendable (Result<T, Error>) -> Void) -> Void
+    ) async throws -> T {
         guard let connection else { throw NotConnected() }
-        return connection.remoteObjectProxyWithErrorHandler { [weak self] error in
-            Task { @MainActor [weak self] in
-                self?.log.error("XPC call failed: \(error.localizedDescription, privacy: .public)")
+        return try await withCheckedThrowingContinuation { continuation in
+            let once = OnceResumer(continuation: continuation)
+            let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+                once.resume(.failure(error))
             }
+            guard let helper = proxy as? HelperProtocol else {
+                once.resume(.failure(NotConnected()))
+                return
+            }
+            body(helper) { once.resume($0) }
         }
     }
 }

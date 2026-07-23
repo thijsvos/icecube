@@ -118,16 +118,21 @@ public struct FanCurve: Sendable, Codable, Equatable {
         CurvePoint(celsius: 85, fraction: 1),
     ])
 
-    /// As cold as physics allows: fans always moving from 35 °C, full blast
-    /// by 55 °C. Holds the machine in the low 40s at idle and minimizes any
-    /// time above 50 °C — at the cost of a permanent soft hum. (The die will
-    /// still exceed 50 °C under real load; no fan can prevent that.)
+    /// As cold as the hardware allows, WITHOUT the fan hunting.
+    ///
+    /// The idle band (35–55 °C, where an M2 Pro spends most of its light-load
+    /// life) is deliberately **flat-ish**: the fans hold a steady, fairly
+    /// strong ~55–70 % across it, so the ±few-°C temperature noise of ordinary
+    /// use no longer crosses a steep knee and swings the fans up and down. The
+    /// steep climb to full speed is placed **above 65 °C**, where real
+    /// sustained load lives. Net: the machine stays just as cool, but with a
+    /// constant soft hum instead of random spikes. (The die still exceeds
+    /// 50 °C under real load — no fan can prevent that.)
     public static let cold = FanCurve(points: [
-        CurvePoint(celsius: 35, fraction: 0.15),
-        CurvePoint(celsius: 40, fraction: 0.35),
-        CurvePoint(celsius: 45, fraction: 0.6),
-        CurvePoint(celsius: 50, fraction: 0.85),
-        CurvePoint(celsius: 55, fraction: 1),
+        CurvePoint(celsius: 35, fraction: 0.5),
+        CurvePoint(celsius: 55, fraction: 0.62),
+        CurvePoint(celsius: 65, fraction: 0.78),
+        CurvePoint(celsius: 80, fraction: 1),
     ])
 
     /// Full speed always (flat at 1.0).

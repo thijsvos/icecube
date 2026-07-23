@@ -30,11 +30,13 @@ final class AppState {
     let helper = HelperManager()
     /// Built-in + user presets (Phase 4).
     let presets = PresetStore()
+    /// Customizable chart/display preferences — the tinkerer surface.
+    let chartSettings = ChartSettings()
 
     /// The hottest die-class sensor (CPU/GPU silicon), the curve input.
     var hottestDie: Double? {
         snapshot?.temperatures
-            .filter { r in ["Tp", "Tg", "Te", "Tf", "Tc"].contains(where: r.key.hasPrefix) }
+            .filter(\.isDieSensor)
             .map(\.celsius).max()
     }
 
@@ -44,12 +46,9 @@ final class AppState {
 
     // MARK: - Charts (Phase 2)
 
-    /// The dashboard's chart rows for the selected window, ready to render.
+    /// The dashboard's chart rows for the selected window, ready to render —
+    /// already filtered to the rows the user has enabled (`chartSettings`).
     private(set) var chartRows: [ChartStore.Row] = []
-    /// Index into `ChartStore.windows` (1 / 5 / 15 / 60 min). Default 5 min.
-    var selectedWindowIndex = 1 {
-        didSet { refreshCharts() }
-    }
 
     /// Frozen display (recording continues; see `togglePaused`).
     private(set) var isPaused = false
@@ -89,7 +88,7 @@ final class AppState {
     private static let intervalKey = "pollInterval"
     @ObservationIgnored private let chartStore = ChartStore()
     private var chartWindow: TimeInterval {
-        ChartStore.windows[selectedWindowIndex]
+        ChartStore.windows[min(max(chartSettings.windowIndex, 0), ChartStore.windows.count - 1)]
     }
 
     // MARK: - Wiring
@@ -97,7 +96,7 @@ final class AppState {
     /// Where readings come from. Injected so tests and simulated mode swap freely.
     private let provider: any SMCProviding
     /// Wraps `provider` in the snapshot stream; rebuilt when cadence changes.
-    private var poller: SMCPollingActor
+    private var poller: SMCPoller
     /// The task consuming the polling stream; `nil` when stopped.
     @ObservationIgnored private var pollTask: Task<Void, Never>?
 
@@ -107,7 +106,7 @@ final class AppState {
         let interval = PollInterval(
             rawValue: UserDefaults.standard.integer(forKey: Self.intervalKey)
         ) ?? .oneSecond
-        poller = SMCPollingActor(provider: provider, interval: .seconds(interval.rawValue))
+        poller = SMCPoller(provider: provider, interval: .seconds(interval.rawValue))
         pollInterval = interval
         menuBarDisplay = MenuBarDisplayMode(
             rawValue: UserDefaults.standard.string(forKey: Self.menuBarDisplayKey) ?? ""
@@ -126,7 +125,7 @@ final class AppState {
             : pollInterval.rawValue
         pollTask?.cancel()
         pollTask = nil
-        poller = SMCPollingActor(provider: provider, interval: .seconds(seconds))
+        poller = SMCPoller(provider: provider, interval: .seconds(seconds))
         start()
     }
 
@@ -156,6 +155,7 @@ final class AppState {
                     await chartStore.ingest(new)
                     if !isPaused {
                         chartRows = await chartStore.rows(window: chartWindow)
+                            .filter { chartSettings.includesRow(id: $0.id) }
                         chartXDomain = new.date.addingTimeInterval(-chartWindow) ... new.date
                     }
                 case let .failure(message):
@@ -189,8 +189,9 @@ final class AppState {
         }
     }
 
-    /// Re-renders rows for the current window (window change or unpause).
-    private func refreshCharts() {
+    /// Re-renders rows for the current window and row filter. Call after a
+    /// window change, a row-visibility toggle, or unpause.
+    func refreshCharts() {
         guard !isPaused else { return }
         Task { [weak self] in
             guard let self else { return }
@@ -198,7 +199,7 @@ final class AppState {
             if let end = rows.first?.series.first?.buckets.last?.time ?? snapshot?.date {
                 chartXDomain = end.addingTimeInterval(-chartWindow) ... end
             }
-            chartRows = rows
+            chartRows = rows.filter { chartSettings.includesRow(id: $0.id) }
         }
     }
 

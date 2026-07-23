@@ -1,52 +1,82 @@
-// CurveFollower.swift — the stateful curve tracker: input hysteresis + output ramp limiting.
+// CurveFollower.swift — the stateful curve tracker: EMA smoothing + input deadband + asymmetric ramp limiting.
 
 import Foundation
 
-/// Follows a ``FanCurve`` tick by tick, smoothing in two places:
+/// Follows a ``FanCurve`` tick by tick, smoothing the noisy die-temperature
+/// signal in three stages so the fans respond to real thermal trends, not to
+/// every momentary CPU burst (which is what makes fans "hunt" audibly):
 ///
-/// - **Input hysteresis**: the temperature feeding the curve only moves when
-///   the real reading drifts more than `hysteresisCelsius` from the last
-///   accepted value — small wiggles (±1–2 °C every second) stop translating
-///   into constant fan-speed changes.
-/// - **Output ramp limiting**: the emitted fraction moves toward the curve's
-///   demand by at most `rampPerTick` per step — speed changes are gradual,
-///   never a lurch (PLAN.md §1.3 "max ΔRPM per second").
+/// 1. **EMA smoothing** of the raw input — an exponential moving average with
+///    time constant ≈ `2s / smoothingAlpha`. A brief 2–4 s load spike barely
+///    moves the average, so it doesn't reach the fans at all.
+/// 2. **Input deadband** — the smoothed temperature must drift more than
+///    `hysteresisCelsius` from the last accepted value before the curve
+///    re-evaluates, killing tiny back-and-forth.
+/// 3. **Asymmetric output ramp** — the emitted fraction rises quickly (safety)
+///    but falls slowly (`rampDownPerTick < rampUpPerTick`), so the fans don't
+///    nervously drop-then-re-raise; they ease down only on a sustained cooldown.
 ///
-/// Pure state machine — no clock, no hardware — so every property is
-/// unit-testable. One follower per fan lives in the daemon.
+/// These defaults follow fan-tuning best practice (see docs/CREDITS.md): gentle
+/// on the ears and, by avoiding needless speed cycling, gentle on the fan
+/// bearings too. Pure state machine — no clock, no hardware — so every stage is
+/// unit-tested. One follower per fan lives in the daemon.
 public struct CurveFollower: Sendable, Equatable {
-    /// °C the input must move before the curve sees it.
+    /// EMA weight applied to each new reading (0 = frozen, 1 = no smoothing).
+    /// 0.2 at a 2 s tick ≈ a 10 s time constant.
+    public var smoothingAlpha: Double
+    /// °C the smoothed input must move before the curve sees it.
     public var hysteresisCelsius: Double
-    /// Maximum output change per tick, as fraction of the fan range
-    /// (0.1 with a 2 s tick ≈ full range in 20 s).
-    public var rampPerTick: Double
+    /// Max upward output change per tick, as a fraction of the fan range.
+    public var rampUpPerTick: Double
+    /// Max downward output change per tick — smaller than up, so cooldowns are
+    /// gradual and the fans don't oscillate.
+    public var rampDownPerTick: Double
 
+    private var smoothedTemp: Double?
     private var effectiveTemp: Double?
     private var output: Double?
 
-    public init(hysteresisCelsius: Double = 3, rampPerTick: Double = 0.1) {
+    public init(
+        hysteresisCelsius: Double = 4,
+        rampUpPerTick: Double = 0.1,
+        rampDownPerTick: Double = 0.05,
+        smoothingAlpha: Double = 0.2
+    ) {
         self.hysteresisCelsius = max(0, hysteresisCelsius)
-        self.rampPerTick = min(max(rampPerTick, 0.01), 1)
+        self.rampUpPerTick = min(max(rampUpPerTick, 0.01), 1)
+        self.rampDownPerTick = min(max(rampDownPerTick, 0.01), 1)
+        self.smoothingAlpha = min(max(smoothingAlpha, 0.01), 1)
     }
 
-    /// Advances one tick: feeds `dieCelsius` through the deadband, evaluates
-    /// `curve`, ramps toward the result. Returns the fraction to command
+    /// Advances one tick: smooths `dieCelsius`, applies the deadband, evaluates
+    /// `curve`, and ramps toward the result. Returns the fraction to command
     /// (always finite, always 0…1).
     public mutating func step(dieCelsius: Double, curve: FanCurve) -> Double {
+        // 1. EMA smoothing (a non-finite reading is ignored — hold the last).
         if dieCelsius.isFinite {
-            if let current = effectiveTemp {
-                if abs(dieCelsius - current) >= hysteresisCelsius {
-                    effectiveTemp = dieCelsius
-                }
-            } else {
-                effectiveTemp = dieCelsius
-            }
+            smoothedTemp = smoothedTemp.map { $0 + smoothingAlpha * (dieCelsius - $0) } ?? dieCelsius
         }
-        let desired = curve.fraction(at: effectiveTemp ?? dieCelsius)
-        let next: Double = if let current = output {
-            current + min(max(desired - current, -rampPerTick), rampPerTick)
+        let temp = smoothedTemp ?? dieCelsius
+        guard temp.isFinite else { return output ?? 0 }
+
+        // 2. Input deadband on the smoothed signal.
+        if let current = effectiveTemp {
+            if abs(temp - current) >= hysteresisCelsius {
+                effectiveTemp = temp
+            }
         } else {
-            desired // first tick: start where the curve says, no fake ramp-up
+            effectiveTemp = temp
+        }
+        let desired = curve.fraction(at: effectiveTemp ?? temp)
+
+        // 3. Asymmetric ramp toward the curve's demand.
+        let next: Double
+        if let current = output {
+            let delta = desired - current
+            let limit = delta >= 0 ? rampUpPerTick : rampDownPerTick
+            next = current + max(-limit, min(delta, limit))
+        } else {
+            next = desired // first tick: start at demand, no artificial ramp-up
         }
         output = min(max(next, 0), 1)
         return output ?? 0
@@ -54,6 +84,7 @@ public struct CurveFollower: Sendable, Equatable {
 
     /// Forgets all state (mode changes, wake, new curve).
     public mutating func reset() {
+        smoothedTemp = nil
         effectiveTemp = nil
         output = nil
     }

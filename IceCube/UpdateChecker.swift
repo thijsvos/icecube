@@ -55,8 +55,11 @@ final class UpdateChecker {
                 ? String(release.tag_name.dropFirst())
                 : release.tag_name
             if Self.isVersion(latest, newerThan: Self.currentVersion),
-               let pageURL = URL(string: release.html_url)
+               let pageURL = URL(string: release.html_url),
+               pageURL.scheme == "https", pageURL.host == "github.com"
             {
+                // Only ever offer an https github.com link — a tampered API
+                // response can't slip a file:// or custom-scheme URL past this.
                 status = .available(version: latest, url: pageURL)
             } else {
                 status = .upToDate

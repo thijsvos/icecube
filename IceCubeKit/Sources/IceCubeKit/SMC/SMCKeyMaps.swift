@@ -76,4 +76,18 @@ public enum SMCKeyMaps {
     public static func isPlausibleTemperature(_ celsius: Double) -> Bool {
         celsius > 10 && celsius < 120
     }
+
+    /// Key prefixes for **die-class** silicon sensors (CPU/GPU cores) — they
+    /// legitimately run hotter than proximity/airflow sensors, which is why
+    /// the safety ceiling and the curve input treat them as a class.
+    ///
+    /// SINGLE SOURCE OF TRUTH: this classification is safety-relevant (it
+    /// selects the higher temperature ceiling), so it must live in exactly
+    /// one place. Do not re-inline the prefix list anywhere.
+    public static let dieKeyPrefixes = ["Tp", "Tg", "Te", "Tf", "Tc"]
+
+    /// Whether `key` names a die-class sensor.
+    public static func isDieKey(_ key: String) -> Bool {
+        dieKeyPrefixes.contains(where: key.hasPrefix)
+    }
 }

@@ -23,12 +23,16 @@ final class HelperService: NSObject, NSXPCListenerDelegate, HelperProtocol, @unc
             connection.setCodeSigningRequirement(requirement)
             log.info("connection accepted with pinning: \(requirement, privacy: .public)")
         } else {
-            // Unsigned helper (ad-hoc/dev CI): pinning is impossible.
+            // Unsigned helper (ad-hoc/dev CI): code-signing pinning is
+            // impossible.
             #if DEBUG
-                log
-                    .fault(
-                        "DEBUG build without a Team ID — accepting XPC WITHOUT code-signing pinning. Never ship this."
-                    )
+                // Don't accept ANY local process — at least require the caller
+                // to run as the same user, so a DEBUG build isn't wide open.
+                guard connection.effectiveUserIdentifier == getuid() else {
+                    log.fault("DEBUG: rejecting XPC from a different user (uid \(connection.effectiveUserIdentifier))")
+                    return false
+                }
+                log.fault("DEBUG build without a Team ID — accepting same-user XPC WITHOUT pinning. Never ship this.")
             #else
                 log.fault("release helper is unsigned — rejecting all XPC connections")
                 return false

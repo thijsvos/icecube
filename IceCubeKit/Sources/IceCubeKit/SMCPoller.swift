@@ -1,4 +1,4 @@
-// SMCPollingActor.swift — turns any SMCProviding into a steady stream of snapshots (or failure notices).
+// SMCPoller.swift — turns any SMCProviding into a steady stream of snapshots (or failure notices).
 
 import Foundation
 
@@ -11,10 +11,13 @@ public enum SMCPollEvent: Sendable {
 }
 
 /// Polls an ``SMCProviding`` on a fixed cadence and publishes the results as
-/// an `AsyncStream` — the app consumes this for the menu bar and (Phase 2)
-/// charts. The default 1 s cadence respects the project rule of never polling
-/// the SMC faster than 500 ms.
-public actor SMCPollingActor {
+/// an `AsyncStream` — the app consumes this for the menu bar and charts. The
+/// default 1 s cadence respects the project rule of never polling the SMC
+/// faster than 500 ms.
+///
+/// A value type: it holds only its (immutable) configuration and its one
+/// method is stateless, so there is nothing for an actor to protect.
+public struct SMCPoller: Sendable {
     private let provider: any SMCProviding
     private let interval: Duration
 
@@ -26,10 +29,14 @@ public actor SMCPollingActor {
     /// Starts a fresh polling loop; the loop lives exactly as long as the
     /// stream has a consumer (cancellation of the consuming task ends it).
     /// The first event arrives immediately, then one per interval.
-    public nonisolated func events() -> AsyncStream<SMCPollEvent> {
+    ///
+    /// Buffering is `.bufferingNewest(1)`: only the freshest reading matters,
+    /// so if the consumer stalls we drop stale frames rather than queue a
+    /// burst of them.
+    public func events() -> AsyncStream<SMCPollEvent> {
         let provider = provider
         let interval = interval
-        return AsyncStream { continuation in
+        return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
             let task = Task {
                 while !Task.isCancelled {
                     do {
