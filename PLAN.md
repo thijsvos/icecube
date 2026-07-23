@@ -190,9 +190,10 @@ Work in order. Each phase ends with its acceptance criteria demonstrably true (s
 - **Accept:** `ZEPHYR_SIMULATED=1` run shows live-updating menu bar + popover; `swift test` green; `scripts/verify-bundle.sh` passes; CI workflow committed (runs on first push).
 
 ### Phase 0.5 — Helper approval spike **[HW]** (gate before Phase 3)
-- [ ] Throwaway do-nothing daemon, personal-team (Apple Development) signing, run from /Applications: register → approve in Login Items → `sudo launchctl print system/io.github.thijsvos.zephyr.helper` → XPC ping round-trip as root.
-- [ ] Outcome decides the Phase 3+ helper story. **Documented fallback if free-Apple-ID approval fails:** owner manually installs the daemon plist via `sudo launchctl bootstrap` for Phases 3–5; SMAppService deferred to Phase 6 / paid-account upgrade.
-- [ ] Note: macOS 26.4.x has a known BTM corruption bug (backgroundtaskmanagementd misbehaving; approval toggles failing for reasons unrelated to our code). If registration hangs, suspect the OS first; `sfltool resetbtm` + reboot is the **last resort** — it resets background-item approvals for ALL apps on the Mac (owner decision).
+- [x] Throwaway do-nothing daemon, personal-team (Apple Development) signing, run from /Applications: register → approve in Login Items → `sudo launchctl print system/io.github.thijsvos.zephyr.helper` → XPC ping round-trip as root.
+- [x] Outcome decides the Phase 3+ helper story. **Documented fallback if free-Apple-ID approval fails:** owner manually installs the daemon plist via `sudo launchctl bootstrap` for Phases 3–5; SMAppService deferred to Phase 6 / paid-account upgrade.
+- [x] Note: macOS 26.4.x has a known BTM corruption bug (backgroundtaskmanagementd misbehaving; approval toggles failing for reasons unrelated to our code). If registration hangs, suspect the OS first; `sfltool resetbtm` + reboot is the **last resort** — it resets background-item approvals for ALL apps on the Mac (owner decision).
+- ANSWERED 2026-07-23: **free-Apple-ID SMAppService root-daemon registration + approval WORKS** on Mac14,9 / macOS 26.4.1 (approved once; re-registration never re-prompts; daemon auto-starts via RunAtLoad). The fallback was never needed.
 - **Accept:** a definitive answer — free-ID path confirmed, or the fallback adopted and documented.
 
 ### Phase 1 — Real SMC reads & sensors browser
