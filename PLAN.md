@@ -229,9 +229,9 @@ Work in order. Each phase ends with its acceptance criteria demonstrably true (s
 - **Accept:** in simulated mode, heating the fake CPU visibly walks the curve with hysteresis; on hardware, a Quiet vs Max preset audibly differs; reboot with "persist" on → curve active before app launch.
 
 ### Phase 5 — Modern-app polish
-- [ ] Settings: launch at login, intervals, units, notifications thresholds, persist-toggle.
-- [ ] UserNotifications alerts (permission flow handled gracefully).
-- [ ] History window + CSV export; onboarding; accessibility audit (VoiceOver labels, keyboard-only curve editing); String Catalog; Reduce Motion.
+- [x] Settings: launch at login, intervals, units, notifications thresholds, persist-toggle.
+- [x] UserNotifications alerts (permission flow handled gracefully).
+- [x] History window + CSV export; onboarding; accessibility audit (VoiceOver labels, keyboard-only curve editing); String Catalog; Reduce Motion.
 - [ ] App icon (Icon Composer `.icon`) + menu bar template icons (owner supplies or we generate placeholder); popover surfaces built on system materials, verified on macOS 26 Tahoe.
 - **Accept:** run through a "new user" script end-to-end without touching the mouse for core flows; VoiceOver can read the dashboard.
 

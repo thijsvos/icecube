@@ -15,9 +15,26 @@ struct ChartRowView: View {
     let row: ChartStore.Row
     /// Shared time axis, ending at the latest sample.
     let xDomain: ClosedRange<Date>
+    /// Display unit for temperature rows (RPM rows ignore it).
+    var unit: TemperatureUnit = .celsius
 
     /// The crosshair position while the pointer is over this row's plot.
     @State private var hoverDate: Date?
+
+    /// Whether this row's values get unit-converted for display.
+    private var convertsUnit: Bool {
+        row.unit == "°C" && unit == .fahrenheit
+    }
+
+    /// A display value in the row's effective unit.
+    private func displayValue(_ celsius: Double) -> Double {
+        convertsUnit ? unit.display(celsius) : celsius
+    }
+
+    /// The unit label shown in the header.
+    private var displayUnit: String {
+        convertsUnit ? "°F" : row.unit
+    }
 
     /// Per-row accent: CPU orange, GPU purple, fans teal.
     private var accent: Color {
@@ -60,7 +77,7 @@ struct ChartRowView: View {
     /// The primary series' live value, e.g. `"66 °C"` / `"4996 RPM"`.
     private var latestText: String {
         guard let stats = row.series.first?.stats else { return "—" }
-        return "\(format(stats.latest)) \(row.unit)"
+        return "\(format(stats.latest)) \(displayUnit)"
     }
 
     /// `min · avg · max` normally; the values under the crosshair on hover.
@@ -78,8 +95,9 @@ struct ChartRowView: View {
         return "min \(format(stats.min)) · avg \(format(stats.avg)) · max \(format(stats.max))"
     }
 
+    /// Formats a raw (°C/RPM) value in the display unit.
     private func format(_ value: Double) -> String {
-        String(Int(value.rounded()))
+        String(Int(displayValue(value).rounded()))
     }
 
     private func nearestBucket(in series: ChartStore.Series, to date: Date) -> ChartBucket? {
@@ -90,7 +108,7 @@ struct ChartRowView: View {
 
     private var accessibilitySummary: String {
         guard let stats = row.series.first?.stats else { return "\(row.title): collecting data" }
-        return "\(row.title): now \(format(stats.latest)) \(row.unit), "
+        return "\(row.title): now \(format(stats.latest)) \(displayUnit), "
             + "minimum \(format(stats.min)), average \(format(stats.avg)), maximum \(format(stats.max))"
     }
 
@@ -105,14 +123,14 @@ struct ChartRowView: View {
                     if !series.isSecondary {
                         AreaMark(
                             x: .value("Time", bucket.time),
-                            yStart: .value("Min", bucket.min),
-                            yEnd: .value("Max", bucket.max)
+                            yStart: .value("Min", displayValue(bucket.min)),
+                            yEnd: .value("Max", displayValue(bucket.max))
                         )
                         .foregroundStyle(bandGradient)
                     }
                     LineMark(
                         x: .value("Time", bucket.time),
-                        y: .value("Value", bucket.avg),
+                        y: .value("Value", displayValue(bucket.avg)),
                         series: .value("Series", series.id)
                     )
                     .foregroundStyle(series.isSecondary ? AnyShapeStyle(.secondary) : AnyShapeStyle(accent))
@@ -129,7 +147,7 @@ struct ChartRowView: View {
             }
         }
         .chartXScale(domain: xDomain)
-        .chartYScale(domain: row.yDomainMin ... row.yDomainMax)
+        .chartYScale(domain: displayValue(row.yDomainMin) ... displayValue(row.yDomainMax))
         .chartXAxis(.hidden)
         .chartYAxis {
             AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) {

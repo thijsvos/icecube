@@ -17,6 +17,7 @@ enum WindowOpener {
     enum ID {
         static let sensors = "sensors"
         static let curves = "curves"
+        static let settings = "settings"
     }
 
     /// Opens the window scene `id` and brings the app frontmost.

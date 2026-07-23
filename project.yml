@@ -73,6 +73,8 @@ targets:
         # UI code defaults to the main actor; helper/kit stay nonisolated.
         SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
         SWIFT_APPROACHABLE_CONCURRENCY: YES
+        # Extract literal SwiftUI strings into the String Catalog at build.
+        SWIFT_EMIT_LOC_STRINGS: YES
     dependencies:
       - package: ZephyrKit
       # embed + copy to executables puts the signed helper binary at

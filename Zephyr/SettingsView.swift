@@ -13,6 +13,8 @@ import SwiftUI
 struct SettingsSection: View {
     /// The shared observable state; owned by `ZephyrApp`.
     @Bindable var state: AppState
+    /// Needed to open the full settings window scene.
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -30,6 +32,11 @@ struct SettingsSection: View {
             Text("The fan icon is always shown; this chooses the text beside it.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
+            Button("All Settings…") {
+                WindowOpener.open(WindowOpener.ID.settings, using: openWindow)
+            }
+            .controlSize(.small)
+            .help("Launch at login, units, update cadence, temperature alerts")
             Divider()
             helperMaintenance
         }

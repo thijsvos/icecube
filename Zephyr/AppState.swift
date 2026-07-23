@@ -58,11 +58,35 @@ final class AppState {
     private(set) var chartXDomain: ClosedRange<Date> = Date.distantPast ... Date.distantFuture
 
     /// What text accompanies the menu bar icon; persisted across launches.
+    /// Icon-only also downshifts polling (nothing on screen needs 1 Hz).
     var menuBarDisplay: MenuBarDisplayMode {
-        didSet { UserDefaults.standard.set(menuBarDisplay.rawValue, forKey: Self.menuBarDisplayKey) }
+        didSet {
+            UserDefaults.standard.set(menuBarDisplay.rawValue, forKey: Self.menuBarDisplayKey)
+            restartPolling()
+        }
     }
 
+    // MARK: - Settings (Phase 5)
+
+    /// Display unit; storage and math stay °C, conversion happens in UI only.
+    var temperatureUnit: TemperatureUnit {
+        didSet { UserDefaults.standard.set(temperatureUnit.rawValue, forKey: Self.unitKey) }
+    }
+
+    /// Display sampling cadence (the daemon's safety tick is independent).
+    var pollInterval: PollInterval {
+        didSet {
+            UserDefaults.standard.set(pollInterval.rawValue, forKey: Self.intervalKey)
+            restartPolling()
+        }
+    }
+
+    /// Temperature-threshold notifications.
+    let alerts = AlertManager()
+
     private static let menuBarDisplayKey = "menuBarDisplay"
+    private static let unitKey = "temperatureUnit"
+    private static let intervalKey = "pollInterval"
     @ObservationIgnored private let chartStore = ChartStore()
     private var chartWindow: TimeInterval {
         ChartStore.windows[selectedWindowIndex]
@@ -72,18 +96,38 @@ final class AppState {
 
     /// Where readings come from. Injected so tests and simulated mode swap freely.
     private let provider: any SMCProviding
-    /// Wraps `provider` in the 1 Hz snapshot stream (`SMCPollEvent`s).
-    private let poller: SMCPollingActor
+    /// Wraps `provider` in the snapshot stream; rebuilt when cadence changes.
+    private var poller: SMCPollingActor
     /// The task consuming the polling stream; `nil` when stopped.
     @ObservationIgnored private var pollTask: Task<Void, Never>?
 
     init(provider: any SMCProviding, isSimulated: Bool) {
         self.provider = provider
         self.isSimulated = isSimulated
-        poller = SMCPollingActor(provider: provider)
+        let interval = PollInterval(
+            rawValue: UserDefaults.standard.integer(forKey: Self.intervalKey)
+        ) ?? .oneSecond
+        poller = SMCPollingActor(provider: provider, interval: .seconds(interval.rawValue))
+        pollInterval = interval
         menuBarDisplay = MenuBarDisplayMode(
             rawValue: UserDefaults.standard.string(forKey: Self.menuBarDisplayKey) ?? ""
         ) ?? .temperature
+        temperatureUnit = TemperatureUnit(
+            rawValue: UserDefaults.standard.string(forKey: Self.unitKey) ?? ""
+        ) ?? .celsius
+    }
+
+    /// Rebuilds the polling stream with the effective cadence. Icon-only
+    /// display needs no 1 Hz updates while the popover is closed, so it
+    /// polls at ≥ 5 s — a real energy win for a menu-bar resident.
+    private func restartPolling() {
+        let seconds = menuBarDisplay == .iconOnly
+            ? max(pollInterval.rawValue, 5)
+            : pollInterval.rawValue
+        pollTask?.cancel()
+        pollTask = nil
+        poller = SMCPollingActor(provider: provider, interval: .seconds(seconds))
+        start()
     }
 
     deinit {
@@ -106,6 +150,7 @@ final class AppState {
                     hottest = new.hottest(stickingTo: hottest?.key)
                     consecutiveFailures = 0
                     errorMessage = nil
+                    alerts.evaluate(dieCelsius: hottestDie)
                     // History records even while the display is paused —
                     // pause freezes the picture, not the recording.
                     await chartStore.ingest(new)
@@ -212,9 +257,15 @@ final class AppState {
     }
 
     /// The menu bar readout, e.g. `"62°"`; `"--°"` before the first reading.
-    /// Uses the hysteresis-stabilized `hottest` so label and badge agree.
+    /// Uses the hysteresis-stabilized `hottest` so label and badge agree,
+    /// and the user's display unit.
     var hottestText: String {
         guard let hottest else { return "--°" }
-        return "\(Int(hottest.celsius.rounded()))°"
+        return temperatureUnit.text(hottest.celsius)
+    }
+
+    /// The chart history as CSV (Phase 5 export).
+    func chartsCSV() async -> String {
+        await chartStore.csv()
     }
 }

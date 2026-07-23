@@ -148,6 +148,35 @@ public actor ChartStore {
         return rows
     }
 
+    // MARK: - CSV export
+
+    /// The full raw history (up to 60 min per series) as CSV:
+    /// `unixTime,series,value` — temperatures in °C, fan speeds in RPM.
+    public func csv() -> String {
+        var lines = ["unixTime,series,value"]
+        func dump(_ name: String, _ buffer: RingBuffer<ChartSample>) {
+            for sample in buffer.elements {
+                lines.append("\(Int(sample.time.timeIntervalSince1970)),\(name),\(sample.value)")
+            }
+        }
+        if hasCPU {
+            dump("cpu.max.celsius", cpuMax)
+            dump("cpu.avg.celsius", cpuAvg)
+        }
+        if hasGPU {
+            dump("gpu.max.celsius", gpuMax)
+        }
+        for fan in fanMeta {
+            if let actual = fanActual[fan.id] {
+                dump("fan.\(fan.id).actual.rpm", actual)
+            }
+            if let target = fanTarget[fan.id] {
+                dump("fan.\(fan.id).target.rpm", target)
+            }
+        }
+        return lines.joined(separator: "\n") + "\n"
+    }
+
     private func series(
         id: String, label: String, from buffer: RingBuffer<ChartSample>?,
         start: Date, end: Date, budget: Int, secondary: Bool = false

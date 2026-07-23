@@ -1,6 +1,7 @@
 // DashboardView.swift — the popover's chart stack: window switcher, pause, and one ChartRowView per row.
 
 import SwiftUI
+import UniformTypeIdentifiers
 import ZephyrKit
 
 /// The live-charts section of the popover (PLAN.md §1.2): a window picker
@@ -15,14 +16,24 @@ struct DashboardView: View {
 
     private static let windowTitles = ["1 min", "5 min", "15 min", "1 hr"]
 
+    /// CSV export flow state.
+    @State private var isExportingCSV = false
+    @State private var exportDocument: DiagnosticsDocument?
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             controls
+                .fileExporter(
+                    isPresented: $isExportingCSV,
+                    document: exportDocument,
+                    contentType: .commaSeparatedText,
+                    defaultFilename: "zephyr-history"
+                ) { _ in }
             if state.chartRows.isEmpty {
                 collectingPlaceholder
             } else {
                 ForEach(state.chartRows) { row in
-                    ChartRowView(row: row, xDomain: state.chartXDomain)
+                    ChartRowView(row: row, xDomain: state.chartXDomain, unit: state.temperatureUnit)
                 }
             }
         }
@@ -43,6 +54,18 @@ struct DashboardView: View {
             .disabled(state.isPaused) // switching windows would contradict the freeze
             .frame(maxWidth: 240)
             Spacer()
+            Button {
+                Task {
+                    exportDocument = await DiagnosticsDocument(data: Data(state.chartsCSV().utf8))
+                    isExportingCSV = true
+                }
+            } label: {
+                Image(systemName: "square.and.arrow.up")
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .help("Export the chart history (up to 60 min) as CSV")
+            .accessibilityLabel("Export history as CSV")
             Button {
                 state.togglePaused()
             } label: {

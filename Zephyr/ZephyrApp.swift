@@ -56,6 +56,13 @@ struct ZephyrApp: App {
             CurveEditorView(state: appState)
         }
         .defaultSize(width: 620, height: 460)
+
+        // Full settings (Phase 5). The quick menu-bar options also remain
+        // inline in the popover, where changing them can't dismiss anything.
+        Window("Zephyr Settings", id: WindowOpener.ID.settings) {
+            SettingsWindowView(state: appState)
+        }
+        .windowResizability(.contentSize)
         // The user resizes the window; content changes never do. Without
         // this, label-width changes while sliding could grow the window —
         // a resize feedback loop that glitches the whole canvas mid-drag.
