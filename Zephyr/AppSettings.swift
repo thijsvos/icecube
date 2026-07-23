@@ -48,3 +48,24 @@ enum PollInterval: Int, CaseIterable, Identifiable {
         "\(rawValue) s"
     }
 }
+
+/// What text (if any) accompanies the menu bar fan icon.
+enum MenuBarDisplayMode: String, CaseIterable, Identifiable {
+    case iconOnly
+    case temperature
+    case fanSpeed
+    case both
+
+    var id: String {
+        rawValue
+    }
+
+    var title: String {
+        switch self {
+        case .iconOnly: "Icon only"
+        case .temperature: "Hottest temperature"
+        case .fanSpeed: "Fan speed"
+        case .both: "Temperature and fan speed"
+        }
+    }
+}

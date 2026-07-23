@@ -64,10 +64,39 @@ struct SettingsWindowView: View {
                         .foregroundStyle(.orange)
                 }
             }
+            Section("Helper daemon") {
+                LabeledContent("Status", value: helperStateText)
+                HStack(spacing: 8) {
+                    Button("Re-register") {
+                        Task { await state.helper.reregister() }
+                    }
+                    .help("Force launchd to pick up a freshly built helper")
+                    Button("Unregister") {
+                        Task { await state.helper.unregister() }
+                    }
+                    .help("Remove the helper daemon; fans return to automatic")
+                }
+                .controlSize(.small)
+            }
         }
         .formStyle(.grouped)
         .frame(width: 420)
         .fixedSize()
+    }
+
+    private var helperStateText: String {
+        let registration = switch state.helper.registration {
+        case .unknown: "unknown"
+        case .notRegistered: "not registered"
+        case .requiresApproval: "waiting for approval"
+        case .enabled: "enabled"
+        }
+        let connection = switch state.helper.connection {
+        case .disconnected: "disconnected"
+        case let .connected(version): "connected (v\(version))"
+        case let .versionMismatch(helper): "version mismatch (v\(helper))"
+        }
+        return "\(registration) · \(connection)"
     }
 
     private var alertBinding: Binding<Int> {
