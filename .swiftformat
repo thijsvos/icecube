@@ -1,0 +1,15 @@
+# .swiftformat — formatting rules for Zephyr. Run `swiftformat .` before committing;
+# CI may later run `swiftformat --lint .`. Kept minimal on purpose.
+
+--swiftversion 6.0
+--indent 4
+--maxwidth 120
+
+# Keep each file's one-line header comment exactly as written.
+--header ignore
+
+--self remove
+--stripunusedargs closure-only
+--wraparguments before-first
+--wrapcollections before-first
+--trimwhitespace always
