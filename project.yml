@@ -1,11 +1,11 @@
-# project.yml — XcodeGen spec; the gitignored Zephyr.xcodeproj is generated from this file.
+# project.yml — XcodeGen spec; the gitignored IceCube.xcodeproj is generated from this file.
 #
 # Workflow: edit THIS file, then run `xcodegen generate`. Never change build settings,
 # schemes, or file membership in the Xcode GUI — regeneration silently wipes GUI edits.
 # Signing (DEVELOPMENT_TEAM) lives only in the gitignored Configs/Local.xcconfig,
 # pulled in via Configs/Shared.xcconfig; CI builds with CODE_SIGNING_ALLOWED=NO.
 
-name: Zephyr
+name: IceCube
 
 options:
   bundleIdPrefix: io.github.thijsvos
@@ -23,81 +23,84 @@ settings:
     SWIFT_STRICT_CONCURRENCY: complete
 
 packages:
-  ZephyrKit:
-    path: ZephyrKit
+  IceCubeKit:
+    path: IceCubeKit
 
 targets:
   # Root LaunchDaemon helper (SMAppService). Plain executable ("tool"), embedded
-  # into Zephyr.app/Contents/MacOS by the app target's dependency below.
-  ZephyrHelper:
+  # into Ice Cube.app/Contents/MacOS by the app target's dependency below.
+  IceCubeHelper:
     type: tool
     platform: macOS
-    sources: [ZephyrHelper]
+    sources: [IceCubeHelper]
     dependencies:
-      - package: ZephyrKit
+      - package: IceCubeKit
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: io.github.thijsvos.zephyr.helper
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.thijsvos.icecube.helper
         SKIP_INSTALL: YES
         # Daemon code must never be MainActor-bound by default.
         SWIFT_DEFAULT_ACTOR_ISOLATION: nonisolated
-        # Command-line tools sign with PRODUCT_NAME ("ZephyrHelper") as their
+        # Command-line tools sign with PRODUCT_NAME ("IceCubeHelper") as their
         # code-signing identifier by default — but the app's XPC pinning
         # requires the bundle id. Force it explicitly.
-        OTHER_CODE_SIGN_FLAGS: --identifier io.github.thijsvos.zephyr.helper
+        OTHER_CODE_SIGN_FLAGS: --identifier io.github.thijsvos.icecube.helper
 
-  # The menu-bar app (LSUIElement — no Dock icon).
-  Zephyr:
+  # The menu-bar app (LSUIElement — no Dock icon). Target/scheme are named
+  # IceCube (automation-safe, no space); the PRODUCT the user sees is "Ice Cube".
+  IceCube:
     type: application
     platform: macOS
     sources:
-      - path: Zephyr
+      - path: IceCube
       # The launchd plist must land in Contents/Library/LaunchDaemons (where
       # SMAppService looks for it), NOT in Resources — hence the explicit
       # per-file copyFiles build phase overriding the default for this file.
-      - path: Zephyr/Support/io.github.thijsvos.zephyr.helper.plist
+      - path: IceCube/Support/io.github.thijsvos.icecube.helper.plist
         buildPhase:
           copyFiles:
             destination: wrapper
             subpath: Contents/Library/LaunchDaemons
     info:
-      path: Zephyr/Info.plist
+      path: IceCube/Info.plist
       properties:
         LSUIElement: true
+        CFBundleDisplayName: Ice Cube
         CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "1"
         NSHumanReadableCopyright: "MIT — github.com/thijsvos"
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: io.github.thijsvos.zephyr
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.thijsvos.icecube
+        PRODUCT_NAME: Ice Cube
         # UI code defaults to the main actor; helper/kit stay nonisolated.
         SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
         SWIFT_APPROACHABLE_CONCURRENCY: YES
         # Extract literal SwiftUI strings into the String Catalog at build.
         SWIFT_EMIT_LOC_STRINGS: YES
     dependencies:
-      - package: ZephyrKit
+      - package: IceCubeKit
       # embed + copy to executables puts the signed helper binary at
-      # Zephyr.app/Contents/MacOS/ZephyrHelper (required by the launchd plist's
+      # Ice Cube.app/Contents/MacOS/IceCubeHelper (required by the launchd plist's
       # BundleProgram path). Copy-phase code signing defaults to on.
-      - target: ZephyrHelper
+      - target: IceCubeHelper
         embed: true
         copy:
           destination: executables
 
 # Schemes are generated from here so they are versioned (no .xcuserdatad needed).
 schemes:
-  Zephyr:
+  IceCube:
     build:
       targets:
-        Zephyr: all
+        IceCube: all
     run:
       config: Debug
-  "Zephyr (Simulated)":
+  "IceCube (Simulated)":
     build:
       targets:
-        Zephyr: all
+        IceCube: all
     run:
       config: Debug
       environmentVariables:
-        ZEPHYR_SIMULATED: "1"
+        ICECUBE_SIMULATED: "1"

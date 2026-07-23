@@ -1,6 +1,6 @@
 # SMC Keys — the living map
 
-What Zephyr knows about Apple's undocumented SMC keys, including field
+What Ice Cube knows about Apple's undocumented SMC keys, including field
 findings from real hardware. Additions welcome (attach a diagnostics JSON).
 
 ## Fan keys (Apple Silicon)
@@ -32,7 +32,7 @@ findings from real hardware. Additions welcome (attach a diagnostics JSON).
 - The reference release sequence ("mode 0 + Tg 0") left both fans **stopped
   at 0 RPM indefinitely**; thermalmonitord did not reclaim them even as die
   temps passed 90 °C. Hence: never write Tg 0; park at `Mn`; hand back with
-  mode 3; drop the SMC connection; and *still* keep watching (Zephyr's
+  mode 3; drop the SMC connection; and *still* keep watching (Ice Cube's
   guardian drives the fans itself if macOS stays absent).
 - Reads need no privileges; **all** fan-key writes need root
   (`kIOReturnNotPrivileged` = `0xE00002C1` — beware docs citing `…C2`,

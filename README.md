@@ -1,4 +1,4 @@
-# Zephyr
+# Ice Cube
 
 An open-source menu-bar fan controller and thermal monitor for **Apple Silicon
 MacBooks**. Live stacked temperature/RPM charts, a draggable fan-curve editor,
@@ -30,7 +30,7 @@ dependencies**; small footprint is a design goal, not an accident.
 
 ## Safety design
 
-Fan control can cook a machine when done carelessly. Zephyr's rules are
+Fan control can cook a machine when done carelessly. Ice Cube's rules are
 enforced **in the root daemon**, where the UI (or a bug in it) cannot reach:
 
 - Every RPM write is clamped to the fan's firmware-reported safe range — and
@@ -43,10 +43,10 @@ enforced **in the root daemon**, where the UI (or a bug in it) cannot reach:
   fans revert to automatic. Only curve mode may run app-less, and only when
   you opt in.
 - Every write is verified by read-back and audit-logged (`log stream
-  --predicate 'subsystem == "io.github.thijsvos.zephyr"'`).
+  --predicate 'subsystem == "io.github.thijsvos.icecube"'`).
 - **The guardian**: we found during development that macOS 26 does not
   reliably resume fan management after *any* fan app releases control (fans
-  can sit stopped while the die climbs past 90 °C). Zephyr therefore never
+  can sit stopped while the die climbs past 90 °C). Ice Cube therefore never
   assumes macOS took the wheel back: if the machine is warm and nothing is
   cooling it, the daemon drives the fans itself along a built-in curve and
   hands back only when it's genuinely cool.
@@ -54,18 +54,18 @@ enforced **in the root daemon**, where the UI (or a bug in it) cannot reach:
 ## Why a root helper?
 
 Writing fan speeds on Apple Silicon requires root — that's firmware-enforced,
-not a choice. Zephyr keeps that surface tiny: a single daemon (registered via
+not a choice. Ice Cube keeps that surface tiny: a single daemon (registered via
 `SMAppService`, approved once by you in System Settings) that speaks a
 five-method XPC protocol, pinned to the app's code signature in both
 directions. The app itself contains **no fan-write code at all**.
 
 ## Install
 
-Zephyr is not in the App Store (sandboxed apps cannot touch the SMC) and
+Ice Cube is not in the App Store (sandboxed apps cannot touch the SMC) and
 release builds are not yet notarized. Building from source:
 
 ```bash
-git clone https://github.com/thijsvos/zephyr && cd zephyr
+git clone https://github.com/thijsvos/icecube && cd icecube
 brew bundle              # xcodegen + swiftformat
 xcodegen generate
 sh scripts/set-team.sh YOURTEAMID   # your Apple Development team (free ID works)
@@ -77,11 +77,11 @@ Settings. Monitoring works without any of that; only control needs the helper.
 
 ## Uninstall
 
-1. Zephyr popover → Settings… → Helper daemon → **Unregister** (returns fans
+1. Ice Cube popover → Settings… → Helper daemon → **Unregister** (returns fans
    to macOS and removes the daemon).
-2. Quit Zephyr, delete `/Applications/Zephyr.app`.
-3. Optional leftovers: `~/Library/Application Support/Zephyr` (your presets)
-   and `sudo rm -rf "/Library/Application Support/Zephyr"` (the daemon's
+2. Quit Ice Cube, delete `/Applications/Ice Cube.app`.
+3. Optional leftovers: `~/Library/Application Support/IceCube` (your presets)
+   and `sudo rm -rf "/Library/Application Support/IceCube"` (the daemon's
    persisted config).
 
 ## Supporting a new Mac model
@@ -95,7 +95,7 @@ attached. That file is exactly what's needed to add a curated mapping.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). The short version: `swift test` must
 stay green, SwiftFormat clean, the safety invariants are non-negotiable, and
-everything must work in simulated mode (`ZEPHYR_SIMULATED=1`) — CI has no
+everything must work in simulated mode (`ICECUBE_SIMULATED=1`) — CI has no
 fans.
 
 ## License

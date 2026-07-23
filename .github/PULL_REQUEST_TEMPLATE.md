@@ -2,9 +2,9 @@
 
 ## Checklist
 
-- [ ] `swift test` green (`cd ZephyrKit && swift test`)
+- [ ] `swift test` green (`cd IceCubeKit && swift test`)
 - [ ] `swiftformat --lint .` clean
-- [ ] Works in simulated mode (`ZEPHYR_SIMULATED=1`)
+- [ ] Works in simulated mode (`ICECUBE_SIMULATED=1`)
 - [ ] Safety invariants untouched (or the PR argues, loudly, why a change is safe)
-- [ ] No new dependencies, no SMC writes outside `ZephyrHelper/`
+- [ ] No new dependencies, no SMC writes outside `IceCubeHelper/`
 - [ ] Helper-daemon changes: tested via `install-debug.sh` + Re-register on real hardware

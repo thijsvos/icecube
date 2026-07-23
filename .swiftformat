@@ -1,4 +1,4 @@
-# .swiftformat — formatting rules for Zephyr. Run `swiftformat .` before committing;
+# .swiftformat — formatting rules for Ice Cube. Run `swiftformat .` before committing;
 # CI may later run `swiftformat --lint .`. Kept minimal on purpose.
 
 --swiftversion 6.0

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- io.github.thijsvos.icecube.helper.plist — launchd definition for the root helper daemon (SMAppService).
+     Copied into Ice Cube.app/Contents/Library/LaunchDaemons at build time.
+     RunAtLoad is required for the Phase 4 boot promise: MachServices alone is on-demand XPC launch only. -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>io.github.thijsvos.icecube.helper</string>
+	<key>BundleProgram</key>
+	<string>Contents/MacOS/IceCubeHelper</string>
+	<key>MachServices</key>
+	<dict>
+		<key>io.github.thijsvos.icecube.helper.xpc</key>
+		<true/>
+	</dict>
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>io.github.thijsvos.icecube</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+</dict>
+</plist>

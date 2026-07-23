@@ -1,6 +1,6 @@
-# CI for Zephyr. The repo is local-only right now — this workflow activates
+# CI for Ice Cube. The repo is local-only right now — this workflow activates
 # automatically on the first push to GitHub. Builds unsigned (no Local.xcconfig
-# on CI), runs the ZephyrKit unit tests, and verifies the app bundle layout.
+# on CI), runs the IceCubeKit unit tests, and verifies the app bundle layout.
 name: CI
 
 on:
@@ -30,12 +30,12 @@ jobs:
 
       - name: Build app (unsigned)
         run: >
-          xcodebuild -project Zephyr.xcodeproj -scheme Zephyr
+          xcodebuild -project IceCube.xcodeproj -scheme IceCube
           -configuration Debug -derivedDataPath build
           build CODE_SIGNING_ALLOWED=NO
 
-      - name: Run ZephyrKit tests
-        run: cd ZephyrKit && swift test
+      - name: Run IceCubeKit tests
+        run: cd IceCubeKit && swift test
 
       - name: Verify bundle layout
         run: sh scripts/verify-bundle.sh

@@ -13,11 +13,11 @@ labels: bug
 **Environment**
 - Mac model (About This Mac → Model Identifier, e.g. `Mac14,9`):
 - macOS version:
-- Zephyr version (Settings… → Updates):
+- Ice Cube version (Settings… → Updates):
 - Helper status line (Settings… → Helper daemon):
 
 **Logs (if fan control is involved)**
 ```
-log show --last 10m --info --predicate 'subsystem == "io.github.thijsvos.zephyr"'
+log show --last 10m --info --predicate 'subsystem == "io.github.thijsvos.icecube"'
 ```
 (Daemon-side entries may need `sudo`.) Paste the relevant lines:

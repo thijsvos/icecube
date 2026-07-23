@@ -1,4 +1,4 @@
-# Releasing Zephyr
+# Releasing Ice Cube
 
 ## Version bump checklist
 
@@ -17,13 +17,13 @@ Notarization needs a paid Developer account; until then releases are
 ```bash
 git tag v0.x.y && git push --tags
 xcodegen generate
-xcodebuild -project Zephyr.xcodeproj -scheme Zephyr -configuration Release \
+xcodebuild -project IceCube.xcodeproj -scheme IceCube -configuration Release \
   -derivedDataPath build build          # signed with your dev cert (local use)
-ditto -c -k --keepParent build/Build/Products/Release/Zephyr.app build/Zephyr-v0.x.y.zip
+ditto -c -k --keepParent build/Build/Products/Release/Ice Cube.app build/Ice Cube-v0.x.y.zip
 ```
 
 Attach the zip to a GitHub Release. Testers on other Macs must clear
-quarantine (`xattr -dr com.apple.quarantine /Applications/Zephyr.app`) and
+quarantine (`xattr -dr com.apple.quarantine /Applications/Ice Cube.app`) and
 will see Gatekeeper warnings — say so in the release notes, every time.
 Dev-cert-signed builds only run helper registration on Macs that trust the
 cert, i.e. effectively the dev machine; remote testers should build from

@@ -1,8 +1,8 @@
 #!/bin/sh
-# generate-icon.sh — renders the placeholder app icon (fan glyph on gradient) into AppIcon.icns.
+# generate-icon.sh — renders the Ice Cube app icon (ice cube glyph on icy gradient) into AppIcon.icns.
 set -eu
 cd "$(dirname "$0")/.."
-mkdir -p build/AppIcon.iconset Zephyr/Resources
+mkdir -p build/AppIcon.iconset IceCube/Resources
 swift - <<'EOF'
 import AppKit
 
@@ -25,18 +25,18 @@ for entry in entries {
     let rect = NSRect(x: inset, y: inset, width: CGFloat(px) - 2 * inset, height: CGFloat(px) - 2 * inset)
     let path = NSBezierPath(roundedRect: rect, xRadius: rect.width * 0.225, yRadius: rect.width * 0.225)
     NSGradient(colors: [
-        NSColor(calibratedRed: 0.08, green: 0.65, blue: 0.65, alpha: 1),
-        NSColor(calibratedRed: 0.02, green: 0.18, blue: 0.32, alpha: 1),
-    ])!.draw(in: path, angle: -90)
+        NSColor(calibratedRed: 0.75, green: 0.93, blue: 1.0, alpha: 1),  // pale ice
+        NSColor(calibratedRed: 0.10, green: 0.45, blue: 0.85, alpha: 1), // glacial blue
+    ])!.draw(in: path, angle: -70)
 
     // White fan glyph, centered.
     let config = NSImage.SymbolConfiguration(pointSize: CGFloat(px) * 0.5, weight: .medium)
-    if let symbol = NSImage(systemSymbolName: "fanblades.fill", accessibilityDescription: nil)?
+    if let symbol = NSImage(systemSymbolName: "cube.transparent", accessibilityDescription: nil)?
         .withSymbolConfiguration(config) {
         let tinted = NSImage(size: symbol.size)
         tinted.lockFocus()
         symbol.draw(at: .zero, from: .zero, operation: .sourceOver, fraction: 1)
-        NSColor.white.set()
+        NSColor(calibratedRed: 0.05, green: 0.15, blue: 0.35, alpha: 1).set()
         NSRect(origin: .zero, size: symbol.size).fill(using: .sourceAtop)
         tinted.unlockFocus()
         let symbolRect = NSRect(
@@ -57,5 +57,5 @@ for entry in entries {
 }
 print("iconset rendered")
 EOF
-iconutil -c icns build/AppIcon.iconset -o Zephyr/Resources/AppIcon.icns
+iconutil -c icns build/AppIcon.iconset -o IceCube/Resources/AppIcon.icns
 echo "AppIcon.icns generated"

@@ -1,4 +1,4 @@
-# Zephyr — Implementation Plan
+# Ice Cube — Implementation Plan
 
 A beautiful, open-source macOS menu bar fan controller and thermal monitor. Real-time stacked graphs in the spirit of MSI Afterburner's hardware monitor, a draggable fan-curve editor, presets, and a hardened root helper that does the actual writing — with safety guardrails everywhere.
 
@@ -34,7 +34,7 @@ This document is the single source of truth for Claude Code. Companion docs: `CL
 - **Stacked live charts** (Swift Charts): one row per metric group — CPU temp(s), GPU/SoC temp(s), each fan's RPM. Area-gradient fill, per-series accent colors, 1 s sampling, selectable window (1 / 5 / 15 / 60 min), pause button, crosshair value readout on hover (`chartOverlay`), min/avg/max in each row's header.
 - **Downsampling is a hard requirement, not a nicety** (Phase 2): ≤ ~600 visible points per series (min-max or LTTB, computed in `ChartStore` off the main actor). The 60-min window at 1 s is 3600/series ≈ 21.6K points across ~6 series — squarely in Swift Charts' documented degradation zone. No implicit animations on live marks; hover/crosshair state scoped per chart row so one crosshair doesn't invalidate every row.
 - Quick controls: preset picker (Auto / Quiet / Balanced / Max / Custom…), per-fan manual slider when in Manual mode (with a visible "manual mode" warning tint).
-- "Open Zephyr" button → full window. **Reality check:** programmatic popover dismissal has no first-party API (FB11984872), and window focus from an LSUIElement app needs `NSApp.activate(ignoringOtherApps: true)` (plus an activation-policy flip to `.regular` if needed, reverting to `.accessory` on last window close). Encapsulate the whole timing-sensitive dance in one `WindowOpener` type — never cargo-culted around the codebase.
+- "Open Ice Cube" button → full window. **Reality check:** programmatic popover dismissal has no first-party API (FB11984872), and window focus from an LSUIElement app needs `NSApp.activate(ignoringOtherApps: true)` (plus an activation-policy flip to `.regular` if needed, reverting to `.accessory` on last window close). Encapsulate the whole timing-sensitive dance in one `WindowOpener` type — never cargo-culted around the codebase.
 
 ### 1.3 Main window
 - **Curve editor**: temperature (x, 30–110 °C) vs fan output (y, % of that fan's max RPM). 3–8 draggable control points, add/remove by double-click, monotonic-x enforcement, live preview line of "where we'd be right now." Per-fan curves or linked-all mode. Parameters: input sensor (Max of all / CPU / GPU / pick-list), hysteresis (°C), ramp smoothing (max ΔRPM per second). **Implementation note:** plain SwiftUI `Canvas` + draggable handle circles, NOT Swift Charts — hit-testing handles and enforcing monotonic-x is simpler without ChartProxy round-trips; Swift Charts stays display-only.
@@ -57,7 +57,7 @@ This document is the single source of truth for Claude Code. Companion docs: `CL
 ## 2. System architecture
 
 ```
-┌────────────────────────── Zephyr.app (user) ──────────────────────────┐
+┌────────────────────────── Ice Cube.app (user) ──────────────────────────┐
 │  SwiftUI UI (MenuBarExtra + windows)                                  │
 │  ChartStore (ring buffers)  CurveEditorModel  SettingsStore           │
 │  SMCPollingActor ──reads──▶ SMCProviding  (READ-ONLY: temps, RPMs)    │
@@ -65,7 +65,7 @@ This document is the single source of truth for Claude Code. Companion docs: `CL
 └───────────────────────────────┬─────────────────────────────────┼─────┘
                                 │ XPC (mach service)              │
 ┌───────────────────────────────▼─────────────────────────────────▼─────┐
-│  ZephyrHelper (root LaunchDaemon via SMAppService)                    │
+│  IceCubeHelper (root LaunchDaemon via SMAppService)                    │
 │  ControlLoop (2 s): sensor read → active curve → clamp → SMC write    │
 │  SafetyMonitor: watchdog, temp ceiling, revert-on-exit                │
 │  SMCService (READ+WRITE, the only writer in the system)               │
@@ -75,7 +75,7 @@ This document is the single source of truth for Claude Code. Companion docs: `CL
 Key decisions:
 - **The daemon owns control.** The app is a configurator/visualizer. This gives "fan curve active at boot without the app running" for free and keeps the root surface tiny.
 - **Reads don't need root.** The app polls the SMC read-only at 1 s for silky charts; the daemon reads independently at 2 s for control. Never assume the app's numbers reached the daemon.
-- **ZephyrKit** (local Swift package, consumed by both targets — declared once in `project.yml`) holds everything testable: SMC key model + encodings, curve interpolation/hysteresis math, `SMCProviding` protocol, `MockSMCProvider` (thermal simulation), XPC protocol types, preset codecs. UI and daemon are thin shells over it; `swift test` in `ZephyrKit/` is the test entry point.
+- **IceCubeKit** (local Swift package, consumed by both targets — declared once in `project.yml`) holds everything testable: SMC key model + encodings, curve interpolation/hysteresis math, `SMCProviding` protocol, `MockSMCProvider` (thermal simulation), XPC protocol types, preset codecs. UI and daemon are thin shells over it; `swift test` in `IceCubeKit/` is the test entry point.
 
 ---
 
@@ -97,7 +97,7 @@ Key decisions:
 | `F{i}Md` / `F{i}md` | per-fan mode | `ui8` (write) | 0 = auto, 1 = forced, 3 = **system** (thermalmonitord/AppleCLPC in control — the Apple Silicon *resting* state; treating 3 as plain "auto" makes read-backs look like failures). Casing varies by generation — M5 uses lowercase `F{i}md`; **probe at runtime** |
 | `Ftst` | force/test unlock flag | `ui8` (write) | write 1 → thermalmonitord yields mode writes (needed on M3/M4; present on M1/M2; absent on M5) |
 
-Encodings: `flt` = little-endian IEEE-754 float32; `ui8/ui16/ui32` unsigned integers. The Intel-era `fpe2` codec (big-endian 16-bit fixed point, value = raw »2) **remains implemented + unit-tested in ZephyrKit** — useful for future reads and a community Intel port — but no Intel write sequence ships. Build encoders/decoders with exhaustive unit tests; this is where fan apps historically have bugs.
+Encodings: `flt` = little-endian IEEE-754 float32; `ui8/ui16/ui32` unsigned integers. The Intel-era `fpe2` codec (big-endian 16-bit fixed point, value = raw »2) **remains implemented + unit-tested in IceCubeKit** — useful for future reads and a community Intel port — but no Intel write sequence ships. Build encoders/decoders with exhaustive unit tests; this is where fan apps historically have bugs.
 
 **Write sequence — generation-aware state machine** (per exelban/stats `unlockFanControl()`, PR #2924 / issue #2928, and agoodkind/macos-smc-fan):
 1. Probe mode-key casing once (`F{i}Md` vs `F{i}md`).
@@ -123,35 +123,35 @@ Vary per chip generation. Attested Apple Silicon families: **M1** `Tp*`/`Tg0*`; 
 ## 4. Privileged helper & security model
 
 ### 4.1 Registration (SMAppService, macOS 13+)
-- Helper = plain executable target `ZephyrHelper`, embedded at `Zephyr.app/Contents/MacOS/ZephyrHelper`.
-- Launchd plist lives at `Zephyr/Support/io.github.thijsvos.zephyr.helper.plist` in the repo, copied into the bundle at `Zephyr.app/Contents/Library/LaunchDaemons/io.github.thijsvos.zephyr.helper.plist`:
+- Helper = plain executable target `IceCubeHelper`, embedded at `Ice Cube.app/Contents/MacOS/IceCubeHelper`.
+- Launchd plist lives at `IceCube/Support/io.github.thijsvos.icecube.helper.plist` in the repo, copied into the bundle at `Ice Cube.app/Contents/Library/LaunchDaemons/io.github.thijsvos.icecube.helper.plist`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>io.github.thijsvos.zephyr.helper</string>
-  <key>BundleProgram</key><string>Contents/MacOS/ZephyrHelper</string>
+  <key>Label</key><string>io.github.thijsvos.icecube.helper</string>
+  <key>BundleProgram</key><string>Contents/MacOS/IceCubeHelper</string>
   <key>MachServices</key><dict>
-    <key>io.github.thijsvos.zephyr.helper.xpc</key><true/>
+    <key>io.github.thijsvos.icecube.helper.xpc</key><true/>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>AssociatedBundleIdentifiers</key>
-  <array><string>io.github.thijsvos.zephyr</string></array>
+  <array><string>io.github.thijsvos.icecube</string></array>
 </dict></plist>
 ```
 
 - **`RunAtLoad` is load-bearing:** `MachServices` alone gives on-demand XPC launch only — the "curve active at boot before the app runs" promise (Phase 4) is impossible without it.
-- App calls `SMAppService.daemon(plistName: "io.github.thijsvos.zephyr.helper.plist")`: `.register()`, surface `.status`, and on `.requiresApproval` show onboarding UI + `SMAppService.openSystemSettingsLoginItems()`. Include a Debug menu with Register / Unregister / Status / "Re-register" (needed after rebuilds — see XCODE_GUIDE §6).
+- App calls `SMAppService.daemon(plistName: "io.github.thijsvos.icecube.helper.plist")`: `.register()`, surface `.status`, and on `.requiresApproval` show onboarding UI + `SMAppService.openSystemSettingsLoginItems()`. Include a Debug menu with Register / Unregister / Status / "Re-register" (needed after rebuilds — see XCODE_GUIDE §6).
 
 ### 4.2 XPC hardening
 - Helper: `NSXPCListener(machServiceName:)`; in the delegate, call `setCodeSigningRequirement(_:)` on each new connection before resuming. **Two requirement variants per TN3127 — they are NOT interchangeable:**
-  - **DEV (Apple Development signing, Phases 0–5):** `identifier "io.github.thijsvos.zephyr" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.1] and certificate leaf[subject.OU] = "TEAMID"`
-  - **RELEASE (Developer ID, Phase 6):** `identifier "io.github.thijsvos.zephyr" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] and certificate leaf[field.1.2.840.113635.100.6.1.13] and certificate leaf[subject.OU] = "TEAMID"`
-  - Derive both from a dumped designated requirement (`codesign -d -r- Zephyr.app`), **never hand-write**; validate candidates offline with `codesign --verify -R`. The Team ID is the certificate's **OU value**, NOT the parenthesized suffix in the certificate name. The real Team ID lives only in gitignored `Configs/Local.xcconfig` → injected build setting → generated Swift constant; DEBUG builds may relax to identifier-only with a loud log warning.
+  - **DEV (Apple Development signing, Phases 0–5):** `identifier "io.github.thijsvos.icecube" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.1] and certificate leaf[subject.OU] = "TEAMID"`
+  - **RELEASE (Developer ID, Phase 6):** `identifier "io.github.thijsvos.icecube" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] and certificate leaf[field.1.2.840.113635.100.6.1.13] and certificate leaf[subject.OU] = "TEAMID"`
+  - Derive both from a dumped designated requirement (`codesign -d -r- Ice Cube.app`), **never hand-write**; validate candidates offline with `codesign --verify -R`. The Team ID is the certificate's **OU value**, NOT the parenthesized suffix in the certificate name. The real Team ID lives only in gitignored `Configs/Local.xcconfig` → injected build setting → generated Swift constant; DEBUG builds may relax to identifier-only with a loud log warning.
 - App side mirrors the requirement on its `NSXPCConnection` (`options: .privileged`).
-- Protocol (in ZephyrKit), deliberately tiny — reply closures are `@escaping @Sendable` (Swift 6 strict concurrency):
+- Protocol (in IceCubeKit), deliberately tiny — reply closures are `@escaping @Sendable` (Swift 6 strict concurrency):
 
 ```swift
 @objc public protocol HelperProtocol {
@@ -171,7 +171,7 @@ Vary per chip generation. Attested Apple Silicon families: **M1** `Tp*`/`Tg0*`; 
 4. Every write: clamp, verify by read-back (behavioral, §3.2), log via `os.Logger`. **Read-back failure: retry once → revert to auto → log.**
 5. Sensor read failure > 3 consecutive ticks while in manual/curve mode → revert to auto.
 6. On system wake: re-verify fan mode/targets and **re-assert or revert** (firmware resets `Ftst` across sleep, §3.4). Also self-test the write path (write + read-back) after daemon start and after OS updates before claiming curves are active.
-7. Daemon-side persistence: `/Library/Application Support/Zephyr/`, **root-owned**, atomic writes, validated + **versioned** schema; corrupt or stale config at boot → auto.
+7. Daemon-side persistence: `/Library/Application Support/IceCube/`, **root-owned**, atomic writes, validated + **versioned** schema; corrupt or stale config at boot → auto.
 
 ---
 
@@ -180,17 +180,17 @@ Vary per chip generation. Attested Apple Silicon families: **M1** `Tp*`/`Tg0*`; 
 Work in order. Each phase ends with its acceptance criteria demonstrably true (simulated mode counts, except where marked **[HW]** = needs real hardware, owner in the loop).
 
 ### Phase 0 — Scaffold & simulated heartbeat
-- [x] Repo layout: committed `project.yml` (XcodeGen 2.46.0 generates the **gitignored** `Zephyr.xcodeproj`), `Zephyr/`, `ZephyrHelper/`, `ZephyrKit/` (local SPM package), `Configs/` (`Shared.xcconfig` committed, containing `#include? "Local.xcconfig"`; gitignored `Local.xcconfig` holds `DEVELOPMENT_TEAM`), `scripts/`, `docs/`, `.github/`.
+- [x] Repo layout: committed `project.yml` (XcodeGen 2.46.0 generates the **gitignored** `IceCube.xcodeproj`), `IceCube/`, `IceCubeHelper/`, `IceCubeKit/` (local SPM package), `Configs/` (`Shared.xcconfig` committed, containing `#include? "Local.xcconfig"`; gitignored `Local.xcconfig` holds `DEVELOPMENT_TEAM`), `scripts/`, `docs/`, `.github/`.
 - [x] Git bootstrap (done 2026-07-23): `git init` + per-repo personal identity (GitHub noreply email — the global git email is the owner's work address); MIT LICENSE (copyright 2026 thijsvos) committed **now**, moved up from Phase 6. Repo stays **local-only** for now — no GitHub remote yet.
-- [x] Bundle prefix **decided**: `io.github.thijsvos.zephyr` (app), `io.github.thijsvos.zephyr.helper` (helper), `io.github.thijsvos.zephyr.helper.xpc` (mach service) — applied consistently to target settings, launchd Label, plist filename, MachService name, log subsystem, and pinning identifier (one atomic set; one free rename allowed until first public release).
-- [x] `project.yml`: app target (SwiftUI, macOS 14.0, sandbox OFF, LSUIElement), helper `tool` target embedded to `Contents/MacOS` + plist copied to `Contents/Library/LaunchDaemons`, both depending on ZephyrKit; Swift 6 language mode everywhere (app target MainActor default isolation; helper + Kit nonisolated); committed `Zephyr (Simulated)` scheme (`ZEPHYR_SIMULATED=1`); `scripts/verify-bundle.sh` asserts the bundle layout after every build.
-- [x] ZephyrKit: `SMCProviding` protocol, models (`Fan`, `SensorReading`, `FanConfig`, `Preset`, `FanMode` incl. `.system` = 3), `MockSMCProvider` (2 fans, CPU/GPU temps as noisy sine + random load spikes; fans respond to targets with inertia), typed `ZephyrError` distinguishing firmware result bytes (0x82/0x84) from IOKit errors.
+- [x] Bundle prefix **decided**: `io.github.thijsvos.icecube` (app), `io.github.thijsvos.icecube.helper` (helper), `io.github.thijsvos.icecube.helper.xpc` (mach service) — applied consistently to target settings, launchd Label, plist filename, MachService name, log subsystem, and pinning identifier (one atomic set; one free rename allowed until first public release).
+- [x] `project.yml`: app target (SwiftUI, macOS 14.0, sandbox OFF, LSUIElement), helper `tool` target embedded to `Contents/MacOS` + plist copied to `Contents/Library/LaunchDaemons`, both depending on IceCubeKit; Swift 6 language mode everywhere (app target MainActor default isolation; helper + Kit nonisolated); committed `Ice Cube (Simulated)` scheme (`ICECUBE_SIMULATED=1`); `scripts/verify-bundle.sh` asserts the bundle layout after every build.
+- [x] IceCubeKit: `SMCProviding` protocol, models (`Fan`, `SensorReading`, `FanConfig`, `Preset`, `FanMode` incl. `.system` = 3), `MockSMCProvider` (2 fans, CPU/GPU temps as noisy sine + random load spikes; fans respond to targets with inertia), typed `IceCubeError` distinguishing firmware result bytes (0x82/0x84) from IOKit errors.
 - [x] MenuBarExtra showing live mock temp/RPM text; basic popover with numbers.
 - [x] `swift test` green (SMCKeyCodec fully implemented with 30 byte-fixture tests — pulled forward from Phase 1), SwiftFormat config, `.gitignore` (xcodeproj, `Local.xcconfig`, build/), CI workflow committed: pinned `runs-on: macos-26` + explicit Xcode 26.6 select, build (`CODE_SIGNING_ALLOWED=NO`) + `swift test` + verify-bundle — **activates on first push** (dormant while the repo is local-only).
-- **Accept:** `ZEPHYR_SIMULATED=1` run shows live-updating menu bar + popover; `swift test` green; `scripts/verify-bundle.sh` passes; CI workflow committed (runs on first push).
+- **Accept:** `ICECUBE_SIMULATED=1` run shows live-updating menu bar + popover; `swift test` green; `scripts/verify-bundle.sh` passes; CI workflow committed (runs on first push).
 
 ### Phase 0.5 — Helper approval spike **[HW]** (gate before Phase 3)
-- [x] Throwaway do-nothing daemon, personal-team (Apple Development) signing, run from /Applications: register → approve in Login Items → `sudo launchctl print system/io.github.thijsvos.zephyr.helper` → XPC ping round-trip as root.
+- [x] Throwaway do-nothing daemon, personal-team (Apple Development) signing, run from /Applications: register → approve in Login Items → `sudo launchctl print system/io.github.thijsvos.icecube.helper` → XPC ping round-trip as root.
 - [x] Outcome decides the Phase 3+ helper story. **Documented fallback if free-Apple-ID approval fails:** owner manually installs the daemon plist via `sudo launchctl bootstrap` for Phases 3–5; SMAppService deferred to Phase 6 / paid-account upgrade.
 - [x] Note: macOS 26.4.x has a known BTM corruption bug (backgroundtaskmanagementd misbehaving; approval toggles failing for reasons unrelated to our code). If registration hangs, suspect the OS first; `sfltool resetbtm` + reboot is the **last resort** — it resets background-item approvals for ALL apps on the Mac (owner decision).
 - ANSWERED 2026-07-23: **free-Apple-ID SMAppService root-daemon registration + approval WORKS** on Mac14,9 / macOS 26.4.1 (approved once; re-registration never re-prompts; daemon auto-starts via RunAtLoad). The fallback was never needed.
@@ -202,7 +202,7 @@ Work in order. Each phase ends with its acceptance criteria demonstrably true (s
 - [x] Fan discovery (`FNum`, per-fan Ac/Mn/Mx), temp discovery via curated map + fallback filter (§3.3).
 - [x] Sensors browser window + JSON diagnostics export.
 - [x] `SMCPollingActor` publishing snapshots at 1 s; menu bar shows real values. **[HW]**
-- Note (2026-07-23): done as planned, plus a `zephyr-diag` CLI (SPM executable in ZephyrKit) that prints the diagnostics summary/JSON without the app — verified on the owner's Mac14,9: 2169 keys, 2 fans (F{i}Mn 2317 / F{i}Mx 6800), all 20 curated M2 sensors resolved with plausible values. Mock fan ranges corrected to the measured ones.
+- Note (2026-07-23): done as planned, plus a `icecube-diag` CLI (SPM executable in IceCubeKit) that prints the diagnostics summary/JSON without the app — verified on the owner's Mac14,9: 2169 keys, 2 fans (F{i}Mn 2317 / F{i}Mx 6800), all 20 curated M2 sensors resolved with plausible values. Mock fan ranges corrected to the measured ones.
 - **Accept:** on owner's Mac, real RPMs/temps visible and plausible; `FNum ≥ 1` confirmed (if it's 0 the machine is fanless — e.g. MacBook Air — and the control phases need a different test Mac; monitoring still works); diagnostics export produces a valid report; all codec tests pass.
 
 ### Phase 2 — Dashboard & charts
@@ -213,8 +213,8 @@ Work in order. Each phase ends with its acceptance criteria demonstrably true (s
 - **Accept:** popover dashboard looks and feels Afterburner-grade in simulated mode; no dropped frames on an idle machine with the point budget enforced.
 
 ### Phase 3 — Helper, XPC, manual control **[HW]**
-- [x] ZephyrHelper: XPC listener + codesign pinning (TN3127 dev variant, §4.2), `SMCService` write path = the generation-aware Apple Silicon state machine (§3.2: casing probe → direct mode write → Ftst unlock fallback), result-byte checking on every call, read-back + behavioral verification.
-- [x] SafetyMonitor per §4.3, with unit-tested state machine in ZephyrKit (time + temps injected).
+- [x] IceCubeHelper: XPC listener + codesign pinning (TN3127 dev variant, §4.2), `SMCService` write path = the generation-aware Apple Silicon state machine (§3.2: casing probe → direct mode write → Ftst unlock fallback), result-byte checking on every call, read-back + behavioral verification.
+- [x] SafetyMonitor per §4.3, with unit-tested state machine in IceCubeKit (time + temps injected).
 - [x] SMAppService registration flow (or the Phase 0.5 fallback) + onboarding sheet + Debug menu (register/unregister/status).
 - [x] App `HelperClient`: connection lifecycle, heartbeat (5 s), reconnect/backoff, version handshake.
 - [x] Manual mode UI: per-fan sliders, prominent revert-to-auto, warning tint.
@@ -224,8 +224,8 @@ Work in order. Each phase ends with its acceptance criteria demonstrably true (s
 - [x] Curve model: monotonic piecewise-linear interpolation, hysteresis, ramp limiter — pure functions, property-based tests (never NaN, never out of clamp, monotone response).
 - [x] Daemon ControlLoop consuming `FanConfig`; "persist without app" honored (curve mode only, §4.3.1).
 - [x] Curve editor UI (drag points, keyboard nudge, live "you are here" marker, per-fan/linked).
-- [x] Presets: built-ins (Auto/Quiet/Balanced/Max) + user presets, JSON in `~/Library/Application Support/Zephyr/`, quick-switch in popover.
-- Note (2026-07-23): implemented — FanCurve (normalized invariants, 90 tests total incl. property sweep), CurveFollower (hysteresis deadband + ramp limiter), daemon curve loop with read-back verify + wake re-assert + root-owned persistence (/Library/Application Support/Zephyr, atomic, schema-validated, manual never persisted), Canvas curve editor (drag/double-click/⌫/arrows, live marker incl. hysteresis preview dot — works simulated), presets quick-switch in popover + user presets JSON. Deviations: per-fan curve editing deferred (model supports per-fan overrides; editor ships linked-all); input-sensor pick-list deferred (input = hottest die sensor); protocol bumped to v2. Owner-pending: Quiet-vs-Max audible check and the reboot-persist test.
+- [x] Presets: built-ins (Auto/Quiet/Balanced/Max) + user presets, JSON in `~/Library/Application Support/IceCube/`, quick-switch in popover.
+- Note (2026-07-23): implemented — FanCurve (normalized invariants, 90 tests total incl. property sweep), CurveFollower (hysteresis deadband + ramp limiter), daemon curve loop with read-back verify + wake re-assert + root-owned persistence (/Library/Application Support/IceCube, atomic, schema-validated, manual never persisted), Canvas curve editor (drag/double-click/⌫/arrows, live marker incl. hysteresis preview dot — works simulated), presets quick-switch in popover + user presets JSON. Deviations: per-fan curve editing deferred (model supports per-fan overrides; editor ships linked-all); input-sensor pick-list deferred (input = hottest die sensor); protocol bumped to v2. Owner-pending: Quiet-vs-Max audible check and the reboot-persist test.
 - **Accept:** in simulated mode, heating the fake CPU visibly walks the curve with hysteresis; on hardware, a Quiet vs Max preset audibly differs; reboot with "persist" on → curve active before app launch.
 
 ### Phase 5 — Modern-app polish
@@ -248,7 +248,7 @@ Work in order. Each phase ends with its acceptance criteria demonstrably true (s
 ---
 
 ## 6. Testing strategy
-- **ZephyrKit = the fortress**: codecs (byte-level fixtures from real Macs), curve math (property tests), SafetyMonitor state machine (simulated clock), preset codecs. Target >90 % coverage here; UI coverage is best-effort.
+- **IceCubeKit = the fortress**: codecs (byte-level fixtures from real Macs), curve math (property tests), SafetyMonitor state machine (simulated clock), preset codecs. Target >90 % coverage here; UI coverage is best-effort.
 - Simulated mode for all UI dev + CI; a `ThermalScenario` script type (idle → load spike → cooldown) drives repeatable demos.
 - Manual HW checklist (docs/TESTPLAN.md): approval flow, watchdog, ceiling override (use scenario injection, don't actually cook the Mac), fast user switching, on owner hardware before each release.
 - **Sleep/wake acceptance test [HW]:** with a curve (and separately, manual mode) active, sleep the Mac ≥ 1 min, wake → daemon re-asserts control (or reverts and reports "control lost") within one control tick; verified via read-back + `log stream`. Firmware resets `Ftst` across sleep (§3.4), so this must be exercised on hardware, not simulated.
@@ -274,7 +274,7 @@ MIT license (matches SMCKit/Stats ecosystem; avoids GPL entanglement — we refe
 - UI (reference only — we vendor our own ~100-line shim, no dependencies): orchetect/MenuBarExtraAccess (NSStatusItem access patterns), steipete.me settings-window post (LSUIElement window-focus dance).
 
 ## 10. Owner decisions (confirmed 2026-07-22, revised 2026-07-23)
-1. **Name & identifiers**: marketing name still open — `Zephyr` is the working codename. Bundle prefix is **decided now**: `io.github.thijsvos.zephyr` (helper `.helper`, mach service `.helper.xpc`). One free rename allowed until the first public release; after that identifiers are frozen (BTM approvals + codesign pinning depend on them).
+1. **Name & identifiers**: marketing name still open — `Ice Cube` is the working codename. Bundle prefix is **decided now**: `io.github.thijsvos.icecube` (helper `.helper`, mach service `.helper.xpc`). One free rename allowed until the first public release; after that identifiers are frozen (BTM approvals + codesign pinning depend on them).
 2. **Account**: free Apple ID (personal team). Free-ID helper approval is **an assumption under test, not a fact** — one primary source claims paid Developer ID is required for SMAppService privileged helpers; the Phase 0.5 spike settles it, with the fallback (manual `sudo launchctl bootstrap` install for Phases 3–5) documented in advance. Phase 6 notarized public release waits on a paid upgrade regardless.
 3. **Hardware**: Apple Silicon **only** — confirmed. Intel is out of scope entirely (community port welcome; `SMCProviding` stays hardware-agnostic; fpe2 codec kept + tested). Within AS, per-generation: M1/M2 direct write path (owner-verifiable on the M2 Pro); M3/M4 Ftst path ships **experimental** until community diagnostics confirm.
 4. **Minimum macOS**: 14.0 confirmed (`@Observable` stays; old-Intel reach is not a priority for this owner).

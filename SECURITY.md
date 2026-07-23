@@ -1,6 +1,6 @@
 # Security Policy
 
-Zephyr ships a root LaunchDaemon, so security reports get priority attention.
+Ice Cube ships a root LaunchDaemon, so security reports get priority attention.
 
 ## Reporting
 
@@ -16,7 +16,7 @@ issues. You'll get an acknowledgment within a few days.
 - Anything that makes the daemon write fan targets outside the clamped
   safe range, disable the temperature ceiling, or skip the watchdog.
 - Privilege escalation through the daemon's file handling
-  (`/Library/Application Support/Zephyr`).
+  (`/Library/Application Support/IceCube`).
 
 ## Out of scope
 

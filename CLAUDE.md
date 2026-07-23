@@ -1,6 +1,6 @@
-# CLAUDE.md — Project Zephyr
+# CLAUDE.md — Project Ice Cube
 
-Zephyr (working name — see PLAN.md §10) is an **open-source macOS menu bar app for fan control and thermal monitoring**: live graphs in the style of MSI Afterburner's hardware monitor, custom temperature→fan curves, presets, and a privileged helper daemon that performs the actual SMC writes.
+Ice Cube (name decided 2026-07-23; identifiers frozen at first public release) is an **open-source macOS menu bar app for fan control and thermal monitoring**: live graphs in the style of MSI Afterburner's hardware monitor, custom temperature→fan curves, presets, and a privileged helper daemon that performs the actual SMC writes.
 
 Read **PLAN.md** for the full roadmap and technical reference. **XCODE_GUIDE.md** contains steps only the human can do (signing, approvals, notarization) — when a task requires one of those, stop and tell the owner exactly which section of that guide to follow.
 
@@ -15,7 +15,7 @@ Read **PLAN.md** for the full roadmap and technical reference. **XCODE_GUIDE.md*
 
 1. Work milestone by milestone in PLAN.md §5 order. Do not start Phase N+1 until Phase N acceptance criteria pass.
 2. **All hardware access goes through the `SMCProviding` protocol.** Never call IOKit directly from UI or feature code.
-3. **Simulated mode must always work.** `ZEPHYR_SIMULATED=1` (env var or `--simulated` launch arg) swaps in `MockSMCProvider`. Every feature must be demonstrable in simulated mode with no root, no helper, no real SMC. CI runs simulated only.
+3. **Simulated mode must always work.** `ICECUBE_SIMULATED=1` (env var or `--simulated` launch arg) swaps in `MockSMCProvider`. Every feature must be demonstrable in simulated mode with no root, no helper, no real SMC. CI runs simulated only.
 4. **Safety invariants are non-negotiable.** Never remove, weaken, or bypass:
    - Daemon-side watchdog: no app heartbeat for 15 s **and** config does not persist without app → revert to auto. Manual (fixed-RPM) mode is **always** watchdogged regardless of the persist toggle — only curve mode may run app-less.
    - Daemon reverts to auto on XPC invalidation, on its own shutdown, and on first launch.
@@ -31,16 +31,16 @@ Read **PLAN.md** for the full roadmap and technical reference. **XCODE_GUIDE.md*
 ## Architecture (see PLAN.md §2–4 for detail)
 
 ```
-Zephyr.xcodeproj
-├── Zephyr            SwiftUI app: MenuBarExtra UI, charts, curve editor,
+IceCube.xcodeproj
+├── Ice Cube            SwiftUI app: MenuBarExtra UI, charts, curve editor,
 │                     settings, read-only SMC polling for display
-├── ZephyrHelper      Root LaunchDaemon (SMAppService): owns ALL SMC writes,
+├── IceCubeHelper      Root LaunchDaemon (SMAppService): owns ALL SMC writes,
 │                     runs the fan-curve control loop, enforces safety
-└── ZephyrKit         Local Swift package (no UI, no root): SMC key parsing,
+└── IceCubeKit         Local Swift package (no UI, no root): SMC key parsing,
                       encodings, curve math, models, XPC protocol, mock provider,
                       read-only SMC access (SMCConnection/SystemSMCProvider —
                       reads need no root; there is deliberately NO write method),
-                      plus the `zephyr-diag` CLI (swift run zephyr-diag)
+                      plus the `icecube-diag` CLI (swift run icecube-diag)
                       → this is where unit tests live
 ```
 
@@ -53,13 +53,13 @@ The app never writes to the SMC. It sends the desired curve/preset over XPC; the
 xcodegen generate
 
 # App (Debug, unsigned-friendly for CI)
-xcodebuild -project Zephyr.xcodeproj -scheme Zephyr -configuration Debug -derivedDataPath build build CODE_SIGNING_ALLOWED=NO
+xcodebuild -project IceCube.xcodeproj -scheme IceCube -configuration Debug -derivedDataPath build build CODE_SIGNING_ALLOWED=NO
 
-# Unit tests (ZephyrKit — pure Swift, no signing, no hardware)
-cd ZephyrKit && swift test
+# Unit tests (IceCubeKit — pure Swift, no signing, no hardware)
+cd IceCubeKit && swift test
 
 # Run app in simulated mode from CLI after building
-ZEPHYR_SIMULATED=1 ./build/Build/Products/Debug/Zephyr.app/Contents/MacOS/Zephyr
+ICECUBE_SIMULATED=1 "./build/Build/Products/Debug/Ice Cube.app/Contents/MacOS/Ice Cube"
 
 # Lint/format (once configured in Phase 0)
 swiftformat --lint .
@@ -71,14 +71,14 @@ If a build needs signing (running the real helper), tell the owner to do it in X
 
 - Swift 6 language mode (strict concurrency), macOS 14.0 deployment target.
 - SwiftUI + `@Observable` for app state; `@MainActor` for anything touching UI.
-- Default isolation: app target uses **MainActor default isolation**; ZephyrHelper + ZephyrKit use **nonisolated default**.
+- Default isolation: app target uses **MainActor default isolation**; IceCubeHelper + IceCubeKit use **nonisolated default**.
 - `HelperProtocol` reply closures are `@escaping @Sendable`.
 - Actors for polling/IO (`SMCPollingActor`); models are `Sendable` value types.
 - **No third-party dependencies. Period.** (Sparkle dropped — Phase 6 uses a hand-rolled GitHub Releases version check.) Foundation/AppKit/SwiftUI/Charts only.
-- Errors: typed `ZephyrError` enum in ZephyrKit; never `fatalError` in daemon code paths.
+- Errors: typed `IceCubeError` enum in IceCubeKit; never `fatalError` in daemon code paths.
 - Every SMC call checks the firmware result byte (`SMCResult`), not just `kern_return_t`.
-- Bundle ids: app `io.github.thijsvos.zephyr`, helper `io.github.thijsvos.zephyr.helper`, mach service `io.github.thijsvos.zephyr.helper.xpc`.
-- Logging: `os.Logger`, subsystem `io.github.thijsvos.zephyr`, categories `smc`, `xpc`, `curve`, `ui`. Daemon logs must make every write auditable (key, value, reason).
+- Bundle ids: app `io.github.thijsvos.icecube`, helper `io.github.thijsvos.icecube.helper`, mach service `io.github.thijsvos.icecube.helper.xpc`.
+- Logging: `os.Logger`, subsystem `io.github.thijsvos.icecube`, categories `smc`, `xpc`, `curve`, `ui`. Daemon logs must make every write auditable (key, value, reason).
 - File header comment on new files: one line saying what the file is for. Keep files under ~300 lines; split by feature.
 
 ## Definition of done (every task)

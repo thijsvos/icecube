@@ -1,6 +1,6 @@
 # Credits & prior art
 
-Zephyr's code is original (MIT), but it stands on community research:
+Ice Cube's code is original (MIT), but it stands on community research:
 
 - **[exelban/Stats](https://github.com/exelban/stats)** (MIT) — the best
   real-world SMC key maps per SoC generation, and the reference for the

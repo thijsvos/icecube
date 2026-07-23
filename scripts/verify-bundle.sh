@@ -1,17 +1,17 @@
 #!/bin/sh
-# verify-bundle.sh — asserts the built Zephyr.app contains the helper binary and
+# verify-bundle.sh — asserts the built Ice Cube.app contains the helper binary and
 # the LaunchDaemon plist at the exact paths SMAppService requires. Run after every
 # build (CI does); it catches XcodeGen/Xcode embedding regressions early, before
 # they surface as inscrutable helper-registration failures.
 #
-# Usage: scripts/verify-bundle.sh [path/to/Zephyr.app]
-# Default app path: build/Build/Products/Debug/Zephyr.app
+# Usage: scripts/verify-bundle.sh [path/to/Ice Cube.app]
+# Default app path: build/Build/Products/Debug/Ice Cube.app
 
 set -eu
 
-APP=${1:-build/Build/Products/Debug/Zephyr.app}
-HELPER_REL="Contents/MacOS/ZephyrHelper"
-PLIST_REL="Contents/Library/LaunchDaemons/io.github.thijsvos.zephyr.helper.plist"
+APP=${1:-build/Build/Products/Debug/Ice Cube.app}
+HELPER_REL="Contents/MacOS/IceCubeHelper"
+PLIST_REL="Contents/Library/LaunchDaemons/io.github.thijsvos.icecube.helper.plist"
 
 if [ ! -d "$APP" ]; then
     echo "FAIL: app bundle not found at: $APP" >&2

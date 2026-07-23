@@ -9,8 +9,8 @@ labels: new-model
 **What works / what doesn't** (monitoring? sensor labels? manual control? curves?):
 
 **Diagnostics JSON** — this is the important part:
-Zephyr popover → **Sensors…** → **Export Diagnostics…**, attach the file here.
-(Or from a checkout: `cd ZephyrKit && swift run zephyr-diag --json > diagnostics.json`.)
+Ice Cube popover → **Sensors…** → **Export Diagnostics…**, attach the file here.
+(Or from a checkout: `cd IceCubeKit && swift run icecube-diag --json > diagnostics.json`.)
 
 The report contains your Mac's SMC key catalog and sensor values — no
 personal data beyond the hardware model.
