@@ -29,23 +29,37 @@ for entry in entries {
         NSColor(calibratedRed: 0.10, green: 0.45, blue: 0.85, alpha: 1), // glacial blue
     ])!.draw(in: path, angle: -70)
 
-    // White fan glyph, centered.
-    let config = NSImage.SymbolConfiguration(pointSize: CGFloat(px) * 0.5, weight: .medium)
-    if let symbol = NSImage(systemSymbolName: "cube.transparent", accessibilityDescription: nil)?
-        .withSymbolConfiguration(config) {
-        let tinted = NSImage(size: symbol.size)
-        tinted.lockFocus()
-        symbol.draw(at: .zero, from: .zero, operation: .sourceOver, fraction: 1)
-        NSColor(calibratedRed: 0.05, green: 0.15, blue: 0.35, alpha: 1).set()
-        NSRect(origin: .zero, size: symbol.size).fill(using: .sourceAtop)
-        tinted.unlockFocus()
-        let symbolRect = NSRect(
-            x: (CGFloat(px) - tinted.size.width) / 2,
-            y: (CGFloat(px) - tinted.size.height) / 2,
-            width: tinted.size.width, height: tinted.size.height
-        )
-        tinted.draw(in: symbolRect)
+    // A glossy isometric ice cube, drawn by hand (an SF cube reads as a
+    // plain geometric box — this one has faces, translucency, and shine).
+    func poly(_ pts: [(CGFloat, CGFloat)]) -> NSBezierPath {
+        let path = NSBezierPath()
+        let scaled = pts.map { NSPoint(x: $0.0 * CGFloat(px), y: $0.1 * CGFloat(px)) }
+        path.move(to: scaled[0])
+        for pt in scaled.dropFirst() { path.line(to: pt) }
+        path.close()
+        return path
     }
+    let top = poly([(0.50, 0.80), (0.78, 0.66), (0.50, 0.52), (0.22, 0.66)])
+    let left = poly([(0.22, 0.66), (0.50, 0.52), (0.50, 0.20), (0.22, 0.34)])
+    let right = poly([(0.50, 0.52), (0.78, 0.66), (0.78, 0.34), (0.50, 0.20)])
+    NSColor(calibratedRed: 0.94, green: 0.99, blue: 1.00, alpha: 0.97).set(); top.fill()
+    NSColor(calibratedRed: 0.55, green: 0.82, blue: 0.97, alpha: 0.92).set(); left.fill()
+    NSColor(calibratedRed: 0.30, green: 0.62, blue: 0.92, alpha: 0.92).set(); right.fill()
+    NSColor(calibratedWhite: 1.0, alpha: 0.85).set()
+    for path in [top, left, right] {
+        path.lineWidth = CGFloat(px) * 0.012
+        path.stroke()
+    }
+    // Specular glints on the right face.
+    NSColor(calibratedWhite: 1.0, alpha: 0.75).set()
+    let glint = NSBezierPath(
+        roundedRect: NSRect(x: 0.585 * CGFloat(px), y: 0.30 * CGFloat(px),
+                            width: 0.045 * CGFloat(px), height: 0.16 * CGFloat(px)),
+        xRadius: 0.02 * CGFloat(px), yRadius: 0.02 * CGFloat(px)
+    )
+    glint.transform(using: AffineTransform(rotationByDegrees: 24))
+    glint.fill()
+
     image.unlockFocus()
 
     guard let tiff = image.tiffRepresentation,
