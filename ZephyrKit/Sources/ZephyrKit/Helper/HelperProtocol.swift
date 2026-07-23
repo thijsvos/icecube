@@ -11,7 +11,8 @@ public enum HelperConstants {
     /// The app's bundle identifier (what the helper pins incoming callers to).
     public static let appBundleID = "io.github.thijsvos.zephyr"
     /// Protocol version; both sides must agree (bump on breaking change).
-    public static let protocolVersion = "1"
+    /// v2: FanConfig gained curve fields (Phase 4).
+    public static let protocolVersion = "2"
     /// How often the app sends a heartbeat while connected.
     public static let heartbeatInterval: TimeInterval = 5
     /// SAFETY: no heartbeat for this long → the daemon's watchdog reverts to

@@ -112,22 +112,67 @@ struct FanControlSection: View {
         }
     }
 
+    private var isCurve: Bool {
+        helper.status?.mode == .curve
+    }
+
+    /// The preset quick-switch row (PLAN.md §1.2). Applying a curve preset
+    /// needs the editor's persist setting, stored app-wide.
+    @AppStorage("persistCurve") private var persistCurve = false
+
+    private var presetRow: some View {
+        HStack(spacing: 6) {
+            ForEach(PresetStore.builtins) { preset in
+                Button(preset.name) {
+                    Task {
+                        var config = preset.config
+                        if config.mode == .curve {
+                            config.persistsWithoutApp = persistCurve
+                        }
+                        await helper.apply(config)
+                    }
+                }
+                .buttonStyle(.bordered)
+                .tint(isActivePreset(preset) ? .teal : nil)
+            }
+            Spacer()
+            Button("Curves…") {
+                WindowOpener.open(WindowOpener.ID.curves, using: openWindow)
+            }
+            .help("Edit the temperature→fan curve")
+        }
+        .controlSize(.small)
+    }
+
+    @Environment(\.openWindow) private var openWindow
+
+    /// Highlight from the last config this app sent, cross-checked against
+    /// the mode the daemon actually reports.
+    private func isActivePreset(_ preset: Preset) -> Bool {
+        guard let applied = helper.lastAppliedConfig,
+              helper.status?.mode == preset.config.mode else { return false }
+        return applied.mode == preset.config.mode
+            && applied.sharedCurve == preset.config.sharedCurve
+    }
+
     private var controls: some View {
         VStack(alignment: .leading, spacing: 8) {
+            presetRow
             HStack {
                 Label(
-                    isManual ? "MANUAL fan control" : "Fans on automatic",
-                    systemImage: isManual ? "hand.raised.fill" : "gearshape"
+                    isManual ? "MANUAL fan control" : (isCurve ? "Curve control active" : "Fans on automatic"),
+                    systemImage: isManual ? "hand.raised.fill" : (isCurve ? "chart.xyaxis.line" : "gearshape")
                 )
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(isManual ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                .foregroundStyle(isManual ? AnyShapeStyle(.orange) :
+                    (isCurve ? AnyShapeStyle(.teal) : AnyShapeStyle(.secondary)))
                 if let branch = helper.status?.unlockBranch, isManual {
                     Text(branch == "ftst" ? "(unlock path)" : "(direct path)")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
                 Spacer()
-                if isManual {
+                if isManual || isCurve {
                     Button("Revert to Auto") {
                         Task { await helper.revertToAuto() }
                     }
@@ -140,6 +185,17 @@ struct FanControlSection: View {
                     }
                     .controlSize(.small)
                 }
+            }
+            if isCurve, let targets = helper.status?.appliedTargets, !targets.isEmpty {
+                Text("Curve targets: " + targets.sorted { $0.key < $1.key }
+                    .map { entry in
+                        let name = fans.first { $0.id == entry.key }?.name ?? "Fan \(entry.key)"
+                        return "\(name) \(Int(entry.value))"
+                    }
+                    .joined(separator: " · "))
+                    .font(.caption2)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
             }
             if isManual {
                 ForEach(fans) { fan in

@@ -50,5 +50,11 @@ struct ZephyrApp: App {
             SensorsBrowserView(state: appState)
         }
         .defaultSize(width: 560, height: 480)
+
+        // The fan-curve editor (Phase 4).
+        Window("Fan Curves", id: WindowOpener.ID.curves) {
+            CurveEditorView(state: appState)
+        }
+        .defaultSize(width: 620, height: 460)
     }
 }

@@ -39,7 +39,16 @@ actor DaemonCore {
     /// whatever a crash or power loss left behind is wiped clean — then runs
     /// the tick forever.
     func start() async {
-        await revertEverything(reason: "daemon start")
+        if let persisted = ConfigStore.load() {
+            // The Phase 4 boot promise: a persisted curve is live before the
+            // app ever launches. Anything else starts from clean auto.
+            config = persisted
+            status.mode = .curve
+            record("boot: resuming persisted curve config")
+            await runCurveTick()
+        } else {
+            await revertEverything(reason: "daemon start")
+        }
         tickTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.tick()
@@ -91,7 +100,20 @@ actor DaemonCore {
                 "manual engaged (\(outcome.branch.rawValue) branch, verified: \(outcome.verified)) targets \(outcome.clampedTargets)"
             )
         case .curve:
-            throw ZephyrError.smcFirmwareRejected(key: "curve", result: 0) // Phase 4
+            guard newConfig.isUsableCurveConfig else {
+                throw ZephyrError.smcDecodingFailed(key: "sharedCurve", type: "FanCurve", bytes: [])
+            }
+            config = newConfig
+            followers = [:]
+            curveTargets = [:]
+            verifyFailures = 0
+            coolingOverride = false
+            guardianActive = false
+            guardianTargets = [:]
+            status.mode = .curve
+            ConfigStore.save(newConfig) // persists only when the rules allow
+            await runCurveTick()
+            record("curve engaged (persists without app: \(newConfig.persistsWithoutApp))")
         }
     }
 
@@ -121,10 +143,10 @@ actor DaemonCore {
         switch verdict {
         case .ok:
             coolingOverride = false
-            if config.mode == .manual {
-                await verifyManualState()
-            } else {
-                await autoSafetyNet()
+            switch config.mode {
+            case .manual: await verifyManualState()
+            case .curve: await runCurveTick()
+            case .auto: await autoSafetyNet()
             }
         case let .forceMaxCooling(offender):
             if !coolingOverride {
@@ -180,8 +202,12 @@ actor DaemonCore {
             }
             record("SAFETY: wake re-assert failed — reverting to auto")
             await revertEverything(reason: "wake re-assert failed")
-        case .auto, .curve:
-            break // nothing held across sleep in Phase 3
+        case .curve:
+            record("wake detected — re-asserting curve control")
+            curveTargets = [:] // force a fresh engage on the next curve tick
+            await runCurveTick()
+        case .auto:
+            break
         }
     }
 
@@ -194,9 +220,76 @@ actor DaemonCore {
         config = .auto
         coolingOverride = false
         verifyFailures = 0
+        followers = [:]
+        curveTargets = [:]
+        ConfigStore.clear() // a revert always cancels the boot promise
         status.mode = .auto
         status.appliedTargets = [:]
         record("all fans auto (\(reason))")
+    }
+
+    // MARK: - Curve control loop (Phase 4)
+
+    /// Per-fan follower state (hysteresis + ramp), reset on config changes.
+    private var followers: [Int: CurveFollower] = [:]
+    /// The targets currently commanded by the curve (quantized to 50 RPM).
+    private var curveTargets: [Int: Double] = [:]
+
+    /// One curve tick: hottest die temp → per-fan follower → quantized
+    /// targets → write when changed, read-back-verify when not.
+    private func runCurveTick() async {
+        guard let fans = try? await readFans(), !fans.isEmpty else { return }
+        // Sensor blindness is handled by the SafetyMonitor (revert after 3
+        // failed ticks) — a single missing reading just skips this tick.
+        guard let dieHot = await (try? readTemperatures())?
+            .filter({ r in ["Tp", "Tg", "Te", "Tf", "Tc"].contains(where: r.key.hasPrefix) })
+            .map(\.celsius).max() else { return }
+
+        var targets: [Int: Double] = [:]
+        for fan in fans {
+            guard let curve = config.curve(for: fan.id) else { continue }
+            var follower = followers[fan.id] ?? CurveFollower(
+                hysteresisCelsius: config.hysteresisCelsius, rampPerTick: config.rampPerTick
+            )
+            let fraction = follower.step(dieCelsius: dieHot, curve: curve)
+            followers[fan.id] = follower
+            let raw = fan.minRPM + fraction * (fan.maxRPM - fan.minRPM)
+            targets[fan.id] = (raw / 50).rounded() * 50
+        }
+        guard !targets.isEmpty else { return }
+
+        if targets != curveTargets {
+            curveTargets = targets
+            if let outcome = try? await sequencer.engageManual(targets: targets, fans: fans) {
+                status.appliedTargets = outcome.clampedTargets
+                status.unlockBranch = outcome.branch.rawValue
+                status.lastWriteVerified = outcome.verified
+            }
+        } else {
+            await verifyCurveHeld(expected: targets, fans: fans)
+        }
+    }
+
+    /// Same read-back discipline as manual mode: one re-assert, then revert.
+    private func verifyCurveHeld(expected: [Int: Double], fans: [Fan]) async {
+        let held = fans.allSatisfy { fan in
+            guard let target = expected[fan.id] else { return true }
+            return fan.mode == .forced && abs(fan.targetRPM - target) <= 1
+        }
+        if held {
+            verifyFailures = 0
+            status.lastWriteVerified = true
+            return
+        }
+        verifyFailures += 1
+        status.lastWriteVerified = false
+        if verifyFailures == 1 {
+            record("curve read-back mismatch — re-asserting")
+            _ = try? await sequencer.engageManual(targets: expected, fans: fans)
+        } else {
+            record("SAFETY: curve control lost (read-back failed twice) — reverting to auto")
+            await revertEverything(reason: "curve read-back verification failed")
+        }
     }
 
     // MARK: - Guardian: Zephyr cools when macOS won't

@@ -221,10 +221,11 @@ Work in order. Each phase ends with its acceptance criteria demonstrably true (s
 - **Accept (owner-verified, M2 Pro):** approve helper once → slider moves a real fan; read-back confirms `F0Md == 1` (or `F0md == 1`) and `Tg` equals the commanded value; the helper reports **which unlock branch ran** (direct vs Ftst); killing the app → fans return to auto ≤ 15 s; `log stream` shows clamped, audited writes.
 
 ### Phase 4 — Curves, presets, control loop
-- [ ] Curve model: monotonic piecewise-linear interpolation, hysteresis, ramp limiter — pure functions, property-based tests (never NaN, never out of clamp, monotone response).
-- [ ] Daemon ControlLoop consuming `FanConfig`; "persist without app" honored (curve mode only, §4.3.1).
-- [ ] Curve editor UI (drag points, keyboard nudge, live "you are here" marker, per-fan/linked).
-- [ ] Presets: built-ins (Auto/Quiet/Balanced/Max) + user presets, JSON in `~/Library/Application Support/Zephyr/`, quick-switch in popover.
+- [x] Curve model: monotonic piecewise-linear interpolation, hysteresis, ramp limiter — pure functions, property-based tests (never NaN, never out of clamp, monotone response).
+- [x] Daemon ControlLoop consuming `FanConfig`; "persist without app" honored (curve mode only, §4.3.1).
+- [x] Curve editor UI (drag points, keyboard nudge, live "you are here" marker, per-fan/linked).
+- [x] Presets: built-ins (Auto/Quiet/Balanced/Max) + user presets, JSON in `~/Library/Application Support/Zephyr/`, quick-switch in popover.
+- Note (2026-07-23): implemented — FanCurve (normalized invariants, 90 tests total incl. property sweep), CurveFollower (hysteresis deadband + ramp limiter), daemon curve loop with read-back verify + wake re-assert + root-owned persistence (/Library/Application Support/Zephyr, atomic, schema-validated, manual never persisted), Canvas curve editor (drag/double-click/⌫/arrows, live marker incl. hysteresis preview dot — works simulated), presets quick-switch in popover + user presets JSON. Deviations: per-fan curve editing deferred (model supports per-fan overrides; editor ships linked-all); input-sensor pick-list deferred (input = hottest die sensor); protocol bumped to v2. Owner-pending: Quiet-vs-Max audible check and the reboot-persist test.
 - **Accept:** in simulated mode, heating the fake CPU visibly walks the curve with hysteresis; on hardware, a Quiet vs Max preset audibly differs; reboot with "persist" on → curve active before app launch.
 
 ### Phase 5 — Modern-app polish

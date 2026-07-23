@@ -114,15 +114,25 @@ final class HelperManager {
 
     // MARK: - Fan control commands
 
-    func applyManual(targets: [Int: Double]) async {
+    /// The last config this app sent (drives preset highlighting; the
+    /// daemon's status remains the truth for what is actually enforced).
+    private(set) var lastAppliedConfig: FanConfig?
+
+    func apply(_ config: FanConfig) async {
         await run {
-            try await self.client.apply(FanConfig(mode: .manual, manualTargets: targets))
+            try await self.client.apply(config)
+            self.lastAppliedConfig = config
         }
+    }
+
+    func applyManual(targets: [Int: Double]) async {
+        await apply(FanConfig(mode: .manual, manualTargets: targets))
     }
 
     func revertToAuto() async {
         await run {
             try await self.client.setAllAuto()
+            self.lastAppliedConfig = .auto
         }
     }
 

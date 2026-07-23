@@ -28,6 +28,16 @@ final class AppState {
     let isSimulated: Bool
     /// Helper daemon lifecycle + fan-control commands (Phase 3).
     let helper = HelperManager()
+    /// Built-in + user presets (Phase 4).
+    let presets = PresetStore()
+
+    /// The hottest die-class sensor (CPU/GPU silicon), the curve input.
+    var hottestDie: Double? {
+        snapshot?.temperatures
+            .filter { r in ["Tp", "Tg", "Te", "Tf", "Tc"].contains(where: r.key.hasPrefix) }
+            .map(\.celsius).max()
+    }
+
     /// Short human-readable description of the last read failure, or `nil`
     /// when the latest poll succeeded.
     private(set) var errorMessage: String?
