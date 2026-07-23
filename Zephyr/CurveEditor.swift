@@ -99,7 +99,7 @@ struct CurveEditorView: View {
             footer
         }
         .padding(14)
-        .frame(minWidth: 560, minHeight: 430)
+        .frame(minWidth: 600, minHeight: 430)
         .onChange(of: state.snapshot) {
             if let die = state.hottestDie {
                 model.updatePreview(die: die)
@@ -173,6 +173,7 @@ struct CurveEditorView: View {
             }
         }
         .background(.quinary, in: RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: 8)) // drawings never bleed past the panel
     }
 
     private func dragGesture(_ rect: CGRect) -> some Gesture {
@@ -317,45 +318,46 @@ struct CurveEditorView: View {
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 14) {
-                // Fixed-width, monospaced value labels: a label that widens
-                // mid-drag re-lays-out the row and shifts the slider under
-                // the cursor — the exact jumping-UI glitch this app forbids.
+            // Two rows, each narrower than the window's minimum width — a
+            // footer that can outgrow the window pushes the whole layout past
+            // its borders. Labels stay fixed-width + monospaced so nothing
+            // moves while a slider is being dragged.
+            HStack(spacing: 10) {
                 Text("Hysteresis \(model.hysteresis, specifier: "%.0f")°")
                     .font(.caption)
                     .monospacedDigit()
-                    .frame(width: 84, alignment: .leading)
+                    .frame(width: 78, alignment: .leading)
                 Slider(value: $model.hysteresis, in: 0 ... 8, step: 1)
-                    .frame(width: 110)
+                    .frame(width: 100)
                     .controlSize(.mini)
                 Text("Ramp \(Int(model.ramp * 100))%/tick")
                     .font(.caption)
                     .monospacedDigit()
-                    .frame(width: 92, alignment: .leading)
+                    .frame(width: 86, alignment: .leading)
                 Slider(value: $model.ramp, in: 0.02 ... 0.3)
-                    .frame(width: 110)
+                    .frame(width: 100)
                     .controlSize(.mini)
-                Spacer()
+                Spacer(minLength: 0)
+                if state.isSimulated {
+                    Text("SIMULATED")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .help("Applying a curve needs real hardware")
+                }
+            }
+            HStack(spacing: 8) {
                 Toggle("Keep running when app quits", isOn: $persistCurve)
                     .font(.caption)
                     .toggleStyle(.checkbox)
-                    .fixedSize()
-            }
-            HStack(spacing: 8) {
+                Spacer(minLength: 8)
                 TextField("Preset name", text: $presetName)
                     .textFieldStyle(.roundedBorder)
-                    .frame(width: 140)
+                    .frame(width: 120)
                 Button("Save Preset") {
                     state.presets.saveUserPreset(named: presetName, curve: model.curve)
                     presetName = ""
                 }
                 .disabled(presetName.trimmingCharacters(in: .whitespaces).isEmpty)
-                Spacer()
-                if state.isSimulated {
-                    Text("SIMULATED — apply needs real hardware")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                }
                 Button("Apply Curve") {
                     Task { await applyCurve() }
                 }
