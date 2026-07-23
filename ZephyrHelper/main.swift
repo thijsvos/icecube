@@ -1,28 +1,40 @@
-// main.swift — ZephyrHelper Phase 0 stub: log one startup line, then idle. No SMC access, no XPC yet.
+// main.swift — ZephyrHelper entry point: start the daemon core, listen for XPC, revert on SIGTERM.
 
 import Foundation
 import os
 import ZephyrKit
 
-// The privileged helper daemon. In later phases this process owns ALL SMC
-// writes (clamped, watchdogged, audited) behind an XPC service. In Phase 0 it
-// only proves the target builds, links ZephyrKit, and can be launched.
-//
-// Daemon rule from day one: never `fatalError` — a crash-looping root daemon
-// is worse than a dead one. This stub has no failure paths at all.
+let log = Logger(subsystem: "io.github.thijsvos.zephyr", category: "xpc")
 
-let logger = Logger(subsystem: "io.github.thijsvos.zephyr", category: "xpc")
+let core: DaemonCore
+do {
+    core = try DaemonCore()
+} catch {
+    // No SMC — nothing a fan daemon can do. Exit cleanly (never fatalError);
+    // launchd owns our lifecycle and may retry later.
+    log.fault("cannot open the SMC: \(error.localizedDescription, privacy: .public)")
+    exit(1)
+}
 
-/// Bumped by hand until Phase 6 wires real versioning.
-let helperVersion = "0.1.0"
+// Revert-to-auto on start + begin the 2 s safety tick.
+Task { await core.start() }
 
-// Referencing FanConfig.auto proves the ZephyrKit linkage end to end: if the
-// Kit is missing from the helper target, this line fails to compile.
-logger
-    .notice(
-        "ZephyrHelper started (Phase 0 stub — no SMC access, no XPC yet) version \(helperVersion, privacy: .public), default config mode: \(FanConfig.auto.mode.rawValue, privacy: .public)"
-    )
+// SIGTERM (launchd shutdown/unregister): leave fans on automatic — always.
+signal(SIGTERM, SIG_IGN)
+let sigterm = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+sigterm.setEventHandler {
+    Task {
+        await core.shutdown()
+        exit(0)
+    }
+}
 
-// Park the main thread forever; launchd owns our lifecycle and will send
-// SIGTERM when the daemon should exit.
+sigterm.resume()
+
+// The XPC front door (matches MachServices in the LaunchDaemons plist).
+let listener = NSXPCListener(machServiceName: HelperConstants.machServiceName)
+let service = HelperService(core: core)
+listener.delegate = service
+listener.resume()
+
 RunLoop.main.run()

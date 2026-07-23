@@ -210,11 +210,11 @@ Work in order. Each phase ends with its acceptance criteria demonstrably true (s
 - **Accept:** popover dashboard looks and feels Afterburner-grade in simulated mode; no dropped frames on an idle machine with the point budget enforced.
 
 ### Phase 3 — Helper, XPC, manual control **[HW]**
-- [ ] ZephyrHelper: XPC listener + codesign pinning (TN3127 dev variant, §4.2), `SMCService` write path = the generation-aware Apple Silicon state machine (§3.2: casing probe → direct mode write → Ftst unlock fallback), result-byte checking on every call, read-back + behavioral verification.
-- [ ] SafetyMonitor per §4.3, with unit-tested state machine in ZephyrKit (time + temps injected).
-- [ ] SMAppService registration flow (or the Phase 0.5 fallback) + onboarding sheet + Debug menu (register/unregister/status).
-- [ ] App `HelperClient`: connection lifecycle, heartbeat (5 s), reconnect/backoff, version handshake.
-- [ ] Manual mode UI: per-fan sliders, prominent revert-to-auto, warning tint.
+- [x] ZephyrHelper: XPC listener + codesign pinning (TN3127 dev variant, §4.2), `SMCService` write path = the generation-aware Apple Silicon state machine (§3.2: casing probe → direct mode write → Ftst unlock fallback), result-byte checking on every call, read-back + behavioral verification.
+- [x] SafetyMonitor per §4.3, with unit-tested state machine in ZephyrKit (time + temps injected).
+- [x] SMAppService registration flow (or the Phase 0.5 fallback) + onboarding sheet + Debug menu (register/unregister/status).
+- [x] App `HelperClient`: connection lifecycle, heartbeat (5 s), reconnect/backoff, version handshake.
+- [x] Manual mode UI: per-fan sliders, prominent revert-to-auto, warning tint.
 - **Accept (owner-verified, M2 Pro):** approve helper once → slider moves a real fan; read-back confirms `F0Md == 1` (or `F0md == 1`) and `Tg` equals the commanded value; the helper reports **which unlock branch ran** (direct vs Ftst); killing the app → fans return to auto ≤ 15 s; `log stream` shows clamped, audited writes.
 
 ### Phase 4 — Curves, presets, control loop

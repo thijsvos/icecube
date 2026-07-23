@@ -26,6 +26,8 @@ final class AppState {
     /// True when running against `MockSMCProvider` — the UI shows a badge so
     /// simulated numbers are never mistaken for real hardware.
     let isSimulated: Bool
+    /// Helper daemon lifecycle + fan-control commands (Phase 3).
+    let helper = HelperManager()
     /// Short human-readable description of the last read failure, or `nil`
     /// when the latest poll succeeded.
     private(set) var errorMessage: String?

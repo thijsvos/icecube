@@ -41,6 +41,10 @@ targets:
         SKIP_INSTALL: YES
         # Daemon code must never be MainActor-bound by default.
         SWIFT_DEFAULT_ACTOR_ISOLATION: nonisolated
+        # Command-line tools sign with PRODUCT_NAME ("ZephyrHelper") as their
+        # code-signing identifier by default — but the app's XPC pinning
+        # requires the bundle id. Force it explicitly.
+        OTHER_CODE_SIGN_FLAGS: --identifier io.github.thijsvos.zephyr.helper
 
   # The menu-bar app (LSUIElement — no Dock icon).
   Zephyr:

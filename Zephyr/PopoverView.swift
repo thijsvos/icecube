@@ -28,6 +28,7 @@ struct PopoverView: View {
                 waitingRow
             } else {
                 fanSection
+                FanControlSection(helper: state.helper, fans: state.fans)
                 Divider()
                 DashboardView(state: state)
             }

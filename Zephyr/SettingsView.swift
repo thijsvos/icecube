@@ -30,7 +30,49 @@ struct SettingsSection: View {
             Text("The fan icon is always shown; this chooses the text beside it.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
+            Divider()
+            helperMaintenance
         }
+    }
+
+    /// Helper daemon maintenance — the dev/debug controls XCODE_GUIDE §4/§6
+    /// references ("Re-register helper" is the #1 fix after a rebuild).
+    private var helperMaintenance: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Helper daemon")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(helperStateText)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+            HStack(spacing: 8) {
+                Button("Re-register") {
+                    Task { await state.helper.reregister() }
+                }
+                .help("Force launchd to pick up a freshly built helper")
+                Button("Unregister") {
+                    Task { await state.helper.unregister() }
+                }
+                .help("Remove the helper daemon; fans return to automatic")
+            }
+            .controlSize(.small)
+        }
+    }
+
+    private var helperStateText: String {
+        let registration = switch state.helper.registration {
+        case .unknown: "unknown"
+        case .notRegistered: "not registered"
+        case .requiresApproval: "waiting for approval"
+        case .enabled: "enabled"
+        case .notFound: "not found in bundle"
+        }
+        let connection = switch state.helper.connection {
+        case .disconnected: "disconnected"
+        case let .connected(version): "connected (v\(version))"
+        case let .versionMismatch(helper): "version mismatch (v\(helper))"
+        }
+        return "Registration: \(registration) · XPC: \(connection)"
     }
 }
 
