@@ -118,6 +118,18 @@ public struct FanCurve: Sendable, Codable, Equatable {
         CurvePoint(celsius: 85, fraction: 1),
     ])
 
+    /// As cold as physics allows: fans always moving from 35 °C, full blast
+    /// by 55 °C. Holds the machine in the low 40s at idle and minimizes any
+    /// time above 50 °C — at the cost of a permanent soft hum. (The die will
+    /// still exceed 50 °C under real load; no fan can prevent that.)
+    public static let cold = FanCurve(points: [
+        CurvePoint(celsius: 35, fraction: 0.15),
+        CurvePoint(celsius: 40, fraction: 0.35),
+        CurvePoint(celsius: 45, fraction: 0.6),
+        CurvePoint(celsius: 50, fraction: 0.85),
+        CurvePoint(celsius: 55, fraction: 1),
+    ])
+
     /// Full speed always (flat at 1.0).
     public static let max = FanCurve(points: [
         CurvePoint(celsius: 30, fraction: 1),

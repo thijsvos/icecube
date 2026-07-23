@@ -202,7 +202,7 @@ public struct FanConfig: Sendable, Codable, Equatable {
 /// A named, user-selectable fan configuration.
 public struct Preset: Identifiable, Sendable, Codable, Equatable {
     public enum Kind: String, Sendable, Codable {
-        case auto, quiet, balanced, max, custom
+        case auto, quiet, balanced, cold, max, custom
     }
 
     public let id: UUID

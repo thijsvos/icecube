@@ -16,6 +16,7 @@ final class PresetStore {
         Preset(name: "Auto", kind: .auto, config: .auto),
         Preset(name: "Quiet", kind: .quiet, config: .curve(.quiet)),
         Preset(name: "Balanced", kind: .balanced, config: .curve(.balanced)),
+        Preset(name: "Cold", kind: .cold, config: .curve(.cold)),
         Preset(name: "Max", kind: .max, config: .curve(.max)),
     ]
 

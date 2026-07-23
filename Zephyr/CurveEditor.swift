@@ -114,7 +114,10 @@ struct CurveEditorView: View {
             Text("Load:")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            ForEach([("Quiet", FanCurve.quiet), ("Balanced", .balanced), ("Max", .max)], id: \.0) { name, curve in
+            ForEach(
+                [("Quiet", FanCurve.quiet), ("Balanced", .balanced), ("Cold", .cold), ("Max", .max)],
+                id: \.0
+            ) { name, curve in
                 Button(name) {
                     model.load(curve)
                 }

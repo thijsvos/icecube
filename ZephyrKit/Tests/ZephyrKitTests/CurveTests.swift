@@ -60,7 +60,7 @@ struct FanCurveTests {
 
     @Test("Built-ins are usable and shaped as advertised")
     func builtins() {
-        for curve in [FanCurve.quiet, .balanced, .max] {
+        for curve in [FanCurve.quiet, .balanced, .cold, .max] {
             #expect(curve.isUsable)
         }
         #expect(FanCurve.quiet.fraction(at: 50) == 0, "quiet is silent when cool")
@@ -68,6 +68,8 @@ struct FanCurveTests {
         #expect(FanCurve.max.fraction(at: 35) == 1, "max is always full speed")
         #expect(FanCurve.balanced.fraction(at: 75) == 0.75)
         #expect(FanCurve.balanced.fraction(at: 85) == 1, "balanced is flat-out by 85 °C")
+        #expect(FanCurve.cold.fraction(at: 55) == 1, "cold is flat-out by 55 °C")
+        #expect(FanCurve.cold.fraction(at: 30) == 0.15, "cold always keeps air moving")
     }
 }
 

@@ -135,11 +135,7 @@ struct FanControlSection: View {
                 .buttonStyle(.bordered)
                 .tint(isActivePreset(preset) ? .teal : nil)
             }
-            Spacer()
-            Button("Curves…") {
-                WindowOpener.open(WindowOpener.ID.curves, using: openWindow)
-            }
-            .help("Edit the temperature→fan curve")
+            Spacer(minLength: 0)
         }
         .controlSize(.small)
     }
@@ -172,6 +168,11 @@ struct FanControlSection: View {
                         .foregroundStyle(.tertiary)
                 }
                 Spacer()
+                Button("Curves…") {
+                    WindowOpener.open(WindowOpener.ID.curves, using: openWindow)
+                }
+                .controlSize(.small)
+                .help("Edit the temperature→fan curve")
                 if isManual || isCurve {
                     Button("Revert to Auto") {
                         Task { await helper.revertToAuto() }
