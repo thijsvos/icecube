@@ -123,6 +123,8 @@ actor DaemonCore {
             coolingOverride = false
             if config.mode == .manual {
                 await verifyManualState()
+            } else {
+                await autoSafetyNet()
             }
         case let .forceMaxCooling(offender):
             if !coolingOverride {
@@ -184,14 +186,45 @@ actor DaemonCore {
     }
 
     private func revertEverything(reason: String) async {
-        let ids = await (try? readFans().map(\.id)) ?? [0, 1]
-        try? await sequencer.revertAllAuto(fanIDs: ids)
+        let fans = await (try? readFans()) ?? []
+        try? await sequencer.revertAllAuto(fans: fans)
         config = .auto
         coolingOverride = false
         verifyFailures = 0
         status.mode = .auto
         status.appliedTargets = [:]
         record("all fans auto (\(reason))")
+    }
+
+    // MARK: - Auto-mode safety net
+
+    /// Consecutive ticks with a stopped fan in auto mode.
+    private var deadFanTicks = 0
+
+    /// FIELD CORRECTION (2026-07-23): after a revert, macOS may fail to
+    /// reclaim the fans, leaving them stopped (observed on Mac14,9). A fan
+    /// with a non-zero reported minimum should never sit at 0 RPM — if that
+    /// state persists for 3 ticks, park its target at the minimum and try
+    /// handing it to the system (mode 3). Runs every tick in auto mode:
+    /// defense in depth, whatever caused the dead-stop.
+    private func autoSafetyNet() async {
+        guard let fans = try? await readFans() else { return }
+        let dead = fans.filter { $0.mode == .auto && $0.actualRPM < 100 && $0.minRPM > 0 }
+        guard !dead.isEmpty else {
+            deadFanTicks = 0
+            return
+        }
+        deadFanTicks += 1
+        guard deadFanTicks >= 3 else { return }
+        deadFanTicks = 0
+        record("SAFETY: fan(s) stopped in auto mode — parking at minimum and handing back to the system")
+        for fan in dead {
+            try? await port.writeDouble("F\(fan.id)Tg", value: fan.minRPM, as: .float)
+            for suffix in ["Md", "md"] where await port.hasKey("F\(fan.id)\(suffix)") {
+                try? await port.writeDouble("F\(fan.id)\(suffix)", value: 3, as: .uint8)
+                break
+            }
+        }
     }
 
     // MARK: - Hardware reads (the daemon trusts only its own readings)

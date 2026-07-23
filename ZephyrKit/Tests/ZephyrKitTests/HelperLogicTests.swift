@@ -120,15 +120,22 @@ struct FanWriteSequencerTests {
         #expect(try await firmware.readDouble("F0md") == 1)
     }
 
-    @Test("Revert writes mode 0 for every fan and clears Ftst after the ftst branch")
+    @Test("Revert parks targets at the fan minimum (NEVER 0), hands back to the system, clears Ftst")
     func revertSequence() async throws {
         let firmware = FakeFirmware(generation: .m3, fans: testFans, pendingRejections: 1)
         let sequencer = FanWriteSequencer(port: firmware, sleep: instantSleep)
         _ = try await sequencer.engageManual(targets: [0: 4000, 1: 4000], fans: testFans)
-        try await sequencer.revertAllAuto(fanIDs: [0, 1])
-        #expect(try await firmware.readDouble("F0Md") == 0)
-        #expect(try await firmware.readDouble("F1Md") == 0)
+        try await sequencer.revertAllAuto(fans: testFans)
+        // Field-corrected sequence: Tg parked at Mn (a 0-RPM target left real
+        // fans stopped dead on Mac14,9), then mode 0, then mode 3 attempt.
+        #expect(try await firmware.readDouble("F0Tg") == 2317, "target parked at minimum, not 0")
+        #expect(try await firmware.readDouble("F1Tg") == 2317)
+        #expect(try await firmware.readDouble("F0Md") == 3, "handed back to the system where accepted")
         #expect(try await firmware.readDouble("Ftst") == 0, "Ftst cleared after last fan reverts")
+        let modeWrites = await firmware.writes.filter { $0.key == "F0Md" }.map(\.value)
+        #expect(modeWrites.suffix(2) == [0, 3], "mode 0 then explicit mode-3 hand-back")
+        let zeroTargets = await firmware.writes.filter { $0.key.hasSuffix("Tg") && $0.value == 0 }
+        #expect(zeroTargets.isEmpty, "a 0-RPM target must never be written, not even on revert")
     }
 
     @Test("A machine with no mode key at all refuses manual mode")

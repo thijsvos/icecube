@@ -93,11 +93,24 @@ public actor FanWriteSequencer {
 
     /// Reverts every fan to automatic: mode 0 (+ Tg 0), then `Ftst=0` once
     /// all fans are back on auto (only if the Ftst path was used).
-    public func revertAllAuto(fanIDs: [Int]) async throws {
-        guard let suffix = try? await resolveModeKeySuffix(fanIDs: fanIDs) else { return }
-        for id in fanIDs {
-            try await port.writeDouble("F\(id)\(suffix)", value: 0, as: .uint8)
-            try? await port.writeDouble("F\(id)Tg", value: 0, as: .float)
+    ///
+    /// FIELD CORRECTION (2026-07-23, verified on Mac14,9 / macOS 26.4.1):
+    /// the reference sequence "mode 0 + Tg 0" left the fans **stopped at
+    /// 0 RPM** — thermalmonitord did not reclaim them. Writing target 0 is
+    /// exactly the unsafe command our clamp forbids the *app* from sending,
+    /// so the revert must never send it either. The safe hand-back:
+    /// park `Tg` at the fan's minimum FIRST (if the firmware keeps honoring
+    /// it, the floor spins — never silence), then mode 0, then attempt mode 3
+    /// (explicitly returning the fan to macOS; some generations refuse, which
+    /// is fine). `DaemonCore` adds a tick-level safety net on top.
+    public func revertAllAuto(fans: [Fan]) async throws {
+        guard let suffix = try? await resolveModeKeySuffix(fanIDs: fans.map(\.id)) else { return }
+        for fan in fans {
+            if fan.minRPM > 0 {
+                try? await port.writeDouble("F\(fan.id)Tg", value: fan.minRPM, as: .float)
+            }
+            try await port.writeDouble("F\(fan.id)\(suffix)", value: 0, as: .uint8)
+            try? await port.writeDouble("F\(fan.id)\(suffix)", value: 3, as: .uint8)
         }
         if knownBranch == .ftst, await port.hasKey("Ftst") {
             try await port.writeDouble("Ftst", value: 0, as: .uint8)
