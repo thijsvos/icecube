@@ -1,46 +1,42 @@
-// SensorsBrowserView.swift — the SMC key browser window: every key, live values, JSON diagnostics export.
+// SensorsBrowserView.swift — the Sensors window: readable named sensors by default, raw SMC keys on demand.
 
 import IceCubeKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Browses every SMC key the machine exposes, refreshing values every 2 s
-/// while the window is open. Doubles as the community diagnostics tool: the
-/// Export button writes the full ``DiagnosticsReport`` as JSON, which is what
-/// a "new Mac model" GitHub issue asks the reporter to attach.
+/// Shows what the Mac is reporting. By default a **readable** list of the
+/// recognized, human-labeled sensors (CPU/GPU/battery/…) and fans, refreshed
+/// live. The full ~2000-key raw SMC dump — useful only to tinkerers and to the
+/// "new Mac model" diagnostics pipeline — is hidden behind an advanced toggle
+/// and loaded on demand. The Export button writes the full ``DiagnosticsReport``
+/// JSON, which a GitHub issue attaches to get an unmapped model supported.
 struct SensorsBrowserView: View {
     /// The shared observable state; owned by `IceCubeApp`.
     let state: AppState
 
-    /// The latest dump; `nil` until the first one lands (loading state).
+    /// Advanced: reveal every raw SMC key (off by default).
+    @State private var showAllKeys = false
+    /// The raw key dump; loaded only while `showAllKeys` is on.
     @State private var rows: [SMCKeyDump]?
-    /// Case-insensitive substring filter over key, type, and label text.
     @State private var filter = ""
-    /// Export flow state.
     @State private var isExporting = false
     @State private var exportDocument: DiagnosticsDocument?
     @State private var exportMessage: String?
-
-    private var filteredRows: [SMCKeyDump] {
-        guard let rows else { return [] }
-        guard !filter.isEmpty else { return rows }
-        let needle = filter.lowercased()
-        return rows.filter {
-            $0.key.lowercased().contains(needle)
-                || $0.type.lowercased().contains(needle)
-                || ($0.text?.lowercased().contains(needle) ?? false)
-        }
-    }
 
     var body: some View {
         VStack(spacing: 0) {
             controls
             Divider()
-            table
+            if showAllKeys {
+                allKeysTable
+            } else {
+                recognizedList
+            }
         }
-        .frame(minWidth: 460, minHeight: 380)
-        // .task cancels with the view: closing the window stops the refresh.
-        .task {
+        .frame(minWidth: 420, minHeight: 440)
+        // Load the expensive raw dump only when the advanced view is showing.
+        .task(id: showAllKeys) {
+            guard showAllKeys else { return }
             while !Task.isCancelled {
                 rows = await state.keyDump()
                 try? await Task.sleep(for: .seconds(2))
@@ -53,10 +49,8 @@ struct SensorsBrowserView: View {
             defaultFilename: "icecube-diagnostics-\(HostInfo.modelIdentifier())"
         ) { result in
             switch result {
-            case .success:
-                exportMessage = "Report exported."
-            case let .failure(error):
-                exportMessage = error.localizedDescription
+            case .success: exportMessage = "Report exported."
+            case let .failure(error): exportMessage = error.localizedDescription
             }
         }
     }
@@ -65,9 +59,15 @@ struct SensorsBrowserView: View {
 
     private var controls: some View {
         HStack(spacing: 8) {
-            TextField("Filter keys…", text: $filter)
-                .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 220)
+            Toggle("All SMC keys", isOn: $showAllKeys)
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .help("Advanced: show every raw SMC register this Mac exposes")
+            if showAllKeys {
+                TextField("Filter…", text: $filter)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 160)
+            }
             if state.isSimulated {
                 Text("SIMULATED")
                     .font(.caption2.weight(.semibold))
@@ -79,10 +79,6 @@ struct SensorsBrowserView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Text("\(filteredRows.count) of \(rows?.count ?? 0) keys")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
             Button("Export Diagnostics…") {
                 Task {
                     do {
@@ -93,15 +89,73 @@ struct SensorsBrowserView: View {
                     }
                 }
             }
-            .help("Save the full machine report as JSON — attach it to a GitHub issue to get your Mac model supported")
+            .help(
+                "Save a full machine report as JSON — attach it to a GitHub issue to get your Mac model's sensors mapped"
+            )
         }
         .padding(10)
     }
 
-    // MARK: - Key table
+    // MARK: - Recognized sensors (the readable default)
+
+    private var recognizedList: some View {
+        List {
+            Section("Temperatures") {
+                let temps = state.temperatures.sorted { $0.celsius > $1.celsius }
+                if temps.isEmpty {
+                    Text("No named temperature sensors on this model yet — Export Diagnostics to help add them.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(temps) { reading in
+                    HStack {
+                        Text(reading.label)
+                        Spacer()
+                        Text(state.temperatureUnit.text(reading.celsius))
+                            .monospacedDigit()
+                            .foregroundStyle(reading.isDieSensor ? .primary : .secondary)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("\(reading.label) \(Int(reading.celsius.rounded())) degrees")
+                }
+            }
+            Section("Fans") {
+                if state.fans.isEmpty {
+                    Text("No fans reported (fanless Mac).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(state.fans) { fan in
+                    HStack {
+                        Text(fan.name)
+                        Spacer()
+                        Text("\(Int(fan.actualRPM)) RPM")
+                            .monospacedDigit()
+                        Text("(\(Int(fan.minRPM))–\(Int(fan.maxRPM)))")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .monospacedDigit()
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Advanced: every raw SMC key
+
+    private var filteredRows: [SMCKeyDump] {
+        guard let rows else { return [] }
+        guard !filter.isEmpty else { return rows }
+        let needle = filter.lowercased()
+        return rows.filter {
+            $0.key.lowercased().contains(needle)
+                || $0.type.lowercased().contains(needle)
+                || ($0.text?.lowercased().contains(needle) ?? false)
+        }
+    }
 
     @ViewBuilder
-    private var table: some View {
+    private var allKeysTable: some View {
         if rows == nil {
             VStack(spacing: 8) {
                 ProgressView()
@@ -112,26 +166,12 @@ struct SensorsBrowserView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             Table(filteredRows) {
-                TableColumn("Key") { row in
-                    Text(row.key)
-                        .font(.body.monospaced())
-                }
-                .width(min: 56, ideal: 64)
-                TableColumn("Type") { row in
-                    Text(row.type)
-                        .font(.body.monospaced())
-                        .foregroundStyle(.secondary)
-                }
-                .width(min: 48, ideal: 56)
-                TableColumn("Value") { row in
-                    Text(displayValue(of: row))
-                        .font(.body.monospaced())
-                }
-                TableColumn("Bytes") { row in
-                    Text(row.bytesHex)
-                        .font(.body.monospaced())
-                        .foregroundStyle(.tertiary)
-                }
+                TableColumn("Key") { Text($0.key).font(.body.monospaced()) }
+                    .width(min: 56, ideal: 64)
+                TableColumn("Type") { Text($0.type).font(.body.monospaced()).foregroundStyle(.secondary) }
+                    .width(min: 48, ideal: 56)
+                TableColumn("Value") { Text(displayValue(of: $0)).font(.body.monospaced()) }
+                TableColumn("Bytes") { Text($0.bytesHex).font(.body.monospaced()).foregroundStyle(.tertiary) }
             }
         }
     }
