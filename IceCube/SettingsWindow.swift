@@ -47,7 +47,10 @@ struct SettingsWindowView: View {
         HStack(spacing: 6) {
             ForEach(Tab.allCases) { item in
                 Button {
-                    withAnimation(.easeInOut(duration: 0.15)) { tab = item }
+                    // Instant switch — no animation. Animating the tab change
+                    // interpolates the whole layout while the window resizes,
+                    // which made the tab bar visibly shift ("move down").
+                    tab = item
                 } label: {
                     VStack(spacing: 3) {
                         Image(systemName: item.icon).font(.system(size: 16))
