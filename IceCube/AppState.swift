@@ -3,6 +3,7 @@
 import Foundation
 import IceCubeKit
 import Observation
+import os
 
 /// The app's only mutable state: the latest ``SMCSnapshot`` plus a short error
 /// message when a read fails.
@@ -68,21 +69,27 @@ final class AppState {
     /// see — measured at ~17 % CPU sustained, against 0.3 % before the popover
     /// had ever been opened. Recording is unaffected: `chartStore.ingest`
     /// still runs every tick, so the history is complete when you next look.
-    @ObservationIgnored private(set) var isPopoverVisible = false
+    /// Observed, deliberately: `PopoverView`'s body branches on this, so
+    /// SwiftUI has to see it change in order to swap the content out.
+    private(set) var isPopoverVisible = false
 
     /// The popover came on screen: resume publishing and catch up at once, so
     /// it opens on current data rather than whatever was last published.
     func popoverAppeared() {
+        Self.uiLog.notice("popover appeared — resuming live content")
         isPopoverVisible = true
         refreshCharts()
     }
 
     /// The popover went away: stop publishing and drop any in-flight render.
     func popoverDisappeared() {
+        Self.uiLog.notice("popover disappeared — pausing live content")
         isPopoverVisible = false
         refreshTask?.cancel()
         refreshTask = nil
     }
+
+    private static let uiLog = Logger(subsystem: "io.github.thijsvos.icecube", category: "ui")
 
     /// The shared x axis for all chart rows: trailing `window`, ending at the
     /// newest sample — every row scrolls in lockstep.

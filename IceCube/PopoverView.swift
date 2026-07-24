@@ -25,6 +25,28 @@ struct PopoverView: View {
     }
 
     var body: some View {
+        // MenuBarExtra(.window) keeps this view graph alive after the first
+        // open, so while the window is off screen the live content must not be
+        // built at all. It is not enough to stop publishing chart rows: the fan
+        // gauges animate (0.45 s easeInOut) and the RPM readouts use
+        // .contentTransition(.numericText()), both keyed on values that change
+        // every second — which kept the hidden window in a continuous
+        // CoreAnimation display cycle at ~18 % CPU. The lifecycle modifiers sit
+        // on this outer Group so they still fire while the body is swapped out.
+        Group {
+            if state.isPopoverVisible {
+                liveContent
+            } else {
+                // Same width so the window doesn't resize on reopen.
+                Color.clear.frame(width: 380, height: 1)
+            }
+        }
+        .task { await state.helper.maintainOnce() }
+        .onAppear { state.popoverAppeared() }
+        .onDisappear { state.popoverDisappeared() }
+    }
+
+    private var liveContent: some View {
         VStack(alignment: .leading, spacing: Theme.Metrics.sectionSpacing) {
             header
             if let errorMessage = state.errorMessage {
@@ -51,17 +73,6 @@ struct PopoverView: View {
         }
         .padding(14)
         .frame(width: 380)
-        // Opening the popover forces an immediate reconnect + reconcile, so the
-        // highlighted preset is correct the instant you look — no waiting for
-        // the 5 s maintenance tick after a wake.
-        // `.task` rather than `onAppear` + an unowned Task: this is tied to the
-        // popover's lifetime and cancels when the menu-bar window dismisses.
-        .task { await state.helper.maintainOnce() }
-        // MenuBarExtra(.window) keeps this view graph alive after the first
-        // open, so the app must be told when it is actually visible — otherwise
-        // it re-renders every chart at 1 Hz into an off-screen window.
-        .onAppear { state.popoverAppeared() }
-        .onDisappear { state.popoverDisappeared() }
     }
 
     /// The fan readouts, grouped as a titled card.
