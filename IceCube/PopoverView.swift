@@ -57,6 +57,11 @@ struct PopoverView: View {
         // `.task` rather than `onAppear` + an unowned Task: this is tied to the
         // popover's lifetime and cancels when the menu-bar window dismisses.
         .task { await state.helper.maintainOnce() }
+        // MenuBarExtra(.window) keeps this view graph alive after the first
+        // open, so the app must be told when it is actually visible — otherwise
+        // it re-renders every chart at 1 Hz into an off-screen window.
+        .onAppear { state.popoverAppeared() }
+        .onDisappear { state.popoverDisappeared() }
     }
 
     /// The fan readouts, grouped as a titled card.

@@ -59,6 +59,31 @@ final class AppState {
 
     /// Frozen display (recording continues; see `togglePaused`).
     private(set) var isPaused = false
+
+    /// Whether the menu-bar popover is actually on screen.
+    ///
+    /// `MenuBarExtra(.window)` keeps the popover's view graph alive after the
+    /// first open, so publishing `chartRows` every second kept SwiftUI
+    /// re-laying-out and re-drawing every chart into a window nobody could
+    /// see — measured at ~17 % CPU sustained, against 0.3 % before the popover
+    /// had ever been opened. Recording is unaffected: `chartStore.ingest`
+    /// still runs every tick, so the history is complete when you next look.
+    @ObservationIgnored private(set) var isPopoverVisible = false
+
+    /// The popover came on screen: resume publishing and catch up at once, so
+    /// it opens on current data rather than whatever was last published.
+    func popoverAppeared() {
+        isPopoverVisible = true
+        refreshCharts()
+    }
+
+    /// The popover went away: stop publishing and drop any in-flight render.
+    func popoverDisappeared() {
+        isPopoverVisible = false
+        refreshTask?.cancel()
+        refreshTask = nil
+    }
+
     /// The shared x axis for all chart rows: trailing `window`, ending at the
     /// newest sample — every row scrolls in lockstep.
     private(set) var chartXDomain: ClosedRange<Date> = Date.distantPast ... Date.distantFuture
@@ -160,10 +185,11 @@ final class AppState {
                     consecutiveFailures = 0
                     errorMessage = nil
                     alerts.evaluate(dieCelsius: hottestDie)
-                    // History records even while the display is paused —
-                    // pause freezes the picture, not the recording.
+                    // History records even while the display is paused, and
+                    // while the popover is closed — pause freezes the picture,
+                    // not the recording.
                     await chartStore.ingest(new)
-                    if !isPaused {
+                    if !isPaused, isPopoverVisible {
                         chartRows = await chartStore.rows(window: chartWindow)
                             .filter { chartSettings.includesRow(id: $0.id) }
                         chartXDomain = new.date.addingTimeInterval(-chartWindow) ... new.date
@@ -218,7 +244,7 @@ final class AppState {
     /// Re-renders rows for the current window and row filter. Call after a
     /// window change, a row-visibility toggle, or unpause.
     func refreshCharts() {
-        guard !isPaused else { return }
+        guard !isPaused, isPopoverVisible else { return }
         // Owned, not fired-and-forgotten: DashboardView calls this from two
         // onChange hooks, and each call raced the poll loop for the same two
         // properties. Both read `chartWindow` before suspending and wrote after,
