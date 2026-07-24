@@ -63,15 +63,14 @@ struct IceCubeApp: App {
         }
         .defaultSize(width: 620, height: 460)
 
-        // Full settings (Phase 5). The quick menu-bar options also remain
-        // inline in the popover, where changing them can't dismiss anything.
+        // Full settings. Fixed content size (the tabbed view is 480×380) and
+        // non-resizable — one `.windowResizability(.contentSize)` only. (A
+        // stray second `.contentMinSize` here previously let the window grow
+        // to its saved frame and fill the screen.)
         Window("Ice Cube Settings", id: WindowOpener.ID.settings) {
             SettingsWindowView(state: appState)
         }
+        .defaultSize(width: 480, height: 380)
         .windowResizability(.contentSize)
-        // The user resizes the window; content changes never do. Without
-        // this, label-width changes while sliding could grow the window —
-        // a resize feedback loop that glitches the whole canvas mid-drag.
-        .windowResizability(.contentMinSize)
     }
 }
