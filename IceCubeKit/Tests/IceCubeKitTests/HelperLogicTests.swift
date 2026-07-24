@@ -181,10 +181,57 @@ struct FanWriteSequencerTests {
 
 @Suite("SafetyMonitor")
 struct SafetyMonitorTests {
-    private let epoch = Date(timeIntervalSince1970: 1_753_000_000)
-
     private func temps(_ celsius: Double, key: String = "Tp01") -> [SensorReading] {
         [SensorReading(key: key, label: key, celsius: celsius)]
+    }
+
+    /// The watchdog takes an age, not two `Date`s, precisely so this cannot
+    /// happen: with absolute wall-clock instants, a backwards NTP correction
+    /// made `now.timeIntervalSince(lastHeartbeat)` negative, and a negative age
+    /// is never greater than the timeout — silently deferring the revert the
+    /// watchdog exists to guarantee, for as long as the clock stayed behind.
+    /// A `Duration` measured on a monotonic clock cannot go backwards.
+    @Test("Watchdog: a negative or zero age is treated as fresh, never as expired")
+    func watchdogNonPositiveAge() {
+        var monitor = SafetyMonitor()
+        let manual = FanConfig(mode: .manual, manualTargets: [0: 4000])
+        #expect(monitor.evaluate(
+            heartbeatAge: .zero, config: manual, temperatures: temps(60)
+        ) == .ok)
+        // A caller can no longer hand us a negative age from a clock step, but
+        // if one somehow arrives it must read as fresh, not as expired.
+        #expect(monitor.evaluate(
+            heartbeatAge: .seconds(-5), config: manual, temperatures: temps(60)
+        ) == .ok)
+    }
+
+    @Test("Watchdog: a heartbeat that never arrived reverts immediately")
+    func watchdogNeverHeard() {
+        var monitor = SafetyMonitor()
+        let manual = FanConfig(mode: .manual, manualTargets: [0: 4000])
+        let verdict = monitor.evaluate(
+            heartbeatAge: nil, config: manual, temperatures: temps(60)
+        )
+        guard case .revertToAuto = verdict else {
+            Issue.record("no heartbeat ever received must revert; got \(verdict)")
+            return
+        }
+    }
+
+    @Test("Watchdog: the boundary is exclusive — exactly 15 s is still ok")
+    func watchdogBoundary() {
+        var monitor = SafetyMonitor()
+        let manual = FanConfig(mode: .manual, manualTargets: [0: 4000])
+        #expect(monitor.evaluate(
+            heartbeatAge: .seconds(15), config: manual, temperatures: temps(60)
+        ) == .ok)
+        let verdict = monitor.evaluate(
+            heartbeatAge: .milliseconds(15001), config: manual, temperatures: temps(60)
+        )
+        guard case .revertToAuto = verdict else {
+            Issue.record("just past the timeout must revert; got \(verdict)")
+            return
+        }
     }
 
     @Test("Watchdog: manual mode reverts after 15 s without a heartbeat")
@@ -192,11 +239,11 @@ struct SafetyMonitorTests {
         var monitor = SafetyMonitor()
         let manual = FanConfig(mode: .manual, manualTargets: [0: 4000])
         #expect(monitor.evaluate(
-            now: epoch, lastHeartbeat: epoch.addingTimeInterval(-10),
+            heartbeatAge: .seconds(10),
             config: manual, temperatures: temps(60)
         ) == .ok)
         let verdict = monitor.evaluate(
-            now: epoch, lastHeartbeat: epoch.addingTimeInterval(-16),
+            heartbeatAge: .seconds(16),
             config: manual, temperatures: temps(60)
         )
         guard case .revertToAuto = verdict else {
@@ -210,7 +257,7 @@ struct SafetyMonitorTests {
         var monitor = SafetyMonitor()
         let manual = FanConfig(mode: .manual, manualTargets: [0: 4000], persistsWithoutApp: true)
         let verdict = monitor.evaluate(
-            now: epoch, lastHeartbeat: epoch.addingTimeInterval(-20),
+            heartbeatAge: .seconds(20),
             config: manual, temperatures: temps(60)
         )
         guard case .revertToAuto = verdict else {
@@ -224,13 +271,13 @@ struct SafetyMonitorTests {
         var monitor = SafetyMonitor()
         let persistent = FanConfig(mode: .curve, persistsWithoutApp: true)
         #expect(monitor.evaluate(
-            now: epoch, lastHeartbeat: nil, config: persistent, temperatures: temps(60)
+            heartbeatAge: nil, config: persistent, temperatures: temps(60)
         ) == .ok)
 
         var monitor2 = SafetyMonitor()
         let ephemeral = FanConfig(mode: .curve, persistsWithoutApp: false)
         let verdict = monitor2.evaluate(
-            now: epoch, lastHeartbeat: epoch.addingTimeInterval(-30),
+            heartbeatAge: .seconds(30),
             config: ephemeral, temperatures: temps(60)
         )
         guard case .revertToAuto = verdict else {
@@ -244,13 +291,13 @@ struct SafetyMonitorTests {
         var monitor = SafetyMonitor()
         let manual = FanConfig(mode: .manual, manualTargets: [0: 2500])
         // Two hot ticks: still ok (debounce). A cool tick resets the count.
-        #expect(monitor.evaluate(now: epoch, lastHeartbeat: epoch, config: manual, temperatures: temps(106)) == .ok)
-        #expect(monitor.evaluate(now: epoch, lastHeartbeat: epoch, config: manual, temperatures: temps(106)) == .ok)
-        #expect(monitor.evaluate(now: epoch, lastHeartbeat: epoch, config: manual, temperatures: temps(70)) == .ok)
+        #expect(monitor.evaluate(heartbeatAge: .zero, config: manual, temperatures: temps(106)) == .ok)
+        #expect(monitor.evaluate(heartbeatAge: .zero, config: manual, temperatures: temps(106)) == .ok)
+        #expect(monitor.evaluate(heartbeatAge: .zero, config: manual, temperatures: temps(70)) == .ok)
         // Three consecutive hot ticks trigger.
-        _ = monitor.evaluate(now: epoch, lastHeartbeat: epoch, config: manual, temperatures: temps(106))
-        _ = monitor.evaluate(now: epoch, lastHeartbeat: epoch, config: manual, temperatures: temps(106))
-        let verdict = monitor.evaluate(now: epoch, lastHeartbeat: epoch, config: manual, temperatures: temps(106))
+        _ = monitor.evaluate(heartbeatAge: .zero, config: manual, temperatures: temps(106))
+        _ = monitor.evaluate(heartbeatAge: .zero, config: manual, temperatures: temps(106))
+        let verdict = monitor.evaluate(heartbeatAge: .zero, config: manual, temperatures: temps(106))
         guard case .forceMaxCooling = verdict else {
             Issue.record("expected forced cooling, got \(verdict)")
             return
@@ -263,16 +310,14 @@ struct SafetyMonitorTests {
         let manual = FanConfig(mode: .manual, manualTargets: [0: 2500])
         for _ in 0 ..< 3 {
             _ = monitor.evaluate(
-                now: epoch,
-                lastHeartbeat: epoch,
+                heartbeatAge: .zero,
                 config: manual,
                 temperatures: temps(100, key: "Tp01")
             )
         }
         // 100 °C on a die sensor: below the 104 ceiling → never trips.
         #expect(monitor.evaluate(
-            now: epoch,
-            lastHeartbeat: epoch,
+            heartbeatAge: .zero,
             config: manual,
             temperatures: temps(100, key: "Tp01")
         ) == .ok)
@@ -280,15 +325,13 @@ struct SafetyMonitorTests {
         var monitor2 = SafetyMonitor()
         for _ in 0 ..< 2 {
             _ = monitor2.evaluate(
-                now: epoch,
-                lastHeartbeat: epoch,
+                heartbeatAge: .zero,
                 config: manual,
                 temperatures: temps(96, key: "TB1T")
             )
         }
         let verdict = monitor2.evaluate(
-            now: epoch,
-            lastHeartbeat: epoch,
+            heartbeatAge: .zero,
             config: manual,
             temperatures: temps(96, key: "TB1T")
         )
@@ -303,17 +346,17 @@ struct SafetyMonitorTests {
         var monitor = SafetyMonitor()
         let manual = FanConfig(mode: .manual, manualTargets: [0: 2500])
         for _ in 0 ..< 3 {
-            _ = monitor.evaluate(now: epoch, lastHeartbeat: epoch, config: manual, temperatures: temps(106))
+            _ = monitor.evaluate(heartbeatAge: .zero, config: manual, temperatures: temps(106))
         }
         // 101 °C: below the 104 ceiling but inside the release band → keep cooling.
         guard case .forceMaxCooling = monitor.evaluate(
-            now: epoch, lastHeartbeat: epoch, config: manual, temperatures: temps(101)
+            heartbeatAge: .zero, config: manual, temperatures: temps(101)
         ) else {
             Issue.record("must keep cooling inside the hysteresis band")
             return
         }
         // 98 °C: below ceiling − 5 → released.
-        #expect(monitor.evaluate(now: epoch, lastHeartbeat: epoch, config: manual, temperatures: temps(98)) == .ok)
+        #expect(monitor.evaluate(heartbeatAge: .zero, config: manual, temperatures: temps(98)) == .ok)
     }
 
     @Test("Sensor failure: >3 consecutive failed reads in manual mode reverts; auto mode tolerates")
@@ -321,9 +364,9 @@ struct SafetyMonitorTests {
         var monitor = SafetyMonitor()
         let manual = FanConfig(mode: .manual, manualTargets: [0: 4000])
         for _ in 0 ..< 3 {
-            #expect(monitor.evaluate(now: epoch, lastHeartbeat: epoch, config: manual, temperatures: nil) == .ok)
+            #expect(monitor.evaluate(heartbeatAge: .zero, config: manual, temperatures: nil) == .ok)
         }
-        let verdict = monitor.evaluate(now: epoch, lastHeartbeat: epoch, config: manual, temperatures: nil)
+        let verdict = monitor.evaluate(heartbeatAge: .zero, config: manual, temperatures: nil)
         guard case .revertToAuto = verdict else {
             Issue.record("4th failed read must revert; got \(verdict)")
             return
@@ -331,7 +374,7 @@ struct SafetyMonitorTests {
 
         var monitor2 = SafetyMonitor()
         for _ in 0 ..< 10 {
-            #expect(monitor2.evaluate(now: epoch, lastHeartbeat: nil, config: .auto, temperatures: nil) == .ok)
+            #expect(monitor2.evaluate(heartbeatAge: nil, config: .auto, temperatures: nil) == .ok)
         }
     }
 
@@ -339,7 +382,7 @@ struct SafetyMonitorTests {
     func autoModeInert() {
         var monitor = SafetyMonitor()
         for _ in 0 ..< 5 {
-            #expect(monitor.evaluate(now: epoch, lastHeartbeat: nil, config: .auto, temperatures: temps(108)) == .ok)
+            #expect(monitor.evaluate(heartbeatAge: nil, config: .auto, temperatures: temps(108)) == .ok)
         }
     }
 }

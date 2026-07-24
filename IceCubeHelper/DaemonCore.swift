@@ -16,11 +16,10 @@ actor DaemonCore {
     /// What the daemon is currently enforcing. Fresh start = `.auto`
     /// (PLAN.md §4.3: config persistence arrives in Phase 4).
     private var config: FanConfig = .auto
-    private var lastHeartbeat: Date?
+    /// Monotonic instant of the app's last heartbeat; see ``heartbeatAge()``.
+    private var lastHeartbeatAt: ContinuousClock.Instant?
     private var status = HelperStatus()
     private var tickTask: Task<Void, Never>?
-    /// Clock of the previous tick — a large jump means the machine slept.
-    private var lastTickAt: Date?
     /// Read-back mismatches since the last good verification.
     private var verifyFailures = 0
     /// Resolved sensor keys for safety monitoring (curated ∩ present).
@@ -52,9 +51,37 @@ actor DaemonCore {
             await revertEverything(reason: "daemon start")
         }
         tickTask = Task { [weak self] in
+            // Two clocks, because they disagree in exactly the useful way:
+            // ContinuousClock keeps counting while the Mac is asleep,
+            // SuspendingClock does not — so their difference IS the time spent
+            // asleep. That replaces inferring sleep from a gap between tick
+            // starts, which could not tell a genuinely slow tick from a nap.
+            // The ftst unlock path alone can legitimately take ~10 s (3 s
+            // settle + 70 × 100 ms retries), which the old 5×-interval
+            // heuristic would have misread as a wake and re-asserted on.
+            let continuous = ContinuousClock()
+            let suspending = SuspendingClock()
+            var lastReal = continuous.now
+            var lastAwake = suspending.now
+            // Absolute deadlines, so the period stays ~2 s instead of drifting
+            // out to (tick duration + 2 s) the way `work then sleep(2s)` does.
+            var deadline = continuous.now
             while !Task.isCancelled {
-                await self?.tick()
-                try? await Task.sleep(for: .seconds(HelperConstants.tickInterval))
+                let realNow = continuous.now
+                let awakeNow = suspending.now
+                let slept = (realNow - lastReal) - (awakeNow - lastAwake)
+                lastReal = realNow
+                lastAwake = awakeNow
+
+                await self?.tick(sleptFor: slept)
+
+                deadline = deadline.advanced(by: .seconds(HelperConstants.tickInterval))
+                // A tick that overran its budget resyncs rather than firing a
+                // burst of catch-up ticks at the hardware.
+                if deadline < continuous.now {
+                    deadline = continuous.now.advanced(by: .seconds(HelperConstants.tickInterval))
+                }
+                try? await Task.sleep(until: deadline, clock: continuous)
             }
         }
         log
@@ -80,7 +107,18 @@ actor DaemonCore {
     // MARK: - XPC entry points
 
     func heartbeat() {
-        lastHeartbeat = Date()
+        lastHeartbeatAt = ContinuousClock().now
+    }
+
+    /// How long since the app last fed the watchdog, or `nil` if it never has.
+    ///
+    /// Monotonic: measured with `ContinuousClock`, not `Date`. A backwards
+    /// wall-clock step (an NTP correction) used to yield a *negative* age,
+    /// which is never greater than the timeout — silently deferring a revert
+    /// the watchdog exists to guarantee. ContinuousClock still counts time
+    /// spent asleep, so the across-sleep behaviour is unchanged.
+    private func heartbeatAge() -> Duration? {
+        lastHeartbeatAt.map { ContinuousClock().now - $0 }
     }
 
     func apply(_ newConfig: FanConfig) async throws {
@@ -137,18 +175,19 @@ actor DaemonCore {
 
     // MARK: - The safety tick
 
-    private func tick() async {
-        let now = Date()
-        // Wake detection: a gap ≫ tick interval means the machine slept and
-        // firmware silently reset manual control (§3.4) — re-assert or revert.
-        if let last = lastTickAt, now.timeIntervalSince(last) > HelperConstants.tickInterval * 5 {
+    /// - Parameter sleptFor: how long the machine was actually asleep since the
+    ///   previous tick, measured as ContinuousClock − SuspendingClock.
+    private func tick(sleptFor slept: Duration) async {
+        // Firmware silently resets manual control across sleep (§3.4), so any
+        // real nap means re-assert or revert. Measured, not inferred: a slow
+        // tick is no longer mistaken for a wake.
+        if slept > .seconds(HelperConstants.tickInterval) {
             await handleWake()
         }
-        lastTickAt = now
 
         let temps = try? await readTemperatures()
         let verdict = monitor.evaluate(
-            now: now, lastHeartbeat: lastHeartbeat, config: config, temperatures: temps
+            heartbeatAge: heartbeatAge(), config: config, temperatures: temps
         )
         switch verdict {
         case .ok:

@@ -20,7 +20,7 @@ import Foundation
 public struct SafetyMonitor: Sendable {
     /// Tunables, overridable in tests only — release code uses the defaults.
     public struct Limits: Sendable {
-        public var watchdogTimeout: TimeInterval = HelperConstants.watchdogTimeout
+        public var watchdogTimeout: Duration = .seconds(HelperConstants.watchdogTimeout)
         /// CPU/GPU die sensors reach 95–105 °C under legitimate full load.
         public var dieCeiling: Double = 104
         /// Everything else (airflow, SSD, battery…) should stay well below.
@@ -57,14 +57,20 @@ public struct SafetyMonitor: Sendable {
 
     /// Evaluates one tick.
     ///
+    /// Takes the heartbeat's **age**, not two absolute instants, on purpose.
+    /// The watchdog is a duration rule, so a duration is all it needs — and
+    /// taking `Date`s made the revert deferrable by a backwards wall-clock
+    /// step (an NTP correction yielded a negative age, which is never greater
+    /// than the timeout). The caller measures the age on a monotonic clock, so
+    /// that class of bug cannot be expressed here.
+    ///
     /// - Parameters:
-    ///   - now: the injected clock.
-    ///   - lastHeartbeat: when the app last fed the watchdog (`nil` = never).
+    ///   - heartbeatAge: how long since the app last fed the watchdog, or
+    ///     `nil` if it never has.
     ///   - config: what the daemon is currently enforcing.
     ///   - temperatures: this tick's readings, or `nil` if the read failed.
     public mutating func evaluate(
-        now: Date,
-        lastHeartbeat: Date?,
+        heartbeatAge: Duration?,
         config: FanConfig,
         temperatures: [SensorReading]?
     ) -> Verdict {
@@ -85,9 +91,12 @@ public struct SafetyMonitor: Sendable {
         if controlling {
             let watchdogged = config.mode == .manual || !config.persistsWithoutApp
             if watchdogged {
-                let age = lastHeartbeat.map { now.timeIntervalSince($0) } ?? .infinity
-                if age > limits.watchdogTimeout {
-                    return .revertToAuto(reason: "watchdog: no app heartbeat for \(Int(age.rounded())) s")
+                guard let heartbeatAge else {
+                    return .revertToAuto(reason: "watchdog: no app heartbeat received")
+                }
+                if heartbeatAge > limits.watchdogTimeout {
+                    let seconds = heartbeatAge.components.seconds
+                    return .revertToAuto(reason: "watchdog: no app heartbeat for \(seconds) s")
                 }
             }
         }
