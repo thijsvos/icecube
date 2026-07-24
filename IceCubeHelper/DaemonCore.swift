@@ -27,6 +27,8 @@ actor DaemonCore {
     private var sensorKeys: [String]?
     /// True while the SafetyMonitor is forcing maximum cooling.
     private var coolingOverride = false
+    /// Bumped by every revert. See ``engage(targets:fans:since:)``.
+    private var revertGeneration = 0
 
     init() throws {
         port = try SMCWritePort()
@@ -86,8 +88,16 @@ actor DaemonCore {
         case .auto:
             await revertEverything(reason: "app requested auto")
         case .manual:
+            let generation = revertGeneration
             let fans = try await readFans()
             let outcome = try await sequencer.engageManual(targets: newConfig.manualTargets, fans: fans)
+            guard generation == revertGeneration else {
+                // A revert landed mid-engage; honour it rather than letting
+                // `config = newConfig` below silently undo it.
+                record("SAFETY: manual engage raced a revert — reverting again")
+                await revertEverything(reason: "manual engage raced a revert")
+                return
+            }
             config = newConfig
             config.manualTargets = outcome.clampedTargets
             verifyFailures = 0
@@ -168,6 +178,7 @@ actor DaemonCore {
     /// control back. One re-apply is attempted; a second consecutive failure
     /// means we are not actually in control → revert and say so.
     private func verifyManualState() async {
+        let generation = revertGeneration
         guard let fans = try? await readFans() else { return }
         let held = fans.allSatisfy { fan in
             guard let target = config.manualTargets[fan.id] else { return true }
@@ -182,7 +193,7 @@ actor DaemonCore {
         status.lastWriteVerified = false
         if verifyFailures == 1 {
             record("read-back mismatch — re-asserting manual state")
-            _ = try? await sequencer.engageManual(targets: config.manualTargets, fans: fans)
+            await engage(targets: config.manualTargets, fans: fans, since: generation)
         } else {
             record("SAFETY: control lost (read-back failed twice) — reverting to auto")
             await revertEverything(reason: "read-back verification failed")
@@ -190,17 +201,19 @@ actor DaemonCore {
     }
 
     private func forceMaximumCooling() async {
+        let generation = revertGeneration
         guard let fans = try? await readFans() else { return }
         let maxTargets = Dictionary(uniqueKeysWithValues: fans.map { ($0.id, $0.maxRPM) })
-        _ = try? await sequencer.engageManual(targets: maxTargets, fans: fans)
+        await engage(targets: maxTargets, fans: fans, since: generation)
     }
 
     private func handleWake() async {
         switch config.mode {
         case .manual:
             record("wake detected — re-asserting manual state")
+            let generation = revertGeneration
             if let fans = try? await readFans(),
-               await (try? sequencer.engageManual(targets: config.manualTargets, fans: fans)) != nil
+               await engage(targets: config.manualTargets, fans: fans, since: generation) != nil
             {
                 return
             }
@@ -215,7 +228,36 @@ actor DaemonCore {
         }
     }
 
+    /// Runs one engage and undoes it if a revert landed while it was in flight.
+    ///
+    /// SAFETY: `DaemonCore` is an actor, but `engageManual` suspends on every
+    /// SMC write, and `HelperService` spawns an independent `Task` per XPC
+    /// message — so `revertEverything` can run to completion *between* two of
+    /// this sequence's writes. The engage then finishes and re-forces the fans,
+    /// leaving them physically `.forced` while `config == .auto`.
+    ///
+    /// Nothing recovers that state on its own: `SafetyMonitor` only acts while
+    /// `config.mode != .auto`, so the 95 °C ceiling cannot fire; and the
+    /// guardian's `nobodyCooling` / `orphaned` filters both read forced fans as
+    /// "somebody is already cooling" and stand down. The fans would hold a
+    /// fixed RPM that no longer tracks load.
+    ///
+    /// The generation check can only ever *add* a revert, never suppress one.
+    @discardableResult
+    private func engage(
+        targets: [Int: Double], fans: [Fan], since generation: Int
+    ) async -> FanWriteOutcome? {
+        let outcome = try? await sequencer.engageManual(targets: targets, fans: fans)
+        guard generation == revertGeneration else {
+            record("SAFETY: fan write raced a revert — reverting again")
+            await revertEverything(reason: "write raced a revert")
+            return nil
+        }
+        return outcome
+    }
+
     private func revertEverything(reason: String) async {
+        revertGeneration &+= 1
         let fans = await (try? readFans()) ?? []
         try? await sequencer.revertAllAuto(fans: fans)
         // Release the SMC connection: thermalmonitord reliably resumes fan
@@ -246,6 +288,7 @@ actor DaemonCore {
     /// One curve tick: hottest die temp → per-fan follower → quantized
     /// targets → write when changed, read-back-verify when not.
     private func runCurveTick() async {
+        let generation = revertGeneration
         guard let fans = try? await readFans(), !fans.isEmpty else { return }
         // Sensor blindness is handled by the SafetyMonitor (revert after 3
         // failed ticks) — a single missing reading just skips this tick.
@@ -277,18 +320,18 @@ actor DaemonCore {
 
         if targets != curveTargets {
             curveTargets = targets
-            if let outcome = try? await sequencer.engageManual(targets: targets, fans: fans) {
+            if let outcome = await engage(targets: targets, fans: fans, since: generation) {
                 status.appliedTargets = outcome.clampedTargets
                 status.unlockBranch = outcome.branch.rawValue
                 status.lastWriteVerified = outcome.verified
             }
         } else {
-            await verifyCurveHeld(expected: targets, fans: fans)
+            await verifyCurveHeld(expected: targets, fans: fans, since: generation)
         }
     }
 
     /// Same read-back discipline as manual mode: one re-assert, then revert.
-    private func verifyCurveHeld(expected: [Int: Double], fans: [Fan]) async {
+    private func verifyCurveHeld(expected: [Int: Double], fans: [Fan], since generation: Int) async {
         let held = fans.allSatisfy { fan in
             guard let target = expected[fan.id] else { return true }
             return fan.mode == .forced && abs(fan.targetRPM - target) <= 1
@@ -302,7 +345,7 @@ actor DaemonCore {
         status.lastWriteVerified = false
         if verifyFailures == 1 {
             record("curve read-back mismatch — re-asserting")
-            _ = try? await sequencer.engageManual(targets: expected, fans: fans)
+            await engage(targets: expected, fans: fans, since: generation)
         } else {
             record("SAFETY: curve control lost (read-back failed twice) — reverting to auto")
             await revertEverything(reason: "curve read-back verification failed")
@@ -336,6 +379,7 @@ actor DaemonCore {
     /// maximum by 95 °C) and releases once the die is truly cool. This is the
     /// seed of Phase 4's control loop, pulled forward for safety.
     private func autoSafetyNet() async {
+        let generation = revertGeneration
         guard let fans = try? await readFans() else { return }
         let dieHot = await (try? readTemperatures())?
             .filter(\.isDieSensor)
@@ -352,7 +396,7 @@ actor DaemonCore {
                 let targets = Self.guardianCurveTargets(for: fans, dieHot: dieHot)
                 if targets != guardianTargets {
                     guardianTargets = targets
-                    _ = try? await sequencer.engageManual(targets: targets, fans: fans)
+                    await engage(targets: targets, fans: fans, since: generation)
                 }
             }
             return
@@ -370,7 +414,7 @@ actor DaemonCore {
                 guardianActive = true
                 guardianTargets = demand
                 record("guardian: die \(Int(dieHot)) °C and nothing cooling — driving the fans (built-in curve)")
-                _ = try? await sequencer.engageManual(targets: demand, fans: fans)
+                await engage(targets: demand, fans: fans, since: generation)
             }
             return
         }
@@ -400,7 +444,7 @@ actor DaemonCore {
         } else {
             record("SAFETY: system did not resume control — holding fans at minimum RPM ourselves")
             let floors = Dictionary(uniqueKeysWithValues: fans.map { ($0.id, $0.minRPM) })
-            _ = try? await sequencer.engageManual(targets: floors, fans: fans)
+            await engage(targets: floors, fans: fans, since: generation)
         }
     }
 
