@@ -158,21 +158,29 @@ final class HelperManager {
         UserDefaults.standard.removeObject(forKey: Self.lastCurveKey)
     }
 
-    /// On the first connection of a session, if the daemon is idling in auto
-    /// (not already running a persisted curve) and the user had a curve
-    /// profile last time, resume it — so opening Ice Cube actually starts
-    /// cooling instead of leaving the machine on macOS's quiet auto behavior.
+    /// On the first connection of a session, reconcile the app with the daemon
+    /// using the stored curve profile:
+    /// - daemon idle in **auto**: resume the curve so opening Ice Cube starts
+    ///   cooling instead of leaving the machine on macOS's quiet auto behavior;
+    /// - daemon already running a **curve** (a persisted profile from boot):
+    ///   restore `lastAppliedConfig` (without re-applying) so the UI knows which
+    ///   preset is active and highlights it — otherwise the popover says "curve
+    ///   active" but no preset button lights up.
     private func autoResumeIfNeeded() async {
         guard !didAutoResume, let mode = status?.mode else { return }
         didAutoResume = true
-        guard mode == .auto else { return } // already running something — leave it
+        guard mode == .auto || mode == .curve else { return }
         guard let data = UserDefaults.standard.data(forKey: Self.lastCurveKey),
               var config = try? JSONDecoder().decode(FanConfig.self, from: data),
               config.mode == .curve else { return }
         // Honor the current "Keep running" preference, not whatever flag was
         // stored with the curve (shares the "persistCurve" @AppStorage key).
         config.persistsWithoutApp = UserDefaults.standard.bool(forKey: "persistCurve")
-        await apply(config)
+        if mode == .auto {
+            await apply(config) // daemon idle → resume (starts cooling)
+        } else {
+            lastAppliedConfig = config // already running it → just restore the highlight
+        }
     }
 
     private func run(_ operation: () async throws -> Void) async {
