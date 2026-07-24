@@ -28,6 +28,11 @@ actor DaemonCore {
     private var coolingOverride = false
     /// Bumped by every revert. See ``engage(targets:fans:since:)``.
     private var revertGeneration = 0
+    /// Reverts currently mid-flight. A revert suspends on every SMC write, so
+    /// an engage can begin *after* the generation was bumped but *before* the
+    /// revert's writes land — that engage would pass the generation check and
+    /// still leave the fans forced. Counting in-flight reverts closes it.
+    private var revertsInFlight = 0
 
     init() throws {
         port = try SMCWritePort()
@@ -286,7 +291,10 @@ actor DaemonCore {
         targets: [Int: Double], fans: [Fan], since generation: Int
     ) async -> FanWriteOutcome? {
         let outcome = try? await sequencer.engageManual(targets: targets, fans: fans)
-        guard generation == revertGeneration else {
+        // Two conditions, covering both orderings: a revert that STARTED after
+        // this engage captured its generation, and a revert that was already
+        // running when it did (whose writes may still be landing).
+        guard generation == revertGeneration, revertsInFlight == 0 else {
             record("SAFETY: fan write raced a revert — reverting again")
             await revertEverything(reason: "write raced a revert")
             return nil
@@ -296,6 +304,8 @@ actor DaemonCore {
 
     private func revertEverything(reason: String) async {
         revertGeneration &+= 1
+        revertsInFlight += 1
+        defer { revertsInFlight -= 1 }
         let fans = await (try? readFans()) ?? []
         try? await sequencer.revertAllAuto(fans: fans)
         // Release the SMC connection: thermalmonitord reliably resumes fan

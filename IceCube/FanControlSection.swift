@@ -286,7 +286,14 @@ struct FanControlSection: View {
     /// noise), ready for the user to slide.
     private func engageManual() {
         for fan in fans {
-            sliderTargets[fan.id] = fan.actualRPM.clamped(to: fan.minRPM ... fan.maxRPM)
+            // Via the sequencer's guarded clamp, NOT `clamped(to: Mn ... Mx)`:
+            // Mn and Mx are read with independent `try?`s that each fall back
+            // to 0 ("degrade per-key rather than losing the whole fan"), so an
+            // inverted range is a modelled outcome — and building a
+            // ClosedRange from one traps. This is the same helper the daemon
+            // clamps writes with, and it returns maxRPM for a degenerate fan,
+            // exactly as the old min(max(...)) did.
+            sliderTargets[fan.id] = FanWriteSequencer.clamp(fan.actualRPM, to: fan)
         }
         commitTargets()
     }

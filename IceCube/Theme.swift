@@ -74,7 +74,11 @@ extension View {
         return frame(maxWidth: .infinity, alignment: .leading)
             .padding(Theme.Metrics.cardPadding)
             .background(shape.fill(fill))
-            .overlay(shape.strokeBorder(border, lineWidth: 1))
+            // Decorative only. Overlays are hit-testable by default, and this
+            // one is now unconditional (cards that pass no border get a clear
+            // stroke), so without this a 1pt ring around every card would
+            // swallow clicks meant for the content beneath it.
+            .overlay(shape.strokeBorder(border, lineWidth: 1).allowsHitTesting(false))
     }
 
     /// A quiet uppercase section label — the hierarchy cue that turns a flat

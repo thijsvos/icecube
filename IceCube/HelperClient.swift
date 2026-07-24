@@ -67,11 +67,18 @@ final class HelperClient {
     }
 
     func disconnect() {
-        // Bump first: the invalidate below fires the handler, which must see a
-        // stale generation and not re-enter onDisconnect.
+        // Bump first so the handler `invalidate()` triggers sees a stale
+        // generation and bails — then report the disconnect ourselves. Both
+        // halves matter: without the bump the async handler could land after a
+        // later reconnect and tear down the NEW connection, and without the
+        // explicit call a deliberate disconnect would never notify at all,
+        // leaving HelperManager holding a stale `status` (a fan mode the
+        // daemon is no longer enforcing) after unregister()/reregister().
+        // Exactly one notification either way.
         generation &+= 1
         connection?.invalidate()
         connection = nil
+        onDisconnect?()
     }
 
     // MARK: - Protocol calls (async wrappers)

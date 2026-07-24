@@ -129,6 +129,33 @@ struct FanWriteSequencerTests {
         #expect(FanWriteSequencer.quantizedTarget(fraction: 1, fan: fan) == fan.maxRPM)
     }
 
+    /// `Mn` and `Mx` are read with independent `try?`s that each fall back to
+    /// 0 ("degrade per-key rather than losing the whole fan"), so a fan whose
+    /// range is degenerate — or inverted — is a modelled outcome, not a
+    /// hypothetical. `clamp` is the guard for it, and it is what every caller
+    /// must go through: building `Mn ... Mx` as a ClosedRange directly TRAPS
+    /// when Mn > Mx, which is a crash rather than a clamp.
+    @Test("clamp survives a degenerate or inverted fan range instead of trapping")
+    func clampDegenerateRange() {
+        let inverted = Fan(
+            id: 0, name: "Left", mode: .auto,
+            actualRPM: 3000, targetRPM: 0, minRPM: 2317, maxRPM: 0
+        )
+        #expect(FanWriteSequencer.clamp(3000, to: inverted) == 0)
+        #expect(FanWriteSequencer.clamp(0, to: inverted) == 0)
+
+        let unread = Fan(
+            id: 0, name: "Left", mode: .auto,
+            actualRPM: 0, targetRPM: 0, minRPM: 0, maxRPM: 0
+        )
+        #expect(FanWriteSequencer.clamp(4000, to: unread) == 0)
+
+        // A non-finite request must not propagate into a write either.
+        let healthy = testFans[0]
+        #expect(FanWriteSequencer.clamp(.nan, to: healthy) == healthy.minRPM)
+        #expect(FanWriteSequencer.clamp(.infinity, to: healthy) == healthy.minRPM)
+    }
+
     @Test("M3-style firmware: 0x82 rejections escalate to the Ftst unlock branch")
     func ftstBranch() async throws {
         let firmware = FakeFirmware(generation: .m3, fans: testFans, pendingRejections: 3)
