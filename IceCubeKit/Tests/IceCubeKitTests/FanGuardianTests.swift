@@ -27,29 +27,29 @@ struct FanGuardianTests {
     // MARK: - The built-in curve
 
     @Test("Below 70 °C the curve asks for the floor, never zero")
-    func curveFloor() {
+    func curveFloor() throws {
         let targets = FanGuardian.curveTargets(for: [fan()], dieCelsius: 50)
         // Quantizing 2317 to a 100-RPM step gives 2300, which is BELOW the
         // SMC-reported minimum — the clamp in quantizedTarget is what keeps
         // this legal. 0 RPM is forbidden everywhere in Ice Cube.
         #expect(targets[0] == 2317)
-        #expect(targets[0]! >= 2317)
+        #expect(try #require(targets[0]) >= 2317)
     }
 
     @Test("The curve never commands below Mn or above Mx at any temperature")
-    func curveStaysInRange() {
+    func curveStaysInRange() throws {
         for die in stride(from: 0.0, through: 120.0, by: 0.5) {
-            let target = FanGuardian.curveTargets(for: [fan()], dieCelsius: die)[0]!
+            let target = try #require(FanGuardian.curveTargets(for: [fan()], dieCelsius: die)[0])
             #expect(target >= 2317, "commanded \(target) at \(die) °C")
             #expect(target <= 6800, "commanded \(target) at \(die) °C")
         }
     }
 
     @Test("The curve is monotonic in temperature and maxes out by 95 °C")
-    func curveMonotonic() {
+    func curveMonotonic() throws {
         var previous = 0.0
         for die in stride(from: 60.0, through: 100.0, by: 1.0) {
-            let target = FanGuardian.curveTargets(for: [fan()], dieCelsius: die)[0]!
+            let target = try #require(FanGuardian.curveTargets(for: [fan()], dieCelsius: die)[0])
             #expect(target >= previous, "curve went backwards at \(die) °C")
             previous = target
         }
@@ -148,7 +148,9 @@ struct FanGuardianTests {
     func orphanEscalation() {
         var guardian = FanGuardian()
         let orphan = [fan(mode: .auto, actual: 0)]
-        for _ in 0 ..< 3 { _ = guardian.evaluate(fans: orphan, dieCelsius: 40) }
+        for _ in 0 ..< 3 {
+            _ = guardian.evaluate(fans: orphan, dieCelsius: 40)
+        }
         // Second pass through the debounce escalates to stage 2.
         _ = guardian.evaluate(fans: orphan, dieCelsius: 40)
         _ = guardian.evaluate(fans: orphan, dieCelsius: 40)

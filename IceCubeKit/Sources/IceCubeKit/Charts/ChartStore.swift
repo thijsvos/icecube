@@ -32,7 +32,9 @@ public actor ChartStore {
         case fifteenMinutes
         case oneHour
 
-        public var id: Int { rawValue }
+        public var id: Int {
+            rawValue
+        }
 
         /// The window's span.
         public var seconds: TimeInterval {

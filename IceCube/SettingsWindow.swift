@@ -1,7 +1,7 @@
 // SettingsWindow.swift — the settings window: a custom tab bar with per-tab window sizing.
 
-import ServiceManagement
 import IceCubeKit
+import ServiceManagement
 import SwiftUI
 
 /// Settings as three tabs — General, Menu, Fan Control. A custom toolbar-style

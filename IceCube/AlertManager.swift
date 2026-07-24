@@ -24,7 +24,9 @@ final class AlertManager {
         case hot = 90
         case critical = 95
 
-        var id: Int { rawValue }
+        var id: Int {
+            rawValue
+        }
 
         /// The threshold in °C, or `nil` when alerts are off.
         var celsius: Double? {
@@ -89,7 +91,7 @@ final class AlertManager {
 
     private func requestPermissionIfNeeded() {
         Task {
-            let granted = (try? await UNUserNotificationCenter.current()
+            let granted = await (try? UNUserNotificationCenter.current()
                 .requestAuthorization(options: [.alert, .sound])) ?? false
             permissionDenied = !granted
         }

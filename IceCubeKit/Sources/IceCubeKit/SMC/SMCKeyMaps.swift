@@ -110,9 +110,15 @@ public enum SMCKeyMaps {
 
     /// Classifies a sensor key. The one place prefixes are matched.
     public static func classify(_ key: String) -> SensorClass {
-        if key.hasPrefix("Tp") || key.hasPrefix("Te") { return .cpu }
-        if key.hasPrefix("Tg") { return .gpu }
-        if key.hasPrefix("Tf") || key.hasPrefix("Tc") { return .otherDie }
+        if key.hasPrefix("Tp") || key.hasPrefix("Te") {
+            return .cpu
+        }
+        if key.hasPrefix("Tg") {
+            return .gpu
+        }
+        if key.hasPrefix("Tf") || key.hasPrefix("Tc") {
+            return .otherDie
+        }
         return .ambient
     }
 

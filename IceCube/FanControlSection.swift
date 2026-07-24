@@ -8,8 +8,8 @@ import SwiftUI
 /// controls. Manual mode gets an unmissable orange tint (PLAN.md §1.2), and
 /// "Auto" is always the biggest, easiest action.
 struct FanControlSection: View {
-    // A plain `let`: observation-driven redraw works without @Bindable, which
-    // exists only to project `$`-bindings — and this view forms none.
+    /// A plain `let`: observation-driven redraw works without @Bindable, which
+    /// exists only to project `$`-bindings — and this view forms none.
     let helper: HelperManager
     /// Live fan readings (for slider ranges and current values).
     let fans: [Fan]

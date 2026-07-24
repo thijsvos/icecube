@@ -47,9 +47,13 @@ struct IceCubeApp: App {
                 // connection. `try?` on a sleep also swallows CancellationError,
                 // so the old code ran the shim even after the task was cancelled.
                 for _ in 0 ..< 20 {
-                    if StatusItemShim.enableRightClick() { return }
+                    if StatusItemShim.enableRightClick() {
+                        return
+                    }
                     try? await Task.sleep(for: .milliseconds(100))
-                    if Task.isCancelled { return }
+                    if Task.isCancelled {
+                        return
+                    }
                 }
             }
         }
