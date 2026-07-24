@@ -17,6 +17,23 @@ public enum FanMode: UInt8, Sendable, Codable, Equatable {
     case system = 3
 }
 
+public extension FanMode {
+    /// The mode a raw SMC reading denotes, treating anything unrecognized as
+    /// `.system`.
+    ///
+    /// SAFETY: `UInt8(someDouble)` **traps** on NaN, negatives, and anything
+    /// over 255 — a `fatalError` in disguise, which daemon code paths forbid.
+    /// The mode key's width is not ours to choose: it is whatever this Mac's
+    /// firmware reports (`ui8`, `ui16`, `ui32`, …), and `SMCKeyCodec` only
+    /// range-checks the `flt` case. A daemon crash here would skip the SIGTERM
+    /// handler and strand the fans wherever they were, so an implausible
+    /// reading must degrade to `.system`, never trap.
+    init(smcValue: Double) {
+        self = UInt8(exactly: smcValue.rounded(.towardZero))
+            .flatMap(FanMode.init(rawValue:)) ?? .system
+    }
+}
+
 /// One fan as read from the SMC.
 public struct Fan: Identifiable, Sendable, Codable, Equatable {
     /// SMC fan index `i` in `F{i}…` keys (0-based).

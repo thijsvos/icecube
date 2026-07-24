@@ -37,6 +37,46 @@ struct SMCParamStructABITests {
     }
 }
 
+/// `FanMode(smcValue:)` is the daemon's only decoder for the fan-mode key, and
+/// the daemon may never trap. These are the readings that would have crashed
+/// the old `UInt8(raw)` conversion.
+@Suite("FanMode from raw SMC readings")
+struct FanModeDecodingTests {
+    @Test("Known modes decode, including from a wider-than-ui8 key")
+    func knownModes() {
+        #expect(FanMode(smcValue: 0) == .auto)
+        #expect(FanMode(smcValue: 1) == .forced)
+        #expect(FanMode(smcValue: 3) == .system)
+        // A ui16/ui32-typed mode key still carries a small value.
+        #expect(FanMode(smcValue: 3.0) == .system)
+    }
+
+    @Test("Implausible readings degrade to .system instead of trapping")
+    func implausibleReadings() {
+        // Each of these traps under `UInt8(raw)`.
+        #expect(FanMode(smcValue: -1) == .system)
+        #expect(FanMode(smcValue: 256) == .system)
+        #expect(FanMode(smcValue: 65535) == .system)
+        #expect(FanMode(smcValue: 4_294_967_295) == .system)
+        #expect(FanMode(smcValue: .nan) == .system)
+        #expect(FanMode(smcValue: .infinity) == .system)
+        #expect(FanMode(smcValue: -.infinity) == .system)
+    }
+
+    @Test("In-range values that name no case degrade to .system")
+    func unknownButInRange() {
+        #expect(FanMode(smcValue: 2) == .system)
+        #expect(FanMode(smcValue: 255) == .system)
+    }
+
+    @Test("Fractional readings truncate toward zero, as the old conversion did")
+    func truncation() {
+        #expect(FanMode(smcValue: 1.9) == .forced)
+        #expect(FanMode(smcValue: 3.4) == .system)
+        #expect(FanMode(smcValue: 0.6) == .auto)
+    }
+}
+
 @Suite("SMCKeyMaps")
 struct SMCKeyMapsTests {
     @Test("The owner's Mac14,9 gets the curated M2 map (CPU, GPU, airflow present)")

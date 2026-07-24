@@ -55,10 +55,9 @@ public actor SystemSMCProvider: SMCProviding {
             let maxRPM = await (try? connection.readDouble("F\(i)Mx")) ?? 0
             var mode = FanMode.system
             if let modeKey = descriptor.modeKey,
-               let raw = try? await connection.readDouble(modeKey),
-               let parsed = FanMode(rawValue: UInt8(raw))
+               let raw = try? await connection.readDouble(modeKey)
             {
-                mode = parsed
+                mode = FanMode(smcValue: raw)
             }
             result.append(Fan(
                 id: i,

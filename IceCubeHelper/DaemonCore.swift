@@ -422,13 +422,21 @@ actor DaemonCore {
     // MARK: - Hardware reads (the daemon trusts only its own readings)
 
     private func readFans() async throws -> [Fan] {
-        let count = try await Int(port.readDouble("FNum"))
+        // `Int(someDouble)` traps on NaN/±inf and on anything past Int.max;
+        // a garbage fan count must yield no fans, not a dead daemon.
+        let rawCount = try await port.readDouble("FNum")
+        let count = Int(exactly: rawCount.rounded(.towardZero)) ?? 0
+        guard (0 ... 64).contains(count) else {
+            throw IceCubeError.smcDecodingFailed(
+                key: "FNum", type: "fan count", bytes: []
+            )
+        }
         var fans: [Fan] = []
         for i in 0 ..< count {
             let mode: FanMode = if let raw = try? await port.readDouble("F\(i)Md") {
-                FanMode(rawValue: UInt8(raw)) ?? .system
+                FanMode(smcValue: raw)
             } else if let raw = try? await port.readDouble("F\(i)md") {
-                FanMode(rawValue: UInt8(raw)) ?? .system
+                FanMode(smcValue: raw)
             } else {
                 .system
             }
