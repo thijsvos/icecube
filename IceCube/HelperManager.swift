@@ -118,10 +118,22 @@ final class HelperManager {
     /// daemon's status remains the truth for what is actually enforced).
     private(set) var lastAppliedConfig: FanConfig?
 
+    private static let lastCurveKey = "lastCurveConfig"
+    /// Guards the once-per-session auto-resume of the last curve on launch.
+    @ObservationIgnored private var didAutoResume = false
+
     func apply(_ config: FanConfig) async {
         await run {
             try await self.client.apply(config)
             self.lastAppliedConfig = config
+        }
+        // Remember a curve profile so a later launch can resume it; a
+        // deliberate Auto forgets it (the user wants macOS in control).
+        let defaults = UserDefaults.standard
+        if config.mode == .curve, let data = try? JSONEncoder().encode(config) {
+            defaults.set(data, forKey: Self.lastCurveKey)
+        } else if config.mode == .auto {
+            defaults.removeObject(forKey: Self.lastCurveKey)
         }
     }
 
@@ -134,6 +146,21 @@ final class HelperManager {
             try await self.client.setAllAuto()
             self.lastAppliedConfig = .auto
         }
+        UserDefaults.standard.removeObject(forKey: Self.lastCurveKey)
+    }
+
+    /// On the first connection of a session, if the daemon is idling in auto
+    /// (not already running a persisted curve) and the user had a curve
+    /// profile last time, resume it — so opening Ice Cube actually starts
+    /// cooling instead of leaving the machine on macOS's quiet auto behavior.
+    private func autoResumeIfNeeded() async {
+        guard !didAutoResume, let mode = status?.mode else { return }
+        didAutoResume = true
+        guard mode == .auto else { return } // already running something — leave it
+        guard let data = UserDefaults.standard.data(forKey: Self.lastCurveKey),
+              let config = try? JSONDecoder().decode(FanConfig.self, from: data),
+              config.mode == .curve else { return }
+        await apply(config)
     }
 
     private func run(_ operation: () async throws -> Void) async {
@@ -170,6 +197,7 @@ final class HelperManager {
         guard case .connected = connection else { return }
         client.heartbeat()
         await refreshStatus()
+        await autoResumeIfNeeded()
     }
 
     private func refreshStatus() async {
