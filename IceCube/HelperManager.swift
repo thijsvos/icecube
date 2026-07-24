@@ -119,18 +119,36 @@ final class HelperManager {
         }
     }
 
+    /// Why registration cannot succeed right now, or `nil` to go ahead.
+    /// See ``RegistrationPreflight`` for why this is checked up front.
+    private var registrationBlocker: String? {
+        RegistrationPreflight.blocker(
+            teamID: CodesignPinning.currentTeamID(),
+            bundlePath: Bundle.main.bundleURL.resolvingSymlinksInPath().path
+        )
+    }
+
     /// Registers the daemon. On a fresh machine this triggers the one-time
     /// System Settings approval flow (XCODE_GUIDE.md §4).
     func register() {
+        if let blocker = registrationBlocker {
+            lastError = blocker
+            log.error("register() blocked: \(blocker, privacy: .public)")
+            refreshRegistration()
+            return
+        }
         do {
             try service.register()
             lastError = nil
         } catch {
-            // The classic causes: not running from /Applications, or the
-            // free-account limitation the Phase 0.5 spike exists to probe.
-            lastError = "Registration failed: \(error.localizedDescription) — "
-                + "make sure Ice Cube runs from /Applications (XCODE_GUIDE §4)."
-            log.error("register() failed: \(error.localizedDescription, privacy: .public)")
+            // Report what macOS actually said, including the OSStatus — the old
+            // message blamed the app's location for every failure, which sent
+            // the reader the wrong way when the real cause was code signing.
+            let code = (error as NSError).code
+            lastError = "Registration failed (\(code)): \(error.localizedDescription)"
+            log.error(
+                "register() failed (\(code, privacy: .public)): \(error.localizedDescription, privacy: .public)"
+            )
         }
         refreshRegistration()
     }
@@ -159,6 +177,17 @@ final class HelperManager {
     /// retry `register()` with a short backoff so a single click does the whole
     /// job, and only surface an error once the retries are exhausted.
     func reregister() async {
+        // SAFETY-OF-SETUP: never tear down a working registration we already
+        // know we cannot restore. Re-register is unregister-then-register, so a
+        // register that was always going to fail (unsigned build, wrong
+        // location) would leave the user with no helper and no fan control —
+        // strictly worse than before they clicked, and for a reason the old
+        // error message actively misdirected them about.
+        if let blocker = registrationBlocker {
+            lastError = blocker
+            log.error("reregister() refused: \(blocker, privacy: .public)")
+            return
+        }
         isReregistering = true
         defer { isReregistering = false }
         await unregister()
