@@ -168,14 +168,30 @@ final class AppState {
                             .filter { chartSettings.includesRow(id: $0.id) }
                         chartXDomain = new.date.addingTimeInterval(-chartWindow) ... new.date
                     }
-                case let .failure(message):
+                case let .failure(error):
                     // Keep the last good snapshot on screen. One transient
                     // miss is silent; only a persistent failure (3+ ticks)
                     // earns the error row — appearing/disappearing captions
                     // are exactly the layout jump we forbid.
+                    //
+                    // A typed error lets us tell permanent from transient:
+                    // smcKeyNotFound on an unmapped Mac will never resolve by
+                    // waiting, and it is precisely the case the diagnostics
+                    // export exists to turn into a curated key map. Waiting
+                    // three ticks to say so — and saying nothing about what to
+                    // do — was the cost of flattening this to a String.
                     consecutiveFailures += 1
-                    if consecutiveFailures >= 3 {
-                        errorMessage = message
+                    switch error {
+                    case .smcKeyNotFound, .smcDecodingFailed:
+                        errorMessage = error.localizedDescription
+                            + " Export Diagnostics to help map this Mac."
+                    case .smcNotPrivileged:
+                        // Documented as "the app should never see this".
+                        errorMessage = error.localizedDescription
+                    default:
+                        if consecutiveFailures >= 3 {
+                            errorMessage = error.localizedDescription
+                        }
                     }
                 }
             }

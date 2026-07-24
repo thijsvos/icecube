@@ -7,7 +7,11 @@ import Foundation
 /// should show a message and keep polling, never kill the pipeline.
 public enum SMCPollEvent: Sendable {
     case snapshot(SMCSnapshot)
-    case failure(String)
+    /// Why this tick failed, as the typed error — not a flattened string.
+    /// Consumers need to tell a permanent failure (`smcKeyNotFound` on an
+    /// unmapped Mac, which the diagnostics export exists to fix) from a
+    /// transient hiccup; a `String` made those indistinguishable.
+    case failure(IceCubeError)
 }
 
 /// Polls an ``SMCProviding`` on a fixed cadence and publishes the results as
@@ -39,10 +43,10 @@ public struct SMCPoller: Sendable {
         return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
             let task = Task {
                 while !Task.isCancelled {
-                    do {
+                    do throws(IceCubeError) {
                         try await continuation.yield(.snapshot(provider.snapshot()))
                     } catch {
-                        continuation.yield(.failure(error.localizedDescription))
+                        continuation.yield(.failure(error))
                     }
                     try? await Task.sleep(for: interval)
                 }

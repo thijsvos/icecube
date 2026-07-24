@@ -37,13 +37,13 @@ public actor SystemSMCProvider: SMCProviding {
 
     /// Opens the SMC. Throws `IceCubeError.smcConnectionFailed` when there is
     /// no AppleSMC service to talk to.
-    public init() throws {
+    public init() throws(IceCubeError) {
         connection = try SMCConnection()
     }
 
     // MARK: - SMCProviding
 
-    public func fans() async throws -> [Fan] {
+    public func fans() async throws(IceCubeError) -> [Fan] {
         var result: [Fan] = []
         for descriptor in try await fanDescriptors() {
             let i = descriptor.id
@@ -72,7 +72,7 @@ public actor SystemSMCProvider: SMCProviding {
         return result
     }
 
-    public func temperatures() async throws -> [SensorReading] {
+    public func temperatures() async throws(IceCubeError) -> [SensorReading] {
         // The list is STATIC after discovery: every discovered sensor appears
         // every tick, in the same order. A read that fails or comes back
         // implausible holds the sensor's last good value instead of dropping
@@ -91,7 +91,7 @@ public actor SystemSMCProvider: SMCProviding {
         return readings
     }
 
-    public func keyDump() async throws -> [SMCKeyDump] {
+    public func keyDump() async throws(IceCubeError) -> [SMCKeyDump] {
         // Key NAMES and the #KEY count are immutable for a boot; only values
         // change. Enumerate the names once (skipping unprintable oddities),
         // then every refresh only re-reads values — the Sensors window polls
@@ -131,7 +131,7 @@ public actor SystemSMCProvider: SMCProviding {
 
     /// Every SMC key name, enumerated once and cached (names don't change
     /// for a boot). Unprintable/garbage names are skipped.
-    private func enumeratedKeyNames() async throws -> [String] {
+    private func enumeratedKeyNames() async throws(IceCubeError) -> [String] {
         if let cachedKeyNames {
             return cachedKeyNames
         }
@@ -149,7 +149,7 @@ public actor SystemSMCProvider: SMCProviding {
 
     // MARK: - Discovery (cached)
 
-    private func fanDescriptors() async throws -> [FanDescriptor] {
+    private func fanDescriptors() async throws(IceCubeError) -> [FanDescriptor] {
         if let discoveredFans {
             return discoveredFans
         }
@@ -189,7 +189,7 @@ public actor SystemSMCProvider: SMCProviding {
         return "Fan \(index + 1)"
     }
 
-    private func sensorDescriptors() async throws -> [SMCKeyMaps.SensorDescriptor] {
+    private func sensorDescriptors() async throws(IceCubeError) -> [SMCKeyMaps.SensorDescriptor] {
         if let discoveredSensors {
             return discoveredSensors
         }
@@ -217,7 +217,7 @@ public actor SystemSMCProvider: SMCProviding {
     /// current value is plausible, labeled by its key. Ugly labels, real data
     /// — and the sensors browser + diagnostics report exist so the community
     /// can turn exactly this situation into a curated mapping.
-    private func enumeratedTemperatureSensors() async throws -> [SMCKeyMaps.SensorDescriptor] {
+    private func enumeratedTemperatureSensors() async throws(IceCubeError) -> [SMCKeyMaps.SensorDescriptor] {
         let count = try await connection.keyCount()
         var found: [SMCKeyMaps.SensorDescriptor] = []
         for index in 0 ..< count {

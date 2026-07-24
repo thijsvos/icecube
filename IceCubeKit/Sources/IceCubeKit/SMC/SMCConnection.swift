@@ -34,7 +34,7 @@ public actor SMCConnection {
     ///
     /// - Throws: `IceCubeError.smcConnectionFailed` if the service is missing
     ///   (non-Mac?) or refuses the connection.
-    public init() throws {
+    public init() throws(IceCubeError) {
         let service = IOServiceGetMatchingService(
             kIOMainPortDefault, IOServiceMatching("AppleSMC")
         )
@@ -62,7 +62,7 @@ public actor SMCConnection {
     ///
     /// - Throws: `IceCubeError.smcKeyNotFound` if the key does not exist on
     ///   this machine; other `IceCubeError` cases for transport failures.
-    public func keyInfo(for key: String) throws -> KeyInfo {
+    public func keyInfo(for key: String) throws(IceCubeError) -> KeyInfo {
         if let cached = keyInfoCache[key] {
             return cached
         }
@@ -85,7 +85,7 @@ public actor SMCConnection {
     }
 
     /// Reads `key`'s raw bytes plus its metadata.
-    public func readBytes(_ key: String) throws -> (bytes: [UInt8], info: KeyInfo) {
+    public func readBytes(_ key: String) throws(IceCubeError) -> (bytes: [UInt8], info: KeyInfo) {
         let info = try keyInfo(for: key)
         var input = SMCParamStruct()
         input.key = try SMCKeyCodec.keyCode(for: key)
@@ -99,7 +99,7 @@ public actor SMCConnection {
     ///
     /// - Throws: `IceCubeError.smcDecodingFailed` when the reported type is one
     ///   Ice Cube has no numeric decoding for (see `SMCDataType`).
-    public func readDouble(_ key: String) throws -> Double {
+    public func readDouble(_ key: String) throws(IceCubeError) -> Double {
         let (bytes, info) = try readBytes(key)
         guard let type = SMCDataType(rawValue: info.type) else {
             throw IceCubeError.smcDecodingFailed(key: key, type: info.type, bytes: bytes)
@@ -108,7 +108,7 @@ public actor SMCConnection {
     }
 
     /// Reads a `{fds` fan-descriptor key and decodes its name field.
-    public func readString(_ key: String) throws -> String {
+    public func readString(_ key: String) throws(IceCubeError) -> String {
         let (bytes, _) = try readBytes(key)
         return try SMCKeyCodec.decodeString(bytes, forKey: key)
     }
@@ -116,7 +116,7 @@ public actor SMCConnection {
     // MARK: - Enumeration (powers the sensors browser + diagnostics)
 
     /// Total number of keys this machine's SMC exposes (the `#KEY` count).
-    public func keyCount() throws -> Int {
+    public func keyCount() throws(IceCubeError) -> Int {
         try Int(readDouble("#KEY"))
     }
 
@@ -124,7 +124,7 @@ public actor SMCConnection {
     ///
     /// - Throws: `IceCubeError.smcDecodingFailed` for keys whose 4 characters
     ///   are not printable ASCII (rare firmware oddities — callers skip them).
-    public func key(atIndex index: Int) throws -> String {
+    public func key(atIndex index: Int) throws(IceCubeError) -> String {
         var input = SMCParamStruct()
         input.data8 = SMCCommand.readKeyByIndex
         input.data32 = UInt32(index)
@@ -137,7 +137,7 @@ public actor SMCConnection {
     /// Performs one SMC call and applies the project's error discipline:
     /// check `kern_return_t` first, then **always** the firmware result byte
     /// (IOKit can report success on a firmware-rejected operation).
-    private func call(_ input: inout SMCParamStruct, key: String) throws -> SMCParamStruct {
+    private func call(_ input: inout SMCParamStruct, key: String) throws(IceCubeError) -> SMCParamStruct {
         var output = SMCParamStruct()
         var outputSize = MemoryLayout<SMCParamStruct>.stride
         let kr = IOConnectCallStructMethod(
@@ -154,13 +154,13 @@ public actor SMCConnection {
             }
             throw IceCubeError.smcCallFailed(key: key, kernReturn: kr)
         }
-        switch output.result {
-        case SMCResult.ok:
+        switch SMCResult(rawValue: output.result) {
+        case .ok:
             return output
-        case SMCResult.keyNotFound:
+        case .keyNotFound:
             throw IceCubeError.smcKeyNotFound(key: key)
-        default:
-            throw IceCubeError.smcFirmwareRejected(key: key, result: output.result)
+        case let result:
+            throw IceCubeError.smcFirmwareRejected(key: key, result: result)
         }
     }
 }

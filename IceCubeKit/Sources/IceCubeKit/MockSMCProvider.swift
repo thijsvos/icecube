@@ -46,11 +46,11 @@ public actor MockSMCProvider: SMCProviding {
         self.now = now
     }
 
-    public func fans() async throws -> [Fan] {
+    public func fans() async throws(IceCubeError) -> [Fan] {
         Self.fans(at: now().timeIntervalSince1970)
     }
 
-    public func temperatures() async throws -> [SensorReading] {
+    public func temperatures() async throws(IceCubeError) -> [SensorReading] {
         Self.temperatures(at: now().timeIntervalSince1970)
     }
 
@@ -58,7 +58,7 @@ public actor MockSMCProvider: SMCProviding {
     /// same values, so the sensors browser and diagnostics export are fully
     /// demonstrable in simulated mode. (A simulated report is marked as such
     /// by `DiagnosticsReport.simulated` — it can never pass as a machine map.)
-    public func keyDump() async throws -> [SMCKeyDump] {
+    public func keyDump() async throws(IceCubeError) -> [SMCKeyDump] {
         let t = now().timeIntervalSince1970
         var dump: [SMCKeyDump] = [
             entry(key: "#KEY", type: .uint32, value: Double(2 + Self.fanSpecs.count * 5 + Self.sensorSpecs.count)),

@@ -74,7 +74,7 @@ public struct DiagnosticsReport: Sendable, Codable, Equatable {
         provider: any SMCProviding,
         isSimulated: Bool,
         appVersion: String
-    ) async throws -> DiagnosticsReport {
+    ) async throws(IceCubeError) -> DiagnosticsReport {
         let snapshot = try await provider.snapshot()
         return try await DiagnosticsReport(
             schemaVersion: 1,

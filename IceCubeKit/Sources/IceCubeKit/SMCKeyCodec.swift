@@ -66,7 +66,7 @@ public enum SMCKeyCodec {
     ///   printable-ASCII characters (0x20…0x7E; `"#KEY"` and `"FS! "` are
     ///   valid). Key-name failures use the *decoding* case in both directions
     ///   because it carries the offending key string and its bytes.
-    public static func keyCode(for key: String) throws -> UInt32 {
+    public static func keyCode(for key: String) throws(IceCubeError) -> UInt32 {
         let scalars = Array(key.unicodeScalars)
         guard scalars.count == 4, scalars.allSatisfy({ (0x20 ... 0x7E).contains($0.value) }) else {
             throw IceCubeError.smcDecodingFailed(key: key, type: "FourCharCode", bytes: Array(key.utf8))
@@ -80,7 +80,7 @@ public enum SMCKeyCodec {
     /// - Throws: `IceCubeError.smcDecodingFailed` if any byte falls outside
     ///   printable ASCII — a garbage code is more useful as an error than as
     ///   mojibake in a sensor list.
-    public static func keyString(from code: UInt32) throws -> String {
+    public static func keyString(from code: UInt32) throws(IceCubeError) -> String {
         let bytes: [UInt8] = [
             UInt8(code >> 24), UInt8((code >> 16) & 0xFF),
             UInt8((code >> 8) & 0xFF), UInt8(code & 0xFF),
@@ -107,7 +107,7 @@ public enum SMCKeyCodec {
     ///   rather than left to poison a curve or a UI label downstream.
     public static func decodeDouble(
         _ bytes: [UInt8], as type: SMCDataType, forKey key: String = ""
-    ) throws -> Double {
+    ) throws(IceCubeError) -> Double {
         try checkCount(bytes, type: type, key: key)
         switch type {
         case .float:
@@ -137,7 +137,7 @@ public enum SMCKeyCodec {
     /// Decodes a 1-byte `flag` value: 0 is `false`, anything else is `true`.
     ///
     /// - Throws: `IceCubeError.smcDecodingFailed` if `bytes` is not exactly 1 byte.
-    public static func decodeBool(_ bytes: [UInt8], forKey key: String = "") throws -> Bool {
+    public static func decodeBool(_ bytes: [UInt8], forKey key: String = "") throws(IceCubeError) -> Bool {
         try checkCount(bytes, type: .flag, key: key)
         return bytes[0] != 0
     }
@@ -151,7 +151,7 @@ public enum SMCKeyCodec {
     ///   all padding.
     /// - Throws: `IceCubeError.smcDecodingFailed` if `bytes` is not exactly 16
     ///   bytes, or the name field contains non-printable/non-ASCII garbage.
-    public static func decodeString(_ bytes: [UInt8], forKey key: String = "") throws -> String {
+    public static func decodeString(_ bytes: [UInt8], forKey key: String = "") throws(IceCubeError) -> String {
         try checkCount(bytes, type: .fanDescriptor, key: key)
         let nameField = bytes[4 ..< 16].prefix { $0 != 0 } // stop at NUL padding
         guard nameField.allSatisfy({ (0x20 ... 0x7E).contains($0) }) else {
@@ -178,7 +178,7 @@ public enum SMCKeyCodec {
     ///   outside the type's representable range (including `flt` overflow of
     ///   float32), fractional values for integer types, and the non-writable
     ///   types (`flag`, `{fds`).
-    public static func encode(_ value: Double, as type: SMCDataType) throws -> [UInt8] {
+    public static func encode(_ value: Double, as type: SMCDataType) throws(IceCubeError) -> [UInt8] {
         guard value.isFinite else {
             throw IceCubeError.smcEncodingFailed(type: type.name, value: value)
         }
@@ -216,14 +216,14 @@ public enum SMCKeyCodec {
 
     /// Throws `smcDecodingFailed` (with the offending bytes) unless `bytes`
     /// has exactly the byte count `type` requires.
-    private static func checkCount(_ bytes: [UInt8], type: SMCDataType, key: String) throws {
+    private static func checkCount(_ bytes: [UInt8], type: SMCDataType, key: String) throws(IceCubeError) {
         guard bytes.count == type.byteCount else {
             throw IceCubeError.smcDecodingFailed(key: key, type: type.name, bytes: bytes)
         }
     }
 
     /// Throws `smcEncodingFailed` unless `value` is a whole number in `0...max`.
-    private static func checkIntegral(_ value: Double, max: Double, type: SMCDataType) throws {
+    private static func checkIntegral(_ value: Double, max: Double, type: SMCDataType) throws(IceCubeError) {
         guard value >= 0, value <= max, value.truncatingRemainder(dividingBy: 1) == 0 else {
             throw IceCubeError.smcEncodingFailed(type: type.name, value: value)
         }

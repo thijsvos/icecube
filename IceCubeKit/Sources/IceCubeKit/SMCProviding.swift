@@ -17,22 +17,22 @@ import Foundation
 public protocol SMCProviding: Sendable {
     /// All fans the SMC reports, discovered via `FNum` and the per-fan
     /// `F{i}Ac` / `F{i}Tg` / `F{i}Mn` / `F{i}Mx` keys.
-    func fans() async throws -> [Fan]
+    func fans() async throws(IceCubeError) -> [Fan]
 
     /// All monitored temperature sensors, in degrees Celsius.
-    func temperatures() async throws -> [SensorReading]
+    func temperatures() async throws(IceCubeError) -> [SensorReading]
 
     /// Every SMC key this machine exposes, with metadata and a best-effort
     /// decoded value — the raw material of the sensors browser and the
     /// diagnostics report. Expensive (thousands of reads on real hardware):
     /// call on demand, never from the polling loop.
-    func keyDump() async throws -> [SMCKeyDump]
+    func keyDump() async throws(IceCubeError) -> [SMCKeyDump]
 }
 
 public extension SMCProviding {
     /// One timestamped reading of everything — the unit that polling publishes
     /// and charts consume.
-    func snapshot() async throws -> SMCSnapshot {
+    func snapshot() async throws(IceCubeError) -> SMCSnapshot {
         try await SMCSnapshot(date: Date(), fans: fans(), temperatures: temperatures())
     }
 }

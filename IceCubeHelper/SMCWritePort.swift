@@ -141,12 +141,12 @@ actor SMCWritePort: SMCControlPort {
             }
             throw IceCubeError.smcCallFailed(key: key, kernReturn: kr)
         }
-        switch output.result {
-        case SMCResult.ok:
+        switch SMCResult(rawValue: output.result) {
+        case .ok:
             return output
-        case SMCResult.keyNotFound:
+        case .keyNotFound:
             throw IceCubeError.smcKeyNotFound(key: key)
-        default:
+        case let result:
             // `format:` keeps the byte a typed os_log field, so Console and
             // `log show --predicate` can filter on it — and it zero-pads, where
             // String(_:radix:) logged 0x0A as "0xa". This path also runs inside
@@ -155,10 +155,10 @@ actor SMCWritePort: SMCControlPort {
             log.error(
                 """
                 SMC firmware rejected \(key, privacy: .public): \
-                result \(output.result, format: .hex(includePrefix: true, uppercase: true), privacy: .public)
+                result \(result.rawValue, format: .hex(includePrefix: true, uppercase: true), privacy: .public)
                 """
             )
-            throw IceCubeError.smcFirmwareRejected(key: key, result: output.result)
+            throw IceCubeError.smcFirmwareRejected(key: key, result: result)
         }
     }
 }

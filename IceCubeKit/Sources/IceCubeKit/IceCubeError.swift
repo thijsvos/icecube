@@ -6,14 +6,41 @@ import Foundation
 ///
 /// IOKit can return `kIOReturnSuccess` while the firmware rejected the
 /// operation — the result byte must be checked on **every** SMC call.
-public enum SMCResult {
+///
+/// A `RawRepresentable` struct rather than an `enum`, deliberately: the
+/// firmware may answer with a byte we have no case for, and an unknown result
+/// is an expected outcome, not a decoding failure. The struct keeps the
+/// `default:` fallthrough that ``SMCConnection`` and `SMCWritePort` need while
+/// still making the value a distinct type — it is not a diagnostic detail but a
+/// *control signal*: ``FanWriteSequencer`` matches on `badCommand` to choose
+/// between the direct write and the M3/M4 `Ftst` unlock branch.
+public struct SMCResult: RawRepresentable, Sendable, Equatable, Hashable {
+    public let rawValue: UInt8
+
+    public init(rawValue: UInt8) {
+        self.rawValue = rawValue
+    }
+
     /// Operation accepted by the firmware.
-    public static let ok: UInt8 = 0x00
+    public static let ok = SMCResult(rawValue: 0x00)
     /// Rejected — e.g. a fan-mode write while `thermalmonitord` holds mode 3
     /// on M3+ (needs the `Ftst` unlock sequence first).
-    public static let badCommand: UInt8 = 0x82
+    public static let badCommand = SMCResult(rawValue: 0x82)
     /// The key does not exist on this machine/generation.
-    public static let keyNotFound: UInt8 = 0x84
+    public static let keyNotFound = SMCResult(rawValue: 0x84)
+}
+
+extension SMCResult: CustomStringConvertible {
+    /// Zero-padded hex, so a log line reads `0x82` rather than `0x8_2`-style
+    /// surprises and an unknown code is still self-describing.
+    public var description: String {
+        switch self {
+        case .ok: "0x00 (ok)"
+        case .badCommand: "0x82 (badCommand)"
+        case .keyNotFound: "0x84 (keyNotFound)"
+        default: String(format: "0x%02X", rawValue)
+        }
+    }
 }
 
 /// `kIOReturnNotPrivileged` — fan *writes* fail with this without root.
@@ -28,7 +55,7 @@ public enum IceCubeError: Error, Sendable, Equatable {
     /// An IOKit call itself failed (transport-level, not firmware-level).
     case smcCallFailed(key: String, kernReturn: Int32)
     /// The firmware answered but rejected the operation — see `SMCResult`.
-    case smcFirmwareRejected(key: String, result: UInt8)
+    case smcFirmwareRejected(key: String, result: SMCResult)
     /// The key does not exist on this machine (firmware result 0x84).
     case smcKeyNotFound(key: String)
     /// Write attempted without root (`kIOReturnNotPrivileged`) — only the
@@ -48,7 +75,7 @@ extension IceCubeError: LocalizedError {
         case let .smcCallFailed(key, kr):
             "SMC call for key '\(key)' failed (IOKit error \(String(format: "0x%08X", UInt32(bitPattern: kr))))."
         case let .smcFirmwareRejected(key, result):
-            "SMC firmware rejected the operation on key '\(key)' (result \(String(format: "0x%02X", result)))."
+            "SMC firmware rejected the operation on key '\(key)' (result \(result))."
         case let .smcKeyNotFound(key):
             "SMC key '\(key)' does not exist on this machine."
         case let .smcNotPrivileged(key):
