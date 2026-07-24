@@ -1,61 +1,29 @@
-// MenuBarGlyph.swift — the menu-bar icon: an original melting-ice-cube silhouette drawn as a template image.
+// MenuBarGlyph.swift — the menu-bar icon: the Noto ice-cube artwork, rendered small and in color.
 
 import AppKit
 
-/// The menu-bar status glyph: a small isometric ice cube with two drips and a
-/// puddle. Drawn in code as a monochrome **template image** (the system tints
-/// it for light/dark), so it stays a crisp brand mark at ~16 pt.
+/// The menu-bar status glyph: the 🧊 ice-cube artwork from Google Noto Emoji
+/// (Apache-2.0; see art/README.md), sized for the menu bar.
 ///
-/// Why not an SF Symbol or a downloaded icon: there is no ice-cube SF Symbol,
-/// and third-party icons carry attribution/redistribution licenses that an
-/// MIT app shouldn't inherit. This is original art — brand-consistent with the
-/// app icon, and unambiguously "a cube" rather than a temperature symbol (the
-/// snowflake it replaced read as a live "it's cold" status, which it never was).
+/// It's shown in **color** (not a tinted template) because "looks like ice"
+/// comes from the translucency and blue — a monochrome silhouette just reads
+/// as a box. It replaced the snowflake, which looked like a live "it's cold"
+/// status rather than a brand mark. The temperature number beside it carries
+/// the actual temperature.
 enum MenuBarGlyph {
-    /// A 18×18 template image of the melting ice cube.
+    /// The ice cube sized for the menu bar (~18 pt; the source is high-res so
+    /// it stays crisp on Retina).
     static let iceCube: NSImage = {
-        let px: CGFloat = 18
-        let image = NSImage(size: NSSize(width: px, height: px), flipped: false) { _ in
-            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
-            ctx.setLineJoin(.round)
-            ctx.setFillColor(NSColor.black.cgColor)
-
-            func fill(_ pts: [(CGFloat, CGFloat)]) {
-                ctx.move(to: CGPoint(x: pts[0].0 * px, y: pts[0].1 * px))
-                for p in pts.dropFirst() {
-                    ctx.addLine(to: CGPoint(x: p.0 * px, y: p.1 * px))
-                }
-                ctx.closePath()
-                ctx.fillPath()
-            }
-            func drip(_ x: CGFloat, _ topY: CGFloat, _ w: CGFloat, _ len: CGFloat) -> [(CGFloat, CGFloat)] {
-                [
-                    (x - w, topY),
-                    (x + w, topY),
-                    (x + w * 0.5, topY - len * 0.5),
-                    (x, topY - len),
-                    (x - w * 0.5, topY - len * 0.5),
-                ]
-            }
-
-            // Solid cube silhouette (outer hexagon) + puddle + two drips.
-            fill([(0.50, 0.82), (0.79, 0.67), (0.79, 0.38), (0.50, 0.25), (0.21, 0.38), (0.21, 0.67)])
-            ctx.fillEllipse(in: CGRect(x: 0.16 * px, y: 0.10 * px, width: 0.56 * px, height: 0.13 * px))
-            fill(drip(0.30, 0.31, 0.05, 0.14))
-            fill(drip(0.66, 0.31, 0.055, 0.20))
-
-            // Punch out the three facet edges so it reads as a 3D cube, not a blob.
-            ctx.setBlendMode(.clear)
-            ctx.setLineWidth(px * 0.045)
-            ctx.setLineCap(.round)
-            ctx.move(to: CGPoint(x: 0.50 * px, y: 0.82 * px)); ctx.addLine(to: CGPoint(x: 0.50 * px, y: 0.54 * px))
-            ctx.addLine(to: CGPoint(x: 0.21 * px, y: 0.67 * px))
-            ctx.move(to: CGPoint(x: 0.50 * px, y: 0.54 * px)); ctx.addLine(to: CGPoint(x: 0.79 * px, y: 0.67 * px))
-            ctx.move(to: CGPoint(x: 0.50 * px, y: 0.54 * px)); ctx.addLine(to: CGPoint(x: 0.50 * px, y: 0.25 * px))
-            ctx.strokePath()
-            return true
+        let image: NSImage = if let url = Bundle.main.url(forResource: "MenuBarIceCube", withExtension: "png"),
+                                let loaded = NSImage(contentsOf: url)
+        {
+            loaded
+        } else {
+            // Fallback so the menu bar is never empty if the resource is missing.
+            NSImage(systemSymbolName: "cube.transparent", accessibilityDescription: "Ice Cube")
+                ?? NSImage()
         }
-        image.isTemplate = true // let the menu bar tint it for light/dark
+        image.size = NSSize(width: 18, height: 18)
         return image
     }()
 }

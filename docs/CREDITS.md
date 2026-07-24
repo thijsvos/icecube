@@ -18,3 +18,10 @@ Ice Cube's code is original (MIT), but it stands on community research:
   this project's implementation.
 - Apple TN3127 (code-signing requirement strings) and Quinn "The Eskimo!"'s
   SMAppService guidance shaped the XPC pinning and daemon registration.
+
+## Artwork
+
+- **App icon & menu-bar glyph**: the 🧊 "Ice" emoji (U+1F9CA) from
+  **[Google Noto Emoji](https://github.com/googlefonts/noto-emoji)**,
+  licensed **Apache 2.0**. Composited onto Ice Cube's gradient background and
+  rescaled. Copyright © Google Inc. See `art/README.md`.
