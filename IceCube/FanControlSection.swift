@@ -169,13 +169,7 @@ struct FanControlSection: View {
         HStack(spacing: 6) {
             ForEach(PresetStore.builtins) { preset in
                 Button(preset.name) {
-                    Task {
-                        var config = preset.config
-                        if config.mode == .curve {
-                            config.persistsWithoutApp = persistCurve
-                        }
-                        await helper.apply(config)
-                    }
+                    Task { await helper.applyPreset(preset, persistCurve: persistCurve) }
                 }
                 .buttonStyle(.bordered)
                 .tint(isActivePreset(preset) ? Theme.accent : nil)
@@ -190,10 +184,8 @@ struct FanControlSection: View {
     /// Highlight from the last config this app sent, cross-checked against
     /// the mode the daemon actually reports.
     private func isActivePreset(_ preset: Preset) -> Bool {
-        guard let applied = helper.lastAppliedConfig,
-              helper.status?.mode == preset.config.mode else { return false }
-        return applied.mode == preset.config.mode
-            && applied.sharedCurve == preset.config.sharedCurve
+        helper.status?.mode == preset.config.mode
+            && PresetHighlight.matches(preset, applied: helper.lastAppliedConfig)
     }
 
     private var controls: some View {

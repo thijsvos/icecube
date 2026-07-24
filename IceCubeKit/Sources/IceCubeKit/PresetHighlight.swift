@@ -12,6 +12,24 @@ import Foundation
 /// yet the app still remembers the curve — which then matches neither the curve
 /// preset nor Auto, leaving no button highlighted.
 public enum PresetHighlight {
+    /// Whether `applied` is the config `preset` represents.
+    ///
+    /// A preset is identified by its mode plus its shared curve — the same two
+    /// fields everywhere. This lived inline in two different views, and the
+    /// copies had already drifted, so the popover and Settings could disagree
+    /// about which preset was active.
+    public static func matches(_ preset: Preset, applied: FanConfig?) -> Bool {
+        guard let applied else { return false }
+        return applied.mode == preset.config.mode
+            && applied.sharedCurve == preset.config.sharedCurve
+    }
+
+    /// The built-in preset `applied` corresponds to, or `nil` for a
+    /// user curve, an edited curve, or manual mode.
+    public static func matching(_ presets: [Preset], applied: FanConfig?) -> Preset? {
+        presets.first { matches($0, applied: applied) }
+    }
+
     /// The config the highlight should reflect. Callers set it only when it
     /// differs from the current value, so a consistent state causes no churn.
     public static func reconcile(

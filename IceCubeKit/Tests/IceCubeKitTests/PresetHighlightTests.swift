@@ -54,4 +54,52 @@ struct PresetHighlightTests {
         )
         #expect(result?.mode == .manual)
     }
+
+    // MARK: - matches / matching
+
+    private var builtins: [Preset] {
+        [
+            Preset(name: "Auto", kind: .auto, config: .auto),
+            Preset(name: "Quiet", kind: .quiet, config: .curve(.quiet)),
+            Preset(name: "Cold", kind: .cold, config: .curve(.cold)),
+        ]
+    }
+
+    @Test("A preset matches the config it represents, and only that one")
+    func matchesItsOwnConfig() {
+        let cold = Preset(name: "Cold", kind: .cold, config: .curve(.cold))
+        let quiet = Preset(name: "Quiet", kind: .quiet, config: .curve(.quiet))
+        #expect(PresetHighlight.matches(cold, applied: .curve(.cold)))
+        #expect(PresetHighlight.matches(quiet, applied: .curve(.cold)) == false)
+    }
+
+    @Test("The persist flag is not part of a preset's identity")
+    func persistFlagIgnored() {
+        let cold = Preset(name: "Cold", kind: .cold, config: .curve(.cold, persists: false))
+        // Clicking a preset stamps the app-wide persist setting onto the config;
+        // that must not stop the button from highlighting.
+        #expect(PresetHighlight.matches(cold, applied: .curve(.cold, persists: true)))
+    }
+
+    @Test("Nothing matches when no config has been applied yet")
+    func noAppliedConfig() {
+        #expect(PresetHighlight.matches(builtins[0], applied: nil) == false)
+        #expect(PresetHighlight.matching(builtins, applied: nil) == nil)
+    }
+
+    @Test("matching finds the built-in by kind, and reports nil for a user curve")
+    func matchingByKind() {
+        #expect(PresetHighlight.matching(builtins, applied: .curve(.cold))?.kind == .cold)
+        #expect(PresetHighlight.matching(builtins, applied: .auto)?.kind == .auto)
+        // An edited/user curve is no built-in — the picker shows "Custom".
+        let edited = FanCurve(points: [
+            CurvePoint(celsius: 40, fraction: 0.1),
+            CurvePoint(celsius: 90, fraction: 0.9),
+        ])
+        #expect(PresetHighlight.matching(builtins, applied: .curve(edited)) == nil)
+        // Manual mode matches no preset either.
+        #expect(PresetHighlight.matching(
+            builtins, applied: FanConfig(mode: .manual, manualTargets: [0: 3000])
+        ) == nil)
+    }
 }

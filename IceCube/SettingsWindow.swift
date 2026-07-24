@@ -196,7 +196,11 @@ struct SettingsWindowView: View {
             Section {
                 if case .connected = state.helper.connection {
                     Picker("Active preset", selection: presetBinding) {
-                        ForEach(PresetStore.builtins) { Text($0.name).tag($0.name) }
+                        ForEach(PresetStore.builtins) { Text($0.name).tag($0.kind) }
+                        // A user curve, an edited curve or manual mode matches
+                        // no built-in. Without a row carrying this tag the
+                        // picker renders blank on an out-of-range selection.
+                        Text("Custom").tag(Preset.Kind.custom)
                     }
                     Button("Edit curves…") {
                         WindowOpener.open(WindowOpener.ID.curves, using: openWindow)
@@ -262,21 +266,20 @@ struct SettingsWindowView: View {
     }
 
     /// Reflects/sets the active built-in preset (mirrors the menu's preset row).
-    private var presetBinding: Binding<String> {
+    ///
+    /// Tagged on ``Preset/Kind`` rather than the display name, so renaming a
+    /// built-in can't silently break the picker.
+    private var presetBinding: Binding<Preset.Kind> {
         Binding(
             get: {
-                guard let applied = state.helper.lastAppliedConfig else { return "Auto" }
-                return PresetStore.builtins.first {
-                    $0.config.mode == applied.mode && $0.config.sharedCurve == applied.sharedCurve
-                }?.name ?? "Custom"
+                guard state.helper.lastAppliedConfig != nil else { return .auto }
+                return PresetHighlight.matching(
+                    PresetStore.builtins, applied: state.helper.lastAppliedConfig
+                )?.kind ?? .custom
             },
-            set: { name in
-                guard let preset = PresetStore.builtins.first(where: { $0.name == name }) else { return }
-                var config = preset.config
-                if config.mode == .curve {
-                    config.persistsWithoutApp = persistCurve
-                }
-                Task { await state.helper.apply(config) }
+            set: { kind in
+                guard let preset = PresetStore.builtins.first(where: { $0.kind == kind }) else { return }
+                Task { await state.helper.applyPreset(preset, persistCurve: persistCurve) }
             }
         )
     }

@@ -192,6 +192,20 @@ final class HelperManager {
         await apply(FanConfig(mode: .manual, manualTargets: targets))
     }
 
+    /// Applies a preset, honouring the app-wide "keep running" setting.
+    ///
+    /// One place owns the rule that **only curve mode may persist without the
+    /// app** — it used to be copied verbatim into the popover's preset row and
+    /// the Settings picker, which is one copy too many for a safety-adjacent
+    /// rule.
+    func applyPreset(_ preset: Preset, persistCurve: Bool) async {
+        var config = preset.config
+        if config.mode == .curve {
+            config.persistsWithoutApp = persistCurve
+        }
+        await apply(config)
+    }
+
     /// Re-applies the currently active curve with a new persist setting, so
     /// toggling "Keep running" takes effect immediately instead of only on the
     /// next preset click. No-op unless a curve is active.
