@@ -1,11 +1,13 @@
-// SettingsWindow.swift — the settings window: three native tabs at a fixed, sensible size.
+// SettingsWindow.swift — the settings window: a custom tab bar with per-tab window sizing.
 
 import ServiceManagement
 import SwiftUI
 
-/// Settings as three balanced macOS tabs — General, Menu, Fan Control — using
-/// the native `TabView` tab bar (not a segmented control) at a fixed window
-/// size, so it's compact and looks like a real preferences window.
+/// Settings as three tabs — General, Menu, Fan Control. A custom toolbar-style
+/// tab bar (so the selection styling is ours, not the system-accent segmented
+/// control) sits above the single current pane, and the window sizes to that
+/// pane's natural height — so it resizes to fit each tab with no scroll and no
+/// empty space. Relies on the window's `.windowResizability(.contentSize)`.
 struct SettingsWindowView: View {
     @Bindable var state: AppState
     @AppStorage("persistCurve") private var persistCurve = false
@@ -14,14 +16,65 @@ struct SettingsWindowView: View {
     @State private var updates = UpdateChecker()
     @Environment(\.openWindow) private var openWindow
 
-    var body: some View {
-        TabView {
-            generalTab.tabItem { Label("General", systemImage: "gearshape") }
-            menuTab.tabItem { Label("Menu", systemImage: "menubar.rectangle") }
-            fanControlTab.tabItem { Label("Fan Control", systemImage: "fanblades") }
+    private enum Tab: String, CaseIterable, Identifiable {
+        case general = "General", menu = "Menu", fans = "Fan Control"
+        var id: String {
+            rawValue
         }
-        // Tall enough that the fullest tab (General) fits without a scrollbar.
-        .frame(width: 480, height: 440)
+
+        var icon: String {
+            switch self {
+            case .general: "gearshape"
+            case .menu: "menubar.rectangle"
+            case .fans: "fanblades"
+            }
+        }
+    }
+
+    @State private var tab: Tab = .general
+
+    var body: some View {
+        VStack(spacing: 0) {
+            tabBar
+            Divider()
+            currentPane
+        }
+        .frame(width: 480)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var tabBar: some View {
+        HStack(spacing: 6) {
+            ForEach(Tab.allCases) { item in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { tab = item }
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: item.icon).font(.system(size: 16))
+                        Text(item.rawValue).font(.caption)
+                    }
+                    .frame(width: 92)
+                    .padding(.vertical, 7)
+                    .background(
+                        tab == item ? AnyShapeStyle(.selection) : AnyShapeStyle(.clear),
+                        in: RoundedRectangle(cornerRadius: 6)
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(tab == item ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+            }
+        }
+        .padding(8)
+    }
+
+    @ViewBuilder
+    private var currentPane: some View {
+        switch tab {
+        case .general: generalTab
+        case .menu: menuTab
+        case .fans: fanControlTab
+        }
     }
 
     // MARK: - General (login, units, cadence, alerts, updates)
@@ -70,6 +123,7 @@ struct SettingsWindowView: View {
             }
         }
         .formStyle(.grouped)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - Menu (what the popover / menu bar shows)
@@ -108,6 +162,7 @@ struct SettingsWindowView: View {
             }
         }
         .formStyle(.grouped)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - Fan Control (+ the advanced helper controls)
@@ -141,6 +196,7 @@ struct SettingsWindowView: View {
             }
         }
         .formStyle(.grouped)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - Shared bits
