@@ -25,6 +25,54 @@ struct RingBufferTests {
     }
 }
 
+/// The chart window's first-run default regressed once, silently, from 5 min
+/// to 1 min: the persisted value was read with `UserDefaults.integer(forKey:)`,
+/// which returns 0 for a missing key, and 0 is a valid raw value — so the
+/// `?? .fiveMinutes` fallback could never fire. These pin the rule.
+@Suite("ChartStore.Window persistence")
+struct ChartWindowStorageTests {
+    @Test("A never-set preference opens on the 5 minute default, not the 0-raw case")
+    func firstRunDefault() {
+        #expect(ChartStore.Window.stored(nil) == .fiveMinutes)
+        #expect(ChartStore.Window.firstRunDefault == .fiveMinutes)
+        // The exact trap: 0 must NOT be how "absent" is spelled.
+        #expect(ChartStore.Window.stored(0) == .oneMinute)
+        #expect(ChartStore.Window.stored(nil) != ChartStore.Window.stored(0))
+    }
+
+    @Test("Every case round-trips through its raw value")
+    func roundTrip() {
+        for window in ChartStore.Window.allCases {
+            #expect(ChartStore.Window.stored(window.rawValue) == window)
+        }
+    }
+
+    @Test("Out-of-range or corrupted values fall back to the default")
+    func corruptedValue() {
+        #expect(ChartStore.Window.stored(-1) == .fiveMinutes)
+        #expect(ChartStore.Window.stored(99) == .fiveMinutes)
+        #expect(ChartStore.Window.stored(Int.max) == .fiveMinutes)
+    }
+
+    @Test("Raw values are the pre-enum array indices, so stored preferences migrate")
+    func migratesFromLegacyIndices() {
+        // The old code stored an index into [60, 300, 900, 3600].
+        #expect(ChartStore.Window.stored(0).seconds == 60)
+        #expect(ChartStore.Window.stored(1).seconds == 300)
+        #expect(ChartStore.Window.stored(2).seconds == 900)
+        #expect(ChartStore.Window.stored(3).seconds == 3600)
+    }
+
+    @Test("Titles and spans stay paired")
+    func titlesPairWithSpans() {
+        #expect(ChartStore.Window.oneMinute.title == "1 min")
+        #expect(ChartStore.Window.fiveMinutes.title == "5 min")
+        #expect(ChartStore.Window.fifteenMinutes.title == "15 min")
+        #expect(ChartStore.Window.oneHour.title == "1 hr")
+        #expect(ChartStore.Window.allCases.map(\.seconds) == [60, 300, 900, 3600])
+    }
+}
+
 @Suite("ChartDownsampler")
 struct ChartDownsamplerTests {
     private let start = Date(timeIntervalSince1970: 1_753_000_000)

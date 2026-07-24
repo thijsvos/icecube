@@ -55,6 +55,23 @@ public actor ChartStore {
             case .oneHour: "1 hr"
             }
         }
+
+        /// What a fresh install opens on.
+        public static let firstRunDefault = Window.fiveMinutes
+
+        /// Resolves a persisted raw value, where `nil` means "never set".
+        ///
+        /// This exists as a function — rather than a `Window(rawValue:) ?? …`
+        /// at the call site — because that shorthand is a trap here and it
+        /// already cost a regression once. `UserDefaults.integer(forKey:)`
+        /// returns **0 for a missing key**, and 0 is a *valid* raw value
+        /// (`.oneMinute`), so the `??` fallback never fires and every fresh
+        /// install silently opens on a 1-minute window. Callers must pass
+        /// `nil` for absent, which this signature forces them to think about.
+        public static func stored(_ raw: Int?) -> Window {
+            guard let raw else { return firstRunDefault }
+            return Window(rawValue: raw) ?? firstRunDefault
+        }
     }
 
     /// The unit a row's values are expressed in.

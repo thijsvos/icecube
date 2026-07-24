@@ -117,14 +117,9 @@ final class ChartSettings {
         showCharts = bool(Key.show, true)
         showControls = bool(Key.controls, true)
         // Raw values are the old array indices, so an existing preference
-        // migrates as-is. The `object(forKey:) == nil` probe is load-bearing:
-        // `integer(forKey:)` returns 0 for a MISSING key, and 0 is a valid raw
-        // value (.oneMinute) — so a plain `?? .fiveMinutes` fallback would
-        // never fire and every fresh install would silently open on a 1-minute
-        // window instead of the intended 5.
-        window = d.object(forKey: Key.window) == nil
-            ? .fiveMinutes
-            : ChartStore.Window(rawValue: d.integer(forKey: Key.window)) ?? .fiveMinutes
+        // migrates as-is. The absent/present distinction is load-bearing and
+        // lives in `Window.stored(_:)` — see the trap documented there.
+        window = .stored(d.object(forKey: Key.window) == nil ? nil : d.integer(forKey: Key.window))
         showCPU = bool(Key.cpu, true)
         showGPU = bool(Key.gpu, true)
         showFans = bool(Key.fans, true)
