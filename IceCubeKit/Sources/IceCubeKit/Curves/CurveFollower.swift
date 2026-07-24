@@ -43,9 +43,9 @@ public struct CurveFollower: Sendable, Equatable {
         smoothingAlpha: Double = 0.2
     ) {
         self.hysteresisCelsius = max(0, hysteresisCelsius)
-        self.rampUpPerTick = min(max(rampUpPerTick, 0.01), 1)
-        self.rampDownPerTick = min(max(rampDownPerTick, 0.01), 1)
-        self.smoothingAlpha = min(max(smoothingAlpha, 0.01), 1)
+        self.rampUpPerTick = rampUpPerTick.clamped(to: 0.01 ... 1)
+        self.rampDownPerTick = rampDownPerTick.clamped(to: 0.01 ... 1)
+        self.smoothingAlpha = smoothingAlpha.clamped(to: 0.01 ... 1)
     }
 
     /// Advances one tick: smooths `dieCelsius`, applies the deadband, evaluates
@@ -74,11 +74,11 @@ public struct CurveFollower: Sendable, Equatable {
         if let current = output {
             let delta = desired - current
             let limit = delta >= 0 ? rampUpPerTick : rampDownPerTick
-            next = current + max(-limit, min(delta, limit))
+            next = current + delta.clamped(to: -limit ... limit)
         } else {
             next = desired // first tick: start at demand, no artificial ramp-up
         }
-        output = min(max(next, 0), 1)
+        output = next.clamped(to: 0 ... 1)
         return output ?? 0
     }
 

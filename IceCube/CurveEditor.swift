@@ -40,8 +40,10 @@ final class CurveEditorModel {
         let lowerY = index > 0 ? points[index - 1].fraction : 0
         let upperY = index < points.count - 1 ? points[index + 1].fraction : 1
         points[index] = CurvePoint(
-            celsius: min(max(raw.celsius, lowerX), max(lowerX, upperX)),
-            fraction: min(max(raw.fraction, lowerY), upperY)
+            celsius: raw.celsius.clamped(to: lowerX ... max(lowerX, upperX)),
+            // max() on the upper bound: a ClosedRange traps on inverted
+            // bounds where the old min(max()) silently returned upperY.
+            fraction: raw.fraction.clamped(to: lowerY ... max(lowerY, upperY))
         )
     }
 
@@ -288,7 +290,7 @@ struct CurveEditorView: View {
 
     private func drawLiveMarker(_ context: GraphicsContext, _ rect: CGRect) {
         guard let die = state.hottestDie else { return }
-        let clamped = min(max(die, Self.tempRange.lowerBound), Self.tempRange.upperBound)
+        let clamped = die.clamped(to: Self.tempRange)
         // The marker is a temperature, so it wears the thermal color — warm as
         // the die heats — which also keeps it legible over the blue curve.
         let heat = Theme.temperatureColor(die)

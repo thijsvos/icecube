@@ -76,8 +76,8 @@ public struct FanCurve: Sendable, Codable, Equatable {
         var cleaned = raw
             .filter { $0.celsius.isFinite && $0.fraction.isFinite }
             .map { CurvePoint(
-                celsius: Swift.min(Swift.max($0.celsius, -20), 120),
-                fraction: Swift.min(Swift.max($0.fraction, 0), 1)
+                celsius: $0.celsius.clamped(to: -20 ... 120),
+                fraction: $0.fraction.clamped(to: 0 ... 1)
             ) }
             .sorted { $0.celsius < $1.celsius }
         // Collapse points closer than 0.5 °C (keep the first of each cluster).

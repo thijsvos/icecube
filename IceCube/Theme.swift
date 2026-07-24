@@ -1,6 +1,7 @@
 // Theme.swift — the app's small design system: brand accent, spacing rhythm, and thermal color mapping.
 
 import AppKit
+import IceCubeKit
 import SwiftUI
 
 private extension NSAppearance {
@@ -34,7 +35,7 @@ enum Theme {
     /// light, where high-brightness hues would otherwise wash out on white.
     static func temperatureColor(_ celsius: Double) -> Color {
         // Hue sweeps 0.58 (blue) → 0.0 (red).
-        let t = min(max((celsius - 45) / (95 - 45), 0), 1)
+        let t = ((celsius - 45) / (95 - 45)).clamped(to: 0 ... 1)
         let hue = 0.58 * (1 - t)
         return Color(nsColor: NSColor(name: nil) { appearance in
             if appearance.isDark {

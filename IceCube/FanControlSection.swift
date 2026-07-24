@@ -278,7 +278,7 @@ struct FanControlSection: View {
     /// noise), ready for the user to slide.
     private func engageManual() {
         for fan in fans {
-            sliderTargets[fan.id] = min(max(fan.actualRPM, fan.minRPM), fan.maxRPM)
+            sliderTargets[fan.id] = fan.actualRPM.clamped(to: fan.minRPM ... fan.maxRPM)
         }
         commitTargets()
     }

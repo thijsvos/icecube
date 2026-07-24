@@ -1,5 +1,6 @@
 // FanSpeedBar.swift — a slim brand-gradient gauge for fan speed (0…1 of max).
 
+import IceCubeKit
 import SwiftUI
 
 /// A rounded, gradient-filled speed gauge — reads as a designed instrument
@@ -19,7 +20,7 @@ struct FanSpeedBar: View {
 
     var body: some View {
         GeometryReader { geo in
-            let clamped = min(max(fraction, 0), 1)
+            let clamped = fraction.clamped(to: 0 ... 1)
             // A spinning fan keeps at least a rounded pill of fill; a truly
             // stopped fan (fraction 0) shows nothing.
             let width = clamped <= 0 ? 0 : max(height, geo.size.width * clamped)
@@ -37,14 +38,14 @@ struct FanSpeedBar: View {
                     // 1 s poll, so it always settles before the next reading).
                     .animation(animated ? .easeInOut(duration: 0.45) : nil, value: clamped)
                 if let target {
-                    let tick = min(max(target, 0), 1)
+                    let tick = target.clamped(to: 0 ... 1)
                     // Only show it once the fill is meaningfully short of the
                     // target — otherwise it just sits on the fill edge as noise.
                     if abs(tick - clamped) > 0.04 {
                         Capsule(style: .continuous)
                             .fill(.primary.opacity(0.45))
                             .frame(width: 2, height: height)
-                            .offset(x: min(max(tick * geo.size.width - 1, 0), geo.size.width - 2))
+                            .offset(x: (tick * geo.size.width - 1).clamped(to: 0 ... max(0, geo.size.width - 2)))
                             .animation(animated ? .easeInOut(duration: 0.45) : nil, value: tick)
                             .transition(.opacity)
                     }

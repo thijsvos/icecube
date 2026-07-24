@@ -149,7 +149,7 @@ struct PopoverView: View {
     /// there's nothing meaningful to aim at (no target reported).
     private func targetSpeed(of fan: Fan) -> Double? {
         guard fan.maxRPM > 0, fan.targetRPM > 0 else { return nil }
-        return min(max(fan.targetRPM / fan.maxRPM, 0), 1)
+        return (fan.targetRPM / fan.maxRPM).clamped(to: 0 ... 1)
     }
 
     /// The current RPM, prominent, with a quiet unit label — and a fixed
@@ -180,7 +180,7 @@ struct PopoverView: View {
     /// as "stopped." The only empty bar is a genuinely stopped fan (0 RPM).
     private func normalizedSpeed(of fan: Fan) -> Double {
         guard fan.maxRPM > 0 else { return 0 }
-        return min(max(fan.actualRPM / fan.maxRPM, 0), 1)
+        return (fan.actualRPM / fan.maxRPM).clamped(to: 0 ... 1)
     }
 
     // MARK: - Minimalist temperature views (when charts are hidden)

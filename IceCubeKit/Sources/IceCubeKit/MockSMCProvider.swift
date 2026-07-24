@@ -182,7 +182,7 @@ extension MockSMCProvider {
 
     /// Clamped cubic ease: 0 for x ≤ 0, 1 for x ≥ 1, smooth in between.
     static func smoothstep(_ x: Double) -> Double {
-        let c = min(max(x, 0), 1)
+        let c = x.clamped(to: 0 ... 1)
         return c * c * (3 - 2 * c)
     }
 
@@ -228,7 +228,7 @@ extension MockSMCProvider {
         let ripplePeriod = 11 + 12 * unitNoise(seed, 12) // 11–23 s, per sensor
         let wander = spec.wanderAmp * sin(2 * .pi * t / spec.wanderPeriod + wanderPhase)
             + 0.4 * sin(2 * .pi * t / ripplePeriod + ripplePhase)
-        return min(max(spec.idle + wander + spike * spec.spikeGain, 20), 110)
+        return (spec.idle + wander + spike * spec.spikeGain).clamped(to: 20 ... 110)
     }
 
     // MARK: Fans
@@ -282,8 +282,8 @@ extension MockSMCProvider {
                 id: spec.id,
                 name: spec.name,
                 mode: .system,
-                actualRPM: min(max(spec.minRPM + lagged * range, spec.minRPM), spec.maxRPM),
-                targetRPM: min(max(spec.minRPM + target * range, spec.minRPM), spec.maxRPM),
+                actualRPM: (spec.minRPM + lagged * range).clamped(to: spec.minRPM ... spec.maxRPM),
+                targetRPM: (spec.minRPM + target * range).clamped(to: spec.minRPM ... spec.maxRPM),
                 minRPM: spec.minRPM,
                 maxRPM: spec.maxRPM
             )
