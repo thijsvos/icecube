@@ -122,7 +122,7 @@ struct ChartStoreTests {
         let store = await fedStore(seconds: 120)
         let rows = await store.rows(window: 60)
         #expect(rows.map(\.id) == ["cpu", "gpu", "fan.0", "fan.1"])
-        #expect(rows.map(\.unit) == ["°C", "°C", "RPM", "RPM"])
+        #expect(rows.map(\.unit) == [.celsius, .celsius, .rpm, .rpm])
         let cpu = rows[0]
         #expect(cpu.series.map(\.id) == ["cpu.max", "cpu.avg"])
         #expect(cpu.yDomainMin == 20 && cpu.yDomainMax == 110)
@@ -135,7 +135,7 @@ struct ChartStoreTests {
     @Test("The point budget holds for every series at every window")
     func budgetAcrossWindows() async {
         let store = await fedStore(seconds: 700)
-        for window in ChartStore.windows {
+        for window in ChartStore.Window.allCases.map(\.seconds) {
             for row in await store.rows(window: window) {
                 for series in row.series {
                     #expect(

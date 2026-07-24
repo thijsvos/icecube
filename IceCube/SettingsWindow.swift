@@ -1,6 +1,7 @@
 // SettingsWindow.swift — the settings window: a custom tab bar with per-tab window sizing.
 
 import ServiceManagement
+import IceCubeKit
 import SwiftUI
 
 /// Settings as three tabs — General, Menu, Fan Control. A custom toolbar-style
@@ -166,9 +167,9 @@ struct SettingsWindowView: View {
             }
             if chart.showCharts {
                 Section("Charts") {
-                    Picker("Time window", selection: $chart.windowIndex) {
-                        ForEach(Array(DashboardView.windowTitles.enumerated()), id: \.offset) { i, t in
-                            Text(t).tag(i)
+                    Picker("Time window", selection: $chart.window) {
+                        ForEach(ChartStore.Window.allCases) { window in
+                            Text(window.title).tag(window)
                         }
                     }
                     .pickerStyle(.segmented)

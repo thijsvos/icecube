@@ -14,8 +14,6 @@ struct DashboardView: View {
     /// The shared observable state; owned by `IceCubeApp`.
     @Bindable var state: AppState
 
-    /// Human labels for the windows, indexed like `ChartStore.windows`.
-    static let windowTitles = ["1 min", "5 min", "15 min", "1 hr"]
 
     /// CSV export flow state.
     @State private var isExportingCSV = false
@@ -45,7 +43,7 @@ struct DashboardView: View {
         }
         // The window and row-visibility live in Settings now; re-render when
         // any of them changes so the popover reflects the new choice at once.
-        .onChange(of: state.chartSettings.windowIndex) { state.refreshCharts() }
+        .onChange(of: state.chartSettings.window) { state.refreshCharts() }
         .onChange(of: chartFilterSignature) { state.refreshCharts() }
     }
 
@@ -59,7 +57,7 @@ struct DashboardView: View {
 
     private var controls: some View {
         HStack(spacing: 8) {
-            Text("\(Self.windowTitles[min(state.chartSettings.windowIndex, Self.windowTitles.count - 1)]) history")
+            Text("\(state.chartSettings.window.title) history")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()

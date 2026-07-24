@@ -96,7 +96,7 @@ final class AppState {
     private static let intervalKey = "pollInterval"
     @ObservationIgnored private let chartStore = ChartStore()
     private var chartWindow: TimeInterval {
-        ChartStore.windows[min(max(chartSettings.windowIndex, 0), ChartStore.windows.count - 1)]
+        chartSettings.window.seconds
     }
 
     // MARK: - Wiring

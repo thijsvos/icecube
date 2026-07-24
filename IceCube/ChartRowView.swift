@@ -30,7 +30,7 @@ struct ChartRowView: View {
 
     /// Whether this row's values get unit-converted for display.
     private var convertsUnit: Bool {
-        row.unit == "°C" && unit == .fahrenheit
+        row.unit == .celsius && unit == .fahrenheit
     }
 
     /// A display value in the row's effective unit.
@@ -40,18 +40,20 @@ struct ChartRowView: View {
 
     /// The unit label shown in the header.
     private var displayUnit: String {
-        convertsUnit ? "°F" : row.unit
+        convertsUnit ? "°F" : row.unit.rawValue
     }
 
     /// Per-row accent, on the app's palette: temperature rows glow by heat
     /// (thermal color of the live value), fan rows use the ice-blue brand accent
     /// — the same language as the popover gauges and readouts.
     private var accent: Color {
-        if row.unit == "°C" {
+        switch row.unit {
+        case .celsius:
             let latest = row.series.first?.stats?.latest ?? row.yDomainMax
             return Theme.temperatureColor(latest)
+        case .rpm:
+            return Theme.accent
         }
-        return Theme.accent
     }
 
     var body: some View {

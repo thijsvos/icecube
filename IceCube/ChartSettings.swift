@@ -59,9 +59,9 @@ final class ChartSettings {
         didSet { defaults.set(showControls, forKey: Key.controls) }
     }
 
-    /// Default time window, as an index into `ChartStore.windows`.
-    var windowIndex: Int {
-        didSet { defaults.set(windowIndex, forKey: Key.window) }
+    /// Default time window.
+    var window: ChartStore.Window {
+        didSet { defaults.set(window.rawValue, forKey: Key.window) }
     }
 
     /// Per-row visibility — tinkerers pick exactly which graphs they want.
@@ -117,8 +117,9 @@ final class ChartSettings {
         }
         showCharts = bool(Key.show, true)
         showControls = bool(Key.controls, true)
-        let storedWindow = d.object(forKey: Key.window) == nil ? 1 : d.integer(forKey: Key.window)
-        windowIndex = min(max(storedWindow, 0), ChartStore.windows.count - 1)
+        // Raw values are the old array indices, so an existing preference
+        // migrates as-is; anything unrecognized falls back to the 5 min default.
+        window = ChartStore.Window(rawValue: d.integer(forKey: Key.window)) ?? .fiveMinutes
         showCPU = bool(Key.cpu, true)
         showGPU = bool(Key.gpu, true)
         showFans = bool(Key.fans, true)

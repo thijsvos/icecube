@@ -16,8 +16,55 @@ public actor ChartStore {
     public static let capacity = 3600
     /// Hard visible-point budget per series (PLAN.md §1.2).
     public static let pointBudget = 600
-    /// The selectable windows, in seconds: 1 / 5 / 15 / 60 minutes.
-    public static let windows: [TimeInterval] = [60, 300, 900, 3600]
+    /// A selectable chart time window: 1 / 5 / 15 / 60 minutes.
+    ///
+    /// One type rather than two parallel arrays kept in sync by a comment:
+    /// the seconds used to live here and the human titles in the app target's
+    /// `DashboardView`, indexed by a bare `Int` that three separate call sites
+    /// each clamped differently. Adding a window is now a single-site change
+    /// and the seconds/title pairing is a compiler-checked `switch`.
+    ///
+    /// Raw values are the old array indices, so a stored preference migrates
+    /// with no shim.
+    public enum Window: Int, CaseIterable, Sendable, Identifiable {
+        case oneMinute = 0
+        case fiveMinutes
+        case fifteenMinutes
+        case oneHour
+
+        public var id: Int { rawValue }
+
+        /// The window's span.
+        public var seconds: TimeInterval {
+            switch self {
+            case .oneMinute: 60
+            case .fiveMinutes: 300
+            case .fifteenMinutes: 900
+            case .oneHour: 3600
+            }
+        }
+
+        /// Human label for the picker and the dashboard caption.
+        public var title: String {
+            switch self {
+            case .oneMinute: "1 min"
+            case .fiveMinutes: "5 min"
+            case .fifteenMinutes: "15 min"
+            case .oneHour: "1 hr"
+            }
+        }
+    }
+
+    /// The unit a row's values are expressed in.
+    ///
+    /// An enum rather than a free-form `String`: this crosses the module
+    /// boundary into the app target, where it gates the Fahrenheit conversion.
+    /// A stray `"C"` or a Unicode normalization difference would silently
+    /// disable that conversion while the axis still claimed °F.
+    public enum Unit: String, Sendable, Equatable {
+        case celsius = "°C"
+        case rpm = "RPM"
+    }
 
     /// One renderable series: a band (bucket min…max) plus its average line.
     public struct Series: Sendable, Equatable, Identifiable {
@@ -33,8 +80,8 @@ public actor ChartStore {
     public struct Row: Sendable, Equatable, Identifiable {
         public let id: String
         public let title: String
-        /// Displayed unit, `"°C"` or `"RPM"`.
-        public let unit: String
+        /// Displayed unit.
+        public let unit: Unit
         /// Fixed axis range — never rescales while you watch (anti-jump).
         public let yDomainMin: Double
         public let yDomainMax: Double
@@ -99,7 +146,7 @@ public actor ChartStore {
         var rows: [Row] = []
         if hasCPU {
             rows.append(Row(
-                id: "cpu", title: "CPU", unit: "°C", yDomainMin: 20, yDomainMax: 110,
+                id: "cpu", title: "CPU", unit: .celsius, yDomainMin: 20, yDomainMax: 110,
                 series: [
                     series(id: "cpu.max", label: "Hottest", from: cpuMax, start: start, end: end, budget: budget),
                     series(
@@ -116,7 +163,7 @@ public actor ChartStore {
         }
         if hasGPU {
             rows.append(Row(
-                id: "gpu", title: "GPU", unit: "°C", yDomainMin: 20, yDomainMax: 110,
+                id: "gpu", title: "GPU", unit: .celsius, yDomainMin: 20, yDomainMax: 110,
                 series: [
                     series(id: "gpu.max", label: "Hottest", from: gpuMax, start: start, end: end, budget: budget),
                 ]
@@ -124,7 +171,7 @@ public actor ChartStore {
         }
         for fan in fanMeta {
             rows.append(Row(
-                id: "fan.\(fan.id)", title: "\(fan.name) Fan", unit: "RPM",
+                id: "fan.\(fan.id)", title: "\(fan.name) Fan", unit: .rpm,
                 yDomainMin: 0, yDomainMax: fan.maxRPM > 0 ? fan.maxRPM * 1.05 : 7000,
                 series: [
                     series(
