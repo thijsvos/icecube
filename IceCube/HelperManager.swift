@@ -167,8 +167,11 @@ final class HelperManager {
         didAutoResume = true
         guard mode == .auto else { return } // already running something — leave it
         guard let data = UserDefaults.standard.data(forKey: Self.lastCurveKey),
-              let config = try? JSONDecoder().decode(FanConfig.self, from: data),
+              var config = try? JSONDecoder().decode(FanConfig.self, from: data),
               config.mode == .curve else { return }
+        // Honor the current "Keep running" preference, not whatever flag was
+        // stored with the curve (shares the "persistCurve" @AppStorage key).
+        config.persistsWithoutApp = UserDefaults.standard.bool(forKey: "persistCurve")
         await apply(config)
     }
 
