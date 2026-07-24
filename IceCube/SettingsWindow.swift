@@ -14,15 +14,42 @@ struct SettingsWindowView: View {
     @State private var updates = UpdateChecker()
     @Environment(\.openWindow) private var openWindow
 
-    var body: some View {
-        TabView {
-            generalTab.tabItem { Label("General", systemImage: "gearshape") }
-            menuTab.tabItem { Label("Menu", systemImage: "menubar.rectangle") }
-            fanControlTab.tabItem { Label("Fan Control", systemImage: "fanblades") }
-            alertsTab.tabItem { Label("Alerts", systemImage: "bell") }
-            advancedTab.tabItem { Label("Advanced", systemImage: "wrench.and.screwdriver") }
+    private enum Tab: String, CaseIterable, Identifiable {
+        case general = "General", menu = "Menu", fans = "Fans", alerts = "Alerts", advanced = "Advanced"
+        var id: String {
+            rawValue
         }
-        .frame(width: 460, height: 400)
+    }
+
+    @State private var tab: Tab = .general
+
+    var body: some View {
+        // A segmented selector + only the current pane in the hierarchy, so
+        // the window hugs each tab's content instead of reserving space for
+        // the tallest one (which left the sparse tabs looking empty).
+        VStack(spacing: 0) {
+            Picker("", selection: $tab) {
+                ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(12)
+            Divider()
+            selectedTab
+        }
+        .frame(width: 460)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder
+    private var selectedTab: some View {
+        switch tab {
+        case .general: generalTab
+        case .menu: menuTab
+        case .fans: fanControlTab
+        case .alerts: alertsTab
+        case .advanced: advancedTab
+        }
     }
 
     // MARK: - General
@@ -56,6 +83,7 @@ struct SettingsWindowView: View {
             }
         }
         .formStyle(.grouped)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - Menu (what the popover / menu bar shows)
@@ -96,6 +124,7 @@ struct SettingsWindowView: View {
             }
         }
         .formStyle(.grouped)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - Fan Control
@@ -123,6 +152,7 @@ struct SettingsWindowView: View {
             }
         }
         .formStyle(.grouped)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - Alerts
@@ -146,6 +176,7 @@ struct SettingsWindowView: View {
             }
         }
         .formStyle(.grouped)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - Advanced (helper daemon)
@@ -166,6 +197,7 @@ struct SettingsWindowView: View {
             }
         }
         .formStyle(.grouped)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - Shared bits
