@@ -9,7 +9,6 @@ import os
 /// The connection pins the helper's code signature to our own Team ID
 /// (mirroring the pinning the helper applies to us). Unsigned dev builds
 /// can't pin — that's logged loudly and only tolerated in DEBUG.
-@MainActor
 final class HelperClient {
     private var connection: NSXPCConnection?
     private let log = Logger(subsystem: "io.github.thijsvos.icecube", category: "xpc")

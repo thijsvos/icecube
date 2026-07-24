@@ -4,7 +4,6 @@ import IceCubeKit
 import SwiftUI
 
 /// Editing state for one curve: points with live constraints.
-@MainActor
 @Observable
 final class CurveEditorModel {
     var points: [CurvePoint]

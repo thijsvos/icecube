@@ -6,7 +6,6 @@ import Observation
 /// Checks the GitHub Releases API for a newer version. Deliberately minimal
 /// (small-footprint rule: no auto-download, no auto-install, no framework):
 /// one HTTPS GET, a version compare, and a link the user can click.
-@MainActor
 @Observable
 final class UpdateChecker {
     enum Status: Equatable {

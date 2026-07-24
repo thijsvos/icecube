@@ -9,14 +9,34 @@ import UserNotifications
 /// threshold, then re-arms after it cools 5 °C below — a fever alarm, not a
 /// nag. Permission is requested lazily on first enable; a denial is surfaced
 /// as UI state, never an error dialog.
-@MainActor
 @Observable
 final class AlertManager {
-    /// Alert threshold in °C; `nil` = alerts off. Persisted.
-    var thresholdCelsius: Double? {
+    /// The die-temperature threshold that fires an alert.
+    ///
+    /// An enum, like every other user preference in the app (`TemperatureUnit`,
+    /// `PollInterval`, `MenuBarDisplayMode`, `ChartHeight`): the allowed values
+    /// are a fixed set, and the old shape carried them as a `Double?` in the
+    /// model, an `Int` in the picker binding and a `0` sentinel on disk, with
+    /// lossy conversions at both boundaries.
+    enum Threshold: Int, CaseIterable, Identifiable {
+        case off = 0
+        case warm = 85
+        case hot = 90
+        case critical = 95
+
+        var id: Int { rawValue }
+
+        /// The threshold in °C, or `nil` when alerts are off.
+        var celsius: Double? {
+            self == .off ? nil : Double(rawValue)
+        }
+    }
+
+    /// Alert threshold; `.off` disables notifications. Persisted.
+    var threshold: Threshold {
         didSet {
-            UserDefaults.standard.set(thresholdCelsius ?? 0, forKey: Self.key)
-            if thresholdCelsius != nil {
+            UserDefaults.standard.set(threshold.rawValue, forKey: Self.key)
+            if threshold != .off {
                 requestPermissionIfNeeded()
             }
         }
@@ -30,17 +50,18 @@ final class AlertManager {
     private let log = Logger(subsystem: "io.github.thijsvos.icecube", category: "ui")
 
     init() {
-        let stored = UserDefaults.standard.double(forKey: Self.key)
-        thresholdCelsius = stored > 0 ? stored : nil
+        // `integer(forKey:)` reads a previously stored 85.0 as 85, so existing
+        // users migrate with no shim.
+        threshold = Threshold(rawValue: UserDefaults.standard.integer(forKey: Self.key)) ?? .off
     }
 
     /// Called once per snapshot with the hottest die reading.
     func evaluate(dieCelsius: Double?) {
-        guard let threshold = thresholdCelsius, let die = dieCelsius else { return }
-        if die >= threshold, armed {
+        guard let limit = threshold.celsius, let die = dieCelsius else { return }
+        if die >= limit, armed {
             armed = false
-            deliver(die: die, threshold: threshold)
-        } else if die < threshold - 5 {
+            deliver(die: die, threshold: limit)
+        } else if die < limit - 5 {
             armed = true // re-arm only after a real cooldown
         }
     }
@@ -53,20 +74,24 @@ final class AlertManager {
         let request = UNNotificationRequest(
             identifier: "temp-alert-\(Int(die))", content: content, trigger: nil
         )
-        UNUserNotificationCenter.current().add(request) { [weak self] error in
-            if let error {
-                Task { @MainActor [weak self] in
-                    self?.log.error("notification failed: \(error.localizedDescription, privacy: .public)")
-                }
+        // The async API: this type is already @MainActor, so a plain Task
+        // inherits that isolation. The old completion handler wrapped a nested
+        // Task { @MainActor [weak self] } whose only job was to hop to the main
+        // actor to touch a Logger — which is Sendable and needs no isolation.
+        Task { [log] in
+            do {
+                try await UNUserNotificationCenter.current().add(request)
+            } catch {
+                log.error("notification failed: \(error.localizedDescription, privacy: .public)")
             }
         }
     }
 
     private func requestPermissionIfNeeded() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { [weak self] granted, _ in
-            Task { @MainActor [weak self] in
-                self?.permissionDenied = !granted
-            }
+        Task {
+            let granted = (try? await UNUserNotificationCenter.current()
+                .requestAuthorization(options: [.alert, .sound])) ?? false
+            permissionDenied = !granted
         }
     }
 }

@@ -34,7 +34,6 @@ enum ChartHeight: String, CaseIterable, Identifiable {
 /// self-contained unit — and so the popover can be made as minimal or as
 /// detailed as the user wants. Each property persists itself to `UserDefaults`
 /// on change; `Key` centralizes the string keys.
-@MainActor
 @Observable
 final class ChartSettings {
     private enum Key {

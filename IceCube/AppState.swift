@@ -12,7 +12,6 @@ import Observation
 /// both just read properties here. It never writes to hardware (nothing in the
 /// app process does; see `SMCProviding`), and it never crashes on a provider
 /// error: failures become a short message and polling keeps trying.
-@MainActor
 @Observable
 final class AppState {
     /// The most recent successful reading, or `nil` before the first one lands.

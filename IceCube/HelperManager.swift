@@ -11,7 +11,6 @@ import ServiceManagement
 /// registration with launchd (SMAppService), the pinned XPC connection with
 /// its version handshake, the 5 s heartbeat that feeds the daemon watchdog,
 /// and the daemon's reported status.
-@MainActor
 @Observable
 final class HelperManager {
     /// Where the helper stands with launchd/Background Task Management.

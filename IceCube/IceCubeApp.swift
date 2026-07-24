@@ -40,10 +40,17 @@ struct IceCubeApp: App {
             }
             .accessibilityLabel("Ice Cube, hottest sensor \(appState.hottestText)")
             .task {
-                // The status item exists once this label renders; widen its
-                // click mask so right-click opens the popover too.
-                try? await Task.sleep(for: .milliseconds(500))
-                StatusItemShim.enableRightClick()
+                // Widen the status item's click mask so right-click opens the
+                // popover too. Polled rather than guessed: 500 ms was a bet on
+                // when NSStatusBarWindow materializes during a cold launch that
+                // also builds the provider, the helper manager and the first XPC
+                // connection. `try?` on a sleep also swallows CancellationError,
+                // so the old code ran the shim even after the task was cancelled.
+                for _ in 0 ..< 20 {
+                    if StatusItemShim.enableRightClick() { return }
+                    try? await Task.sleep(for: .milliseconds(100))
+                    if Task.isCancelled { return }
+                }
             }
         }
         .menuBarExtraStyle(.window)

@@ -11,7 +11,6 @@ import SwiftUI
 /// after opening. Every window-opening call site goes through here so the
 /// workaround lives (and can be adjusted) in exactly one place, instead of
 /// being cargo-culted across views. (PLAN.md §1.2; Apple FB11984872.)
-@MainActor
 enum WindowOpener {
     /// Identifiers for the app's window scenes.
     enum ID {

@@ -109,7 +109,11 @@ public actor SystemSMCProvider: SMCProviding {
                     text = (try? SMCKeyCodec.decodeBool(bytes, forKey: key)).map(String.init)
                 case .fanDescriptor:
                     text = try? SMCKeyCodec.decodeString(bytes, forKey: key)
-                default:
+                // Exhaustive on purpose: SMCDataType is a growing set, and this
+                // key dump is where a new wire type is most likely to show up.
+                // A `default:` would route it to decodeDouble, throw, get
+                // swallowed by try?, and render as "—" with no clue.
+                case .float, .fpe2, .uint8, .uint16, .uint32:
                     value = try? SMCKeyCodec.decodeDouble(bytes, as: type, forKey: key)
                 }
             }

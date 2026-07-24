@@ -15,7 +15,19 @@ import Security
 public enum CodesignPinning {
     /// The Team ID (`subject.OU`) of the **current process's** signature, or
     /// `nil` when unsigned / ad-hoc signed.
+    ///
+    /// Resolved once: a process cannot change its own signature, and this is a
+    /// synchronous Security-framework + on-disk read that `HelperClient.connect()`
+    /// performs on the main actor. `maintain()` calls connect() on every 5 s pass
+    /// while registered-but-unreachable, so it would otherwise repeat forever in
+    /// exactly the degraded state where the UI already reads "connecting…".
     public static func currentTeamID() -> String? {
+        ownTeamID
+    }
+
+    private static let ownTeamID: String? = resolveTeamID()
+
+    private static func resolveTeamID() -> String? {
         var code: SecCode?
         guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return nil }
         var staticCode: SecStaticCode?

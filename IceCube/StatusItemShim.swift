@@ -11,17 +11,20 @@ import AppKit
 /// Deliberately best-effort and defensive: it walks a private view hierarchy,
 /// so if a macOS update changes the internals, every lookup simply fails and
 /// right-click stays inert — nothing can break or crash.
-@MainActor
 enum StatusItemShim {
-    /// Call once shortly after the menu-bar item exists.
-    static func enableRightClick() {
+    /// Widens the status item's click mask. Returns whether it found the button,
+    /// so a caller can retry until the item exists instead of guessing a delay.
+    @discardableResult
+    static func enableRightClick() -> Bool {
         for window in NSApp.windows
             where String(describing: type(of: window)).contains("NSStatusBarWindow")
         {
             if let button = firstStatusButton(in: window.contentView) {
                 button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+                return true
             }
         }
+        return false
     }
 
     private static func firstStatusButton(in view: NSView?) -> NSStatusBarButton? {

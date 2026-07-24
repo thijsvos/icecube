@@ -96,7 +96,8 @@ struct SettingsWindowView: View {
     // MARK: - General (login, units, cadence, alerts, updates)
 
     private var generalTab: some View {
-        Form {
+        @Bindable var alerts = state.alerts
+        return Form {
             Section {
                 Toggle("Launch Ice Cube at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, enabled in setLaunchAtLogin(enabled) }
@@ -115,11 +116,11 @@ struct SettingsWindowView: View {
                 .pickerStyle(.segmented)
             }
             Section("Alerts") {
-                Picker("Notify at", selection: alertBinding) {
-                    Text("Off").tag(0)
-                    ForEach([85, 90, 95], id: \.self) { threshold in
+                Picker("Notify at", selection: $alerts.threshold) {
+                    Text("Off").tag(AlertManager.Threshold.off)
+                    ForEach(AlertManager.Threshold.allCases.filter { $0 != .off }) { threshold in
                         Text(
-                            "\(Int(state.temperatureUnit.display(Double(threshold)).rounded()))\(state.temperatureUnit.title)"
+                            "\(Int(state.temperatureUnit.display(Double(threshold.rawValue)).rounded()))\(state.temperatureUnit.title)"
                         )
                         .tag(threshold)
                     }
@@ -281,13 +282,6 @@ struct SettingsWindowView: View {
                 guard let preset = PresetStore.builtins.first(where: { $0.kind == kind }) else { return }
                 Task { await state.helper.applyPreset(preset, persistCurve: persistCurve) }
             }
-        )
-    }
-
-    private var alertBinding: Binding<Int> {
-        Binding(
-            get: { Int(state.alerts.thresholdCelsius ?? 0) },
-            set: { state.alerts.thresholdCelsius = $0 > 0 ? Double($0) : nil }
         )
     }
 

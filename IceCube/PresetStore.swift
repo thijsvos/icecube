@@ -8,7 +8,6 @@ import os
 /// The preset catalog: four fixed built-ins plus user-saved curves, stored at
 /// `~/Library/Application Support/IceCube/presets.json` (app-side; the daemon
 /// has its own root-owned store for the active config).
-@MainActor
 @Observable
 final class PresetStore {
     /// The four built-ins, in display order.
