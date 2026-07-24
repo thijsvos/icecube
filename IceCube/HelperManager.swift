@@ -42,10 +42,10 @@ final class HelperManager {
     private let client = HelperClient()
     private let log = Logger(subsystem: "io.github.thijsvos.icecube", category: "xpc")
     @ObservationIgnored private var maintenanceTask: Task<Void, Never>?
-    @ObservationIgnored private var wakeObserver: NSObjectProtocol?
-    /// Guards against overlapping maintenance passes (the 5 s loop vs. an
-    /// on-demand refresh from wake / popover-open).
-    @ObservationIgnored private var isMaintaining = false
+    @ObservationIgnored private var wakeTask: Task<Void, Never>?
+    /// The maintenance pass currently in flight, if any. Concurrent callers
+    /// join it rather than being dropped — see ``maintainOnce()``.
+    @ObservationIgnored private var maintenancePass: Task<Void, Never>?
 
     init() {
         client.onDisconnect = { [weak self] in
@@ -58,7 +58,7 @@ final class HelperManager {
         // drives heartbeat + status while connected.
         maintenanceTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.maintain()
+                await self?.maintainOnce()
                 try? await Task.sleep(for: .seconds(HelperConstants.heartbeatInterval))
             }
         }
@@ -66,27 +66,43 @@ final class HelperManager {
         // tick — reconnect + reconcile so the popover is correct the moment the
         // lid opens. Purely an app-side responsiveness hook; the daemon and its
         // safety timers are untouched.
-        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.refreshNow() }
+        //
+        // An AsyncSequence rather than addObserver: ending the `for await`
+        // deregisters the observation, so cancelling a stored Task from a
+        // nonisolated deinit is all the teardown it needs. The loop body also
+        // runs in this type's MainActor isolation, so there is no hop.
+        wakeTask = Task { [weak self] in
+            let wakes = NSWorkspace.shared.notificationCenter
+                .notifications(named: NSWorkspace.didWakeNotification)
+            // Element ignored: Notification is not Sendable.
+            for await _ in wakes {
+                await self?.maintainOnce()
+            }
         }
     }
 
     deinit {
+        // Task.cancel() is nonisolated and safe to call from deinit.
         maintenanceTask?.cancel()
-        // `wakeObserver` is intentionally left registered: HelperManager lives
-        // for the whole app lifetime, and its block captures only a weak self,
-        // so it becomes inert on teardown. (A non-Sendable NSObjectProtocol
-        // can't be removed from a nonisolated deinit under Swift 6 anyway.)
+        wakeTask?.cancel()
     }
 
-    /// Runs one maintenance pass right now (reconnect + status + reconcile)
-    /// without waiting for the loop — used on system wake and when the popover
-    /// opens so the UI reflects reality promptly. A pass already in flight is
-    /// skipped, so it's cheap and safe to call repeatedly.
-    func refreshNow() {
-        Task { await maintain() }
+    /// Runs one maintenance pass (reconnect + status + reconcile) and waits for
+    /// it, without waiting for the 5 s loop — used on system wake and when the
+    /// popover opens so the UI reflects reality promptly.
+    ///
+    /// Concurrent callers **join** the pass in flight rather than being
+    /// dropped. The old `isMaintaining` flag returned early instead, so opening
+    /// the popover while the loop's pass was mid-round-trip silently discarded
+    /// the refresh — the exact staleness this hook exists to prevent.
+    func maintainOnce() async {
+        if let pass = maintenancePass {
+            return await pass.value
+        }
+        let pass = Task { await self.maintain() }
+        maintenancePass = pass
+        await pass.value
+        maintenancePass = nil
     }
 
     // MARK: - Registration (SMAppService)
@@ -287,11 +303,6 @@ final class HelperManager {
     // MARK: - The maintenance loop
 
     private func maintain() async {
-        if isMaintaining {
-            return
-        } // don't let the loop and an on-demand refresh overlap
-        isMaintaining = true
-        defer { isMaintaining = false }
         refreshRegistration()
         guard registration == .enabled else {
             connection = .disconnected

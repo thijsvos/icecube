@@ -15,6 +15,11 @@ final class HelperClient {
     private let log = Logger(subsystem: "io.github.thijsvos.icecube", category: "xpc")
     /// Called when the connection drops (helper crashed, unregistered, …).
     var onDisconnect: (() -> Void)?
+    /// Bumped on every connect and disconnect, so a callback can tell whether
+    /// the connection it reports on is still the current one. An `Int` rather
+    /// than the connection itself because `NSXPCConnection` is not `Sendable`
+    /// and these handlers must be.
+    private var generation = 0
 
     var isConnected: Bool {
         connection != nil
@@ -22,6 +27,8 @@ final class HelperClient {
 
     func connect() {
         guard connection == nil else { return }
+        generation &+= 1
+        let generation = generation
         let c = NSXPCConnection(
             machServiceName: HelperConstants.machServiceName, options: .privileged
         )
@@ -33,16 +40,27 @@ final class HelperClient {
         } else {
             log.fault("app has no Team ID — connecting WITHOUT pinning (DEBUG-only situation)")
         }
-        c.invalidationHandler = { [weak self] in
-            Task { @MainActor [weak self] in
-                self?.connection = nil
-                self?.onDisconnect?()
+        // `@Sendable` makes the "XPC calls this off the main thread" contract
+        // explicit and checked in a module that is MainActor by default.
+        //
+        // The generation guard matters: this handler reports on THIS
+        // connection, but by the time the main-actor hop lands, `maintain()`
+        // may already have disconnected and reconnected. Without the check, a
+        // stale callback would null out a newer, resumed connection —
+        // orphaning it and flipping the UI to disconnected after a good
+        // handshake.
+        c.invalidationHandler = { @Sendable [weak self] in
+            Task { @MainActor in
+                guard let self, self.generation == generation else { return }
+                self.connection = nil
+                self.onDisconnect?()
             }
         }
-        c.interruptionHandler = { [weak self] in
+        c.interruptionHandler = { @Sendable [weak self] in
             // Helper died mid-flight; invalidate and let the manager reconnect.
-            Task { @MainActor [weak self] in
-                self?.connection?.invalidate()
+            Task { @MainActor in
+                guard let self, self.generation == generation else { return }
+                self.connection?.invalidate()
             }
         }
         c.resume()
@@ -50,6 +68,9 @@ final class HelperClient {
     }
 
     func disconnect() {
+        // Bump first: the invalidate below fires the handler, which must see a
+        // stale generation and not re-enter onDisconnect.
+        generation &+= 1
         connection?.invalidate()
         connection = nil
     }

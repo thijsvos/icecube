@@ -107,6 +107,8 @@ final class AppState {
     private var poller: SMCPoller
     /// The task consuming the polling stream; `nil` when stopped.
     @ObservationIgnored private var pollTask: Task<Void, Never>?
+    /// The in-flight chart re-render, cancelled when a newer one supersedes it.
+    @ObservationIgnored private var refreshTask: Task<Void, Never>?
 
     init(provider: any SMCProviding, isSimulated: Bool) {
         self.provider = provider
@@ -140,6 +142,7 @@ final class AppState {
     deinit {
         // Task.cancel() is nonisolated and safe to call from deinit.
         pollTask?.cancel()
+        refreshTask?.cancel()
     }
 
     // MARK: - Polling
@@ -201,11 +204,21 @@ final class AppState {
     /// window change, a row-visibility toggle, or unpause.
     func refreshCharts() {
         guard !isPaused else { return }
-        Task { [weak self] in
+        // Owned, not fired-and-forgotten: DashboardView calls this from two
+        // onChange hooks, and each call raced the poll loop for the same two
+        // properties. Both read `chartWindow` before suspending and wrote after,
+        // so whichever resumed last won — a window switch could leave the
+        // previous window's domain on screen, which is exactly the axis rescale
+        // mid-glance the anti-jump rules forbid.
+        refreshTask?.cancel()
+        refreshTask = Task { [weak self] in
             guard let self else { return }
-            let rows = await chartStore.rows(window: chartWindow)
+            let window = chartWindow // capture before suspending…
+            let rows = await chartStore.rows(window: window)
+            // …and re-validate after, so a superseded pass writes nothing.
+            guard !Task.isCancelled, window == chartWindow else { return }
             if let end = rows.first?.series.first?.buckets.last?.time ?? snapshot?.date {
-                chartXDomain = end.addingTimeInterval(-chartWindow) ... end
+                chartXDomain = end.addingTimeInterval(-window) ... end
             }
             chartRows = rows.filter { chartSettings.includesRow(id: $0.id) }
         }

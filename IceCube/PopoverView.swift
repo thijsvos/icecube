@@ -54,7 +54,9 @@ struct PopoverView: View {
         // Opening the popover forces an immediate reconnect + reconcile, so the
         // highlighted preset is correct the instant you look — no waiting for
         // the 5 s maintenance tick after a wake.
-        .onAppear { state.helper.refreshNow() }
+        // `.task` rather than `onAppear` + an unowned Task: this is tied to the
+        // popover's lifetime and cancels when the menu-bar window dismisses.
+        .task { await state.helper.maintainOnce() }
     }
 
     /// The fan readouts, grouped as a titled card.
