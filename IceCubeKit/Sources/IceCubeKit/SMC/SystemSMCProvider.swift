@@ -119,7 +119,7 @@ public actor SystemSMCProvider: SMCProviding {
                 size: info.size,
                 value: value,
                 text: text,
-                bytesHex: bytes.map { String(format: "%02X", $0) }.joined()
+                bytesHex: bytes.smcHexString
             ))
         }
         return dump

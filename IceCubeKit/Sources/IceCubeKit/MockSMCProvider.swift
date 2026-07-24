@@ -87,7 +87,7 @@ public actor MockSMCProvider: SMCProviding {
             size: type.byteCount,
             value: (try? SMCKeyCodec.decodeDouble(bytes, as: type)) ?? value,
             text: nil,
-            bytesHex: bytes.map { String(format: "%02X", $0) }.joined()
+            bytesHex: bytes.smcHexString
         )
     }
 }

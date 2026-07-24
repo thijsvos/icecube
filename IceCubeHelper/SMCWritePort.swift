@@ -96,10 +96,12 @@ actor SMCWritePort: SMCControlPort {
         input.key = try SMCKeyCodec.keyCode(for: key)
         input.keyInfo.dataSize = UInt32(bytes.count)
         input.data8 = SMCCommand.writeBytes
+        // copyBytes carries its own "source fits destination" precondition,
+        // so bounds safety is a stdlib guarantee rather than something the
+        // hand-written loop and the count guard above maintain jointly. The
+        // read side already uses the buffer API (SMCParamStruct.dataBytes).
         withUnsafeMutableBytes(of: &input.bytes) { raw in
-            for (i, byte) in bytes.enumerated() {
-                raw[i] = byte
-            }
+            raw.copyBytes(from: bytes)
         }
         _ = try call(&input, key: key)
     }
@@ -145,10 +147,17 @@ actor SMCWritePort: SMCControlPort {
         case SMCResult.keyNotFound:
             throw IceCubeError.smcKeyNotFound(key: key)
         default:
-            log
-                .error(
-                    "SMC firmware rejected \(key, privacy: .public): result 0x\(String(output.result, radix: 16), privacy: .public)"
-                )
+            // `format:` keeps the byte a typed os_log field, so Console and
+            // `log show --predicate` can filter on it — and it zero-pads, where
+            // String(_:radix:) logged 0x0A as "0xa". This path also runs inside
+            // forceManualMode's 70-iteration ftst retry loop, so not building a
+            // String per rejection matters.
+            log.error(
+                """
+                SMC firmware rejected \(key, privacy: .public): \
+                result \(output.result, format: .hex(includePrefix: true, uppercase: true), privacy: .public)
+                """
+            )
             throw IceCubeError.smcFirmwareRejected(key: key, result: output.result)
         }
     }

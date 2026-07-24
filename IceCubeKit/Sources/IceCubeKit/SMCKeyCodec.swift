@@ -229,3 +229,26 @@ public enum SMCKeyCodec {
         }
     }
 }
+
+public extension Collection<UInt8> {
+    /// Uppercase hex, two digits per byte — the `bytesHex` column of
+    /// ``SMCKeyDump``, so a diagnostics report stays readable even for types
+    /// Ice Cube cannot decode yet.
+    ///
+    /// One encoder, not one per provider: `MockSMCProvider` is what CI and
+    /// simulated mode exercise, so a divergence between the two copies would
+    /// have been invisible until a real user's report looked different from
+    /// every tested one. Hand-rolled rather than `String(format:)` per byte
+    /// because `SystemSMCProvider.keyDump()` walks every key on the machine
+    /// (~2000 on a Mac14,9) and the sensors browser re-runs it every 2 s.
+    var smcHexString: String {
+        let digits = Array("0123456789ABCDEF".utf8)
+        var out: [UInt8] = []
+        out.reserveCapacity(count * 2)
+        for byte in self {
+            out.append(digits[Int(byte >> 4)])
+            out.append(digits[Int(byte & 0x0F)])
+        }
+        return String(decoding: out, as: UTF8.self)
+    }
+}
