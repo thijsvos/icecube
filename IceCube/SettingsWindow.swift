@@ -20,7 +20,8 @@ struct SettingsWindowView: View {
             menuTab.tabItem { Label("Menu", systemImage: "menubar.rectangle") }
             fanControlTab.tabItem { Label("Fan Control", systemImage: "fanblades") }
         }
-        .frame(width: 480, height: 380)
+        // Tall enough that the fullest tab (General) fits without a scrollbar.
+        .frame(width: 480, height: 440)
     }
 
     // MARK: - General (login, units, cadence, alerts, updates)

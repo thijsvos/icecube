@@ -70,7 +70,7 @@ struct IceCubeApp: App {
         Window("Ice Cube Settings", id: WindowOpener.ID.settings) {
             SettingsWindowView(state: appState)
         }
-        .defaultSize(width: 480, height: 380)
+        .defaultSize(width: 480, height: 440)
         .windowResizability(.contentSize)
     }
 }
