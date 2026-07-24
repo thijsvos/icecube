@@ -1,11 +1,11 @@
-// SettingsWindow.swift — the tabbed settings window: focused tabs instead of one long page.
+// SettingsWindow.swift — the settings window: three native tabs at a fixed, sensible size.
 
 import ServiceManagement
 import SwiftUI
 
-/// The settings window, organized as macOS-style preference tabs (General /
-/// Menu / Fan Control / Alerts / Advanced) so no single page is a wall of
-/// controls. Each tab is a compact grouped `Form`.
+/// Settings as three balanced macOS tabs — General, Menu, Fan Control — using
+/// the native `TabView` tab bar (not a segmented control) at a fixed window
+/// size, so it's compact and looks like a real preferences window.
 struct SettingsWindowView: View {
     @Bindable var state: AppState
     @AppStorage("persistCurve") private var persistCurve = false
@@ -14,45 +14,16 @@ struct SettingsWindowView: View {
     @State private var updates = UpdateChecker()
     @Environment(\.openWindow) private var openWindow
 
-    private enum Tab: String, CaseIterable, Identifiable {
-        case general = "General", menu = "Menu", fans = "Fans", alerts = "Alerts", advanced = "Advanced"
-        var id: String {
-            rawValue
-        }
-    }
-
-    @State private var tab: Tab = .general
-
     var body: some View {
-        // A segmented selector + only the current pane in the hierarchy, so
-        // the window hugs each tab's content instead of reserving space for
-        // the tallest one (which left the sparse tabs looking empty).
-        VStack(spacing: 0) {
-            Picker("", selection: $tab) {
-                ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(12)
-            Divider()
-            selectedTab
+        TabView {
+            generalTab.tabItem { Label("General", systemImage: "gearshape") }
+            menuTab.tabItem { Label("Menu", systemImage: "menubar.rectangle") }
+            fanControlTab.tabItem { Label("Fan Control", systemImage: "fanblades") }
         }
-        .frame(width: 460)
-        .fixedSize(horizontal: false, vertical: true)
+        .frame(width: 480, height: 380)
     }
 
-    @ViewBuilder
-    private var selectedTab: some View {
-        switch tab {
-        case .general: generalTab
-        case .menu: menuTab
-        case .fans: fanControlTab
-        case .alerts: alertsTab
-        case .advanced: advancedTab
-        }
-    }
-
-    // MARK: - General
+    // MARK: - General (login, units, cadence, alerts, updates)
 
     private var generalTab: some View {
         Form {
@@ -73,6 +44,21 @@ struct SettingsWindowView: View {
                 }
                 .pickerStyle(.segmented)
             }
+            Section("Alerts") {
+                Picker("Notify at", selection: alertBinding) {
+                    Text("Off").tag(0)
+                    ForEach([85, 90, 95], id: \.self) { threshold in
+                        Text(
+                            "\(Int(state.temperatureUnit.display(Double(threshold)).rounded()))\(state.temperatureUnit.title)"
+                        )
+                        .tag(threshold)
+                    }
+                }
+                if state.alerts.permissionDenied {
+                    Text("Notifications are denied — allow Ice Cube in System Settings → Notifications.")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+            }
             Section("Updates") {
                 LabeledContent("Version", value: UpdateChecker.currentVersion)
                 HStack(spacing: 8) {
@@ -83,7 +69,6 @@ struct SettingsWindowView: View {
             }
         }
         .formStyle(.grouped)
-        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - Menu (what the popover / menu bar shows)
@@ -100,8 +85,6 @@ struct SettingsWindowView: View {
                 Toggle("Fan controls", isOn: $chart.showControls)
                 Toggle("Full temperature list", isOn: $chart.showTemperatureList)
                 Toggle("Live charts", isOn: $chart.showCharts)
-                Text("Turn controls and charts off for a pure monitoring menu.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
             if chart.showCharts {
                 Section("Charts") {
@@ -124,10 +107,9 @@ struct SettingsWindowView: View {
             }
         }
         .formStyle(.grouped)
-        .fixedSize(horizontal: false, vertical: true)
     }
 
-    // MARK: - Fan Control
+    // MARK: - Fan Control (+ the advanced helper controls)
 
     private var fanControlTab: some View {
         Form {
@@ -144,45 +126,8 @@ struct SettingsWindowView: View {
                     Text("Open the menu and enable fan control first.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-            }
-            Section {
                 Toggle("Keep the curve running when Ice Cube quits", isOn: $persistCurve)
-                Text("Applies to the next preset or curve you activate. With this on, a curve even survives a reboot.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
-        }
-        .formStyle(.grouped)
-        .fixedSize(horizontal: false, vertical: true)
-    }
-
-    // MARK: - Alerts
-
-    private var alertsTab: some View {
-        Form {
-            Section {
-                Picker("Notify when the hottest sensor reaches", selection: alertBinding) {
-                    Text("Off").tag(0)
-                    ForEach([85, 90, 95], id: \.self) { threshold in
-                        Text(
-                            "\(Int(state.temperatureUnit.display(Double(threshold)).rounded()))\(state.temperatureUnit.title)"
-                        )
-                        .tag(threshold)
-                    }
-                }
-                if state.alerts.permissionDenied {
-                    Text("Notifications are denied — allow Ice Cube in System Settings → Notifications.")
-                        .font(.caption).foregroundStyle(.orange)
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .fixedSize(horizontal: false, vertical: true)
-    }
-
-    // MARK: - Advanced (helper daemon)
-
-    private var advancedTab: some View {
-        Form {
             Section("Helper daemon") {
                 LabeledContent("Status", value: helperStateText)
                 HStack(spacing: 8) {
@@ -192,12 +137,9 @@ struct SettingsWindowView: View {
                         .help("Remove the helper daemon; fans return to automatic")
                 }
                 .controlSize(.small)
-                Text("The root helper performs the fan writes. Unregistering returns the fans to macOS.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
-        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - Shared bits
@@ -228,8 +170,7 @@ struct SettingsWindowView: View {
         return "\(registration) · \(connection)"
     }
 
-    /// Reflects/sets the active built-in preset (mirrors the menu's preset row,
-    /// so hiding controls from the menu strands nothing).
+    /// Reflects/sets the active built-in preset (mirrors the menu's preset row).
     private var presetBinding: Binding<String> {
         Binding(
             get: {
