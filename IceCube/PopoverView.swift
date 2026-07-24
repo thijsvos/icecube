@@ -51,6 +51,13 @@ struct PopoverView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
+            // The ice-cube brand mark — instant confirmation you opened the
+            // right app the moment the popover appears.
+            Image(nsImage: MenuBarGlyph.iceCube)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 22, height: 22)
+                .accessibilityHidden(true)
             Text("Ice Cube")
                 .font(.headline)
             if state.isSimulated {
