@@ -69,6 +69,7 @@ struct FanControlSection: View {
                 helper.register()
             }
             .controlSize(.small)
+            .primaryGlassButton()
         }
     }
 
@@ -85,6 +86,7 @@ struct FanControlSection: View {
                 helper.openApprovalSettings()
             }
             .controlSize(.small)
+            .primaryGlassButton()
         }
     }
 

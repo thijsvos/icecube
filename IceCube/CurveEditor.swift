@@ -365,7 +365,7 @@ struct CurveEditorView: View {
                 Button("Apply Curve") {
                     Task { await applyCurve() }
                 }
-                .buttonStyle(.borderedProminent)
+                .primaryGlassButton()
                 .disabled(!canApply)
             }
         }
