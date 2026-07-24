@@ -1,5 +1,5 @@
 #!/bin/sh
-# generate-icon.sh — renders the Ice Cube app icon (ice cube glyph on icy gradient) into AppIcon.icns.
+# generate-icon.sh — renders the Ice Cube app icon (melting ice cube on icy gradient) into AppIcon.icns.
 set -eu
 cd "$(dirname "$0")/.."
 mkdir -p build/AppIcon.iconset IceCube/Resources
@@ -29,8 +29,9 @@ for entry in entries {
         NSColor(calibratedRed: 0.10, green: 0.45, blue: 0.85, alpha: 1), // glacial blue
     ])!.draw(in: path, angle: -70)
 
-    // A glossy isometric ice cube, drawn by hand (an SF cube reads as a
-    // plain geometric box — this one has faces, translucency, and shine).
+    // A glossy isometric ice cube that is MELTING — faceted faces (so it
+    // reads as a cube, not a blob), plus two drips and a puddle. Drawn by
+    // hand: original art, no third-party license to carry into an MIT app.
     func poly(_ pts: [(CGFloat, CGFloat)]) -> NSBezierPath {
         let path = NSBezierPath()
         let scaled = pts.map { NSPoint(x: $0.0 * CGFloat(px), y: $0.1 * CGFloat(px)) }
@@ -39,26 +40,32 @@ for entry in entries {
         path.close()
         return path
     }
-    let top = poly([(0.50, 0.80), (0.78, 0.66), (0.50, 0.52), (0.22, 0.66)])
-    let left = poly([(0.22, 0.66), (0.50, 0.52), (0.50, 0.20), (0.22, 0.34)])
-    let right = poly([(0.50, 0.52), (0.78, 0.66), (0.78, 0.34), (0.50, 0.20)])
-    NSColor(calibratedRed: 0.94, green: 0.99, blue: 1.00, alpha: 0.97).set(); top.fill()
-    NSColor(calibratedRed: 0.55, green: 0.82, blue: 0.97, alpha: 0.92).set(); left.fill()
-    NSColor(calibratedRed: 0.30, green: 0.62, blue: 0.92, alpha: 0.92).set(); right.fill()
+    func drip(_ x: CGFloat, _ topY: CGFloat, _ w: CGFloat, _ len: CGFloat) -> NSBezierPath {
+        poly([(x - w, topY), (x + w, topY), (x + w * 0.5, topY - len * 0.5),
+              (x, topY - len), (x - w * 0.5, topY - len * 0.5)])
+    }
+    let p = CGFloat(px)
+    // Puddle + drips (behind the cube).
+    NSColor(calibratedWhite: 1.0, alpha: 0.5).set()
+    NSBezierPath(ovalIn: NSRect(x: 0.16 * p, y: 0.10 * p, width: 0.56 * p, height: 0.13 * p)).fill()
+    NSColor(calibratedRed: 0.85, green: 0.95, blue: 1.0, alpha: 0.95).set()
+    drip(0.30, 0.31, 0.045, 0.14).fill()
+    drip(0.66, 0.31, 0.05, 0.20).fill()
+    // Cube faces: top lightest, left mid, right darkest.
+    let top = poly([(0.50, 0.82), (0.79, 0.67), (0.50, 0.54), (0.21, 0.67)])
+    let left = poly([(0.21, 0.67), (0.50, 0.54), (0.50, 0.25), (0.21, 0.38)])
+    let right = poly([(0.50, 0.54), (0.79, 0.67), (0.79, 0.38), (0.50, 0.25)])
+    NSColor(calibratedRed: 0.95, green: 0.99, blue: 1.00, alpha: 0.97).set(); top.fill()
+    NSColor(calibratedRed: 0.62, green: 0.85, blue: 0.99, alpha: 0.95).set(); left.fill()
+    NSColor(calibratedRed: 0.38, green: 0.68, blue: 0.95, alpha: 0.95).set(); right.fill()
     NSColor(calibratedWhite: 1.0, alpha: 0.85).set()
     for path in [top, left, right] {
-        path.lineWidth = CGFloat(px) * 0.012
+        path.lineWidth = p * 0.012
         path.stroke()
     }
-    // Specular glints on the right face.
-    NSColor(calibratedWhite: 1.0, alpha: 0.75).set()
-    let glint = NSBezierPath(
-        roundedRect: NSRect(x: 0.585 * CGFloat(px), y: 0.30 * CGFloat(px),
-                            width: 0.045 * CGFloat(px), height: 0.16 * CGFloat(px)),
-        xRadius: 0.02 * CGFloat(px), yRadius: 0.02 * CGFloat(px)
-    )
-    glint.transform(using: AffineTransform(rotationByDegrees: 24))
-    glint.fill()
+    // Shine on the top face.
+    NSColor(calibratedWhite: 1.0, alpha: 0.8).set()
+    NSBezierPath(ovalIn: NSRect(x: 0.40 * p, y: 0.63 * p, width: 0.09 * p, height: 0.06 * p)).fill()
 
     image.unlockFocus()
 

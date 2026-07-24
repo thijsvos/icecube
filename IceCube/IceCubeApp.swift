@@ -26,11 +26,11 @@ struct IceCubeApp: App {
         MenuBarExtra {
             PopoverView(state: appState)
         } label: {
-            // Template rendering is mandatory-and-correct on the macOS 26
-            // transparent menu bar: the system re-tints the glyph for us.
+            // A custom melting-ice-cube template glyph (see MenuBarGlyph) —
+            // a stable brand mark, not the snowflake which read as a live
+            // "it's cold" status. The system tints the template for light/dark.
             HStack(spacing: 3) {
-                Image(systemName: "snowflake")
-                    .renderingMode(.template)
+                Image(nsImage: MenuBarGlyph.iceCube)
                 // The Text is ALWAYS present (empty when icon-only) — the
                 // label's view structure never changes. Structurally removing
                 // views from a MenuBarExtra label is a known way to glitch
