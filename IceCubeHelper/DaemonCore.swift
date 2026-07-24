@@ -102,7 +102,7 @@ actor DaemonCore {
             config.manualTargets = outcome.clampedTargets
             verifyFailures = 0
             coolingOverride = false
-            guardianActive = false
+            guardian.reset()
             status.mode = .manual
             status.appliedTargets = outcome.clampedTargets
             status.unlockBranch = outcome.branch.rawValue
@@ -119,8 +119,7 @@ actor DaemonCore {
             curveTargets = [:]
             verifyFailures = 0
             coolingOverride = false
-            guardianActive = false
-            guardianTargets = [:]
+            guardian.reset()
             status.mode = .curve
             ConfigStore.save(newConfig) // persists only when the rules allow
             await runCurveTick()
@@ -171,7 +170,7 @@ actor DaemonCore {
         }
         // Mirror the guardian's live state into the reported status so the app
         // can explain "Automatic, but Ice Cube is cooling."
-        status.guardianActive = guardianActive
+        status.guardianActive = guardian.isActive
     }
 
     /// Read-back + re-assert: firmware or thermalmonitord can silently take
@@ -268,9 +267,10 @@ actor DaemonCore {
         verifyFailures = 0
         followers = [:]
         curveTargets = [:]
-        guardianActive = false
-        guardianTargets = [:]
-        guardianTicks = 0
+        // One reset, not a hand-picked subset: the old code cleared the engage
+        // debounce here but left the orphan-ladder counters stale, so the next
+        // orphaned tick could skip the gentle re-park stage.
+        guardian.reset()
         ConfigStore.clear() // a revert always cancels the boot promise
         status.mode = .auto
         status.appliedTargets = [:]
@@ -354,30 +354,10 @@ actor DaemonCore {
 
     // MARK: - Guardian: Ice Cube cools when macOS won't
 
-    /// Consecutive ticks with a cool orphaned fan (gentle ladder debounce).
-    private var deadFanTicks = 0
-    /// Escalation stage of the gentle ladder.
-    private var recoveryStage = 0
-    /// Consecutive ticks of warm-and-nobody-cooling (guardian debounce).
-    private var guardianTicks = 0
-    /// True while the guardian curve is driving the fans.
-    private var guardianActive = false
-    /// Last targets the guardian wrote (quantized), to avoid write churn.
-    private var guardianTargets: [Int: Double] = [:]
-    /// Guardian considers engaging at this die temperature…
-    private static let guardianEngageCelsius = 75.0
-    /// …and releases below this one (wide hysteresis, no flapping).
-    private static let guardianReleaseCelsius = 65.0
+    /// The decision engine; see ``FanGuardian`` for the field finding behind it.
+    /// All policy lives there — this actor only performs the resulting I/O.
+    private var guardian = FanGuardian()
 
-    /// FIELD FINDING (2026-07-23, Mac14,9 / macOS 26.4.1): after any fan app
-    /// touches the SMC, macOS's own fan management does NOT reliably resume —
-    /// we observed die temperatures climbing through 78…92 °C with the fans
-    /// parked and macOS never intervening, mode 3 notwithstanding. "Hand back
-    /// and hope" is therefore not a safety strategy. The guardian: whenever
-    /// the config is auto and the machine is warm while nothing spins, the
-    /// daemon drives the fans itself along a built-in curve (gentle at 70 °C,
-    /// maximum by 95 °C) and releases once the die is truly cool. This is the
-    /// seed of Phase 4's control loop, pulled forward for safety.
     private func autoSafetyNet() async {
         let generation = revertGeneration
         guard let fans = try? await readFans() else { return }
@@ -385,53 +365,17 @@ actor DaemonCore {
             .filter(\.isDieSensor)
             .map(\.celsius).max() ?? 0
 
-        if guardianActive {
-            if dieHot < Self.guardianReleaseCelsius {
-                guardianActive = false
-                guardianTargets = [:]
-                record("guardian: cooled to \(Int(dieHot)) °C — releasing the fans")
-                try? await sequencer.revertAllAuto(fans: fans)
-                await port.reset()
-            } else {
-                let targets = Self.guardianCurveTargets(for: fans, dieHot: dieHot)
-                if targets != guardianTargets {
-                    guardianTargets = targets
-                    await engage(targets: targets, fans: fans, since: generation)
-                }
-            }
-            return
-        }
-
-        // Engage when warm and nothing is effectively cooling.
-        let demand = Self.guardianCurveTargets(for: fans, dieHot: dieHot)
-        let nobodyCooling = fans.contains { fan in
-            fan.mode != .forced && fan.actualRPM + 400 < (demand[fan.id] ?? 0)
-        }
-        if dieHot >= Self.guardianEngageCelsius, nobodyCooling {
-            guardianTicks += 1
-            if guardianTicks >= 2 {
-                guardianTicks = 0
-                guardianActive = true
-                guardianTargets = demand
-                record("guardian: die \(Int(dieHot)) °C and nothing cooling — driving the fans (built-in curve)")
-                await engage(targets: demand, fans: fans, since: generation)
-            }
-            return
-        }
-        guardianTicks = 0
-
-        // Cool orphan: mode 0 with stopped fans — always wrong, never urgent.
-        let orphaned = fans.filter { $0.actualRPM < 100 && $0.minRPM > 0 && $0.mode == .auto }
-        guard !orphaned.isEmpty else {
-            deadFanTicks = 0
-            recoveryStage = 0
-            return
-        }
-        deadFanTicks += 1
-        guard deadFanTicks >= 3 else { return }
-        deadFanTicks = 0
-        recoveryStage += 1
-        if recoveryStage == 1 {
+        switch guardian.evaluate(fans: fans, dieCelsius: dieHot) {
+        case .idle:
+            break
+        case let .engage(targets, die):
+            record("guardian: die \(Int(die)) °C and nothing cooling — driving the fans (built-in curve)")
+            await engage(targets: targets, fans: fans, since: generation)
+        case let .release(die):
+            record("guardian: cooled to \(Int(die)) °C — releasing the fans")
+            try? await sequencer.revertAllAuto(fans: fans)
+            await port.reset()
+        case let .reparkOrphans(orphaned):
             record("SAFETY: fan(s) orphaned in mode 0 — re-parking, handing back, resetting SMC connection")
             for fan in orphaned {
                 try? await port.writeDouble("F\(fan.id)Tg", value: fan.minRPM, as: .float)
@@ -441,26 +385,10 @@ actor DaemonCore {
                 }
             }
             await port.reset()
-        } else {
+        case let .holdAtFloor(floors):
             record("SAFETY: system did not resume control — holding fans at minimum RPM ourselves")
-            let floors = Dictionary(uniqueKeysWithValues: fans.map { ($0.id, $0.minRPM) })
             await engage(targets: floors, fans: fans, since: generation)
         }
-    }
-
-    /// The built-in guardian curve: 0 below 70 °C, then 20 %…100 % of each
-    /// fan's range linearly from 70 to 95 °C. Quantized to 100 RPM steps so
-    /// small temperature wiggles don't cause write churn.
-    static func guardianCurveTargets(for fans: [Fan], dieHot: Double) -> [Int: Double] {
-        let fraction: Double = if dieHot <= 70 {
-            0
-        } else {
-            min(1.0, 0.2 + 0.8 * (dieHot - 70.0) / 25.0)
-        }
-        return Dictionary(uniqueKeysWithValues: fans.map { fan in
-            let raw = fan.minRPM + fraction * (fan.maxRPM - fan.minRPM)
-            return (fan.id, (raw / 100).rounded() * 100)
-        })
     }
 
     // MARK: - Hardware reads (the daemon trusts only its own readings)
