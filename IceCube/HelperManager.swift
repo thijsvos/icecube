@@ -141,6 +141,15 @@ final class HelperManager {
         await apply(FanConfig(mode: .manual, manualTargets: targets))
     }
 
+    /// Re-applies the currently active curve with a new persist setting, so
+    /// toggling "Keep running" takes effect immediately instead of only on the
+    /// next preset click. No-op unless a curve is active.
+    func setPersist(_ persist: Bool) async {
+        guard var config = lastAppliedConfig, config.mode == .curve else { return }
+        config.persistsWithoutApp = persist
+        await apply(config)
+    }
+
     func revertToAuto() async {
         await run {
             try await self.client.setAllAuto()

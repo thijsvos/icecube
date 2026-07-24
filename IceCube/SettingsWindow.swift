@@ -186,6 +186,11 @@ struct SettingsWindowView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Toggle("Keep the curve running when Ice Cube quits", isOn: $persistCurve)
+                    .onChange(of: persistCurve) { _, on in
+                        // Push the new setting to the daemon now, so an already-
+                        // active curve starts (or stops) persisting immediately.
+                        Task { await state.helper.setPersist(on) }
+                    }
             }
             Section("Helper daemon") {
                 LabeledContent("Status", value: helperStateText)
