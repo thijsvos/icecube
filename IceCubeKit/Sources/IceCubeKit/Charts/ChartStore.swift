@@ -59,8 +59,10 @@ public actor ChartStore {
     // MARK: - Ingest (1 Hz)
 
     public func ingest(_ snapshot: SMCSnapshot) {
-        let cpuValues = snapshot.temperatures.filter { $0.key.hasPrefix("Tp") }.map(\.celsius)
-        let gpuValues = snapshot.temperatures.filter { $0.key.hasPrefix("Tg") }.map(\.celsius)
+        // Classification lives in SMCKeyMaps so the chart and the popover's
+        // compact readout cannot disagree about what counts as a CPU sensor.
+        let cpuValues = snapshot.temperatures.filter { $0.sensorClass == .cpu }.map(\.celsius)
+        let gpuValues = snapshot.temperatures.filter { $0.sensorClass == .gpu }.map(\.celsius)
 
         if !didDiscoverRows {
             hasCPU = !cpuValues.isEmpty

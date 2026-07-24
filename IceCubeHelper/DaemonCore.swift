@@ -292,9 +292,7 @@ actor DaemonCore {
         guard let fans = try? await readFans(), !fans.isEmpty else { return }
         // Sensor blindness is handled by the SafetyMonitor (revert after 3
         // failed ticks) — a single missing reading just skips this tick.
-        guard let dieHot = await (try? readTemperatures())?
-            .filter(\.isDieSensor)
-            .map(\.celsius).max() else { return }
+        guard let dieHot = await (try? readTemperatures())?.hottestDieCelsius else { return }
 
         var targets: [Int: Double] = [:]
         for fan in fans {
@@ -361,9 +359,7 @@ actor DaemonCore {
     private func autoSafetyNet() async {
         let generation = revertGeneration
         guard let fans = try? await readFans() else { return }
-        let dieHot = await (try? readTemperatures())?
-            .filter(\.isDieSensor)
-            .map(\.celsius).max() ?? 0
+        let dieHot = await (try? readTemperatures())?.hottestDieCelsius ?? 0
 
         switch guardian.evaluate(fans: fans, dieCelsius: dieHot) {
         case .idle:

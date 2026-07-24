@@ -98,6 +98,30 @@ public struct SensorReading: Identifiable, Sendable, Codable, Equatable {
     public var isDieSensor: Bool {
         SMCKeyMaps.isDieKey(key)
     }
+
+    /// What this sensor measures. See ``SMCKeyMaps/classify(_:)``.
+    public var sensorClass: SMCKeyMaps.SensorClass {
+        SMCKeyMaps.classify(key)
+    }
+}
+
+public extension Collection<SensorReading> {
+    /// The hottest die-class reading — the fan curve's input and the
+    /// guardian's escalation trigger. `nil` when no die sensor is present.
+    ///
+    /// Extracted because this exact chain was inlined three times, twice
+    /// inside the daemon, and the two daemon copies had already diverged in
+    /// their nil handling (`guard let` in the curve loop, `?? 0` in the
+    /// guardian). `lazy` avoids two intermediate arrays on a path that runs
+    /// every 2 s in the daemon and every second in the app.
+    var hottestDieCelsius: Double? {
+        lazy.filter(\.isDieSensor).map(\.celsius).max()
+    }
+
+    /// The hottest reading in `sensorClass`, or `nil` if none is present.
+    func hottestCelsius(in sensorClass: SMCKeyMaps.SensorClass) -> Double? {
+        lazy.filter { $0.sensorClass == sensorClass }.map(\.celsius).max()
+    }
 }
 
 /// One timestamped reading of all fans and sensors — what polling publishes.

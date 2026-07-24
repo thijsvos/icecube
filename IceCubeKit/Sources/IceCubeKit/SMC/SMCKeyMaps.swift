@@ -86,8 +86,38 @@ public enum SMCKeyMaps {
     /// one place. Do not re-inline the prefix list anywhere.
     public static let dieKeyPrefixes = ["Tp", "Tg", "Te", "Tf", "Tc"]
 
+    /// What kind of thing a sensor key measures.
+    ///
+    /// The die/ambient split selects the safety ceiling; the CPU/GPU split
+    /// drives the compact readout and the chart rows. Both used to be
+    /// hand-rolled at the call sites, and they had already drifted — the
+    /// popover counted E-cores as CPU while the CPU chart did not.
+    public enum SensorClass: Sendable, Equatable {
+        /// CPU silicon: P-cores (`Tp*`) and E-cores (`Te*`).
+        case cpu
+        /// GPU silicon (`Tg*`).
+        case gpu
+        /// Other die-class silicon (`Tf*`, `Tc*`).
+        case otherDie
+        /// Everything else: airflow, proximity, SSD, battery…
+        case ambient
+
+        /// Die-class sensors legitimately run hotter, hence a higher ceiling.
+        public var isDie: Bool {
+            self != .ambient
+        }
+    }
+
+    /// Classifies a sensor key. The one place prefixes are matched.
+    public static func classify(_ key: String) -> SensorClass {
+        if key.hasPrefix("Tp") || key.hasPrefix("Te") { return .cpu }
+        if key.hasPrefix("Tg") { return .gpu }
+        if key.hasPrefix("Tf") || key.hasPrefix("Tc") { return .otherDie }
+        return .ambient
+    }
+
     /// Whether `key` names a die-class sensor.
     public static func isDieKey(_ key: String) -> Bool {
-        dieKeyPrefixes.contains(where: key.hasPrefix)
+        classify(key).isDie
     }
 }

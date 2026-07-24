@@ -35,23 +35,17 @@ final class AppState {
 
     /// The hottest die-class sensor (CPU/GPU silicon), the curve input.
     var hottestDie: Double? {
-        snapshot?.temperatures
-            .filter(\.isDieSensor)
-            .map(\.celsius).max()
+        snapshot?.temperatures.hottestDieCelsius
     }
 
-    /// Hottest CPU-core reading (`Tp*`/`Te*`), for the compact readout.
+    /// Hottest CPU-core reading, for the compact readout.
     var cpuTempMax: Double? {
-        snapshot?.temperatures
-            .filter { $0.key.hasPrefix("Tp") || $0.key.hasPrefix("Te") }
-            .map(\.celsius).max()
+        snapshot?.temperatures.hottestCelsius(in: .cpu)
     }
 
-    /// Hottest GPU reading (`Tg*`), for the compact readout.
+    /// Hottest GPU reading, for the compact readout.
     var gpuTempMax: Double? {
-        snapshot?.temperatures
-            .filter { $0.key.hasPrefix("Tg") }
-            .map(\.celsius).max()
+        snapshot?.temperatures.hottestCelsius(in: .gpu)
     }
 
     /// Short human-readable description of the last read failure, or `nil`
