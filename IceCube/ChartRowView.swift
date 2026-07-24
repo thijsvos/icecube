@@ -43,15 +43,15 @@ struct ChartRowView: View {
         convertsUnit ? "°F" : row.unit
     }
 
-    /// Per-row accent: CPU orange, GPU purple, fans teal.
+    /// Per-row accent, on the app's palette: temperature rows glow by heat
+    /// (thermal color of the live value), fan rows use the ice-blue brand accent
+    /// — the same language as the popover gauges and readouts.
     private var accent: Color {
-        if row.id == "cpu" {
-            .orange
-        } else if row.id == "gpu" {
-            .purple
-        } else {
-            .teal
+        if row.unit == "°C" {
+            let latest = row.series.first?.stats?.latest ?? row.yDomainMax
+            return Theme.temperatureColor(latest)
         }
+        return Theme.accent
     }
 
     var body: some View {
@@ -159,7 +159,8 @@ struct ChartRowView: View {
         .chartXAxis(.hidden)
         .chartYAxis {
             AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) {
-                AxisGridLine().foregroundStyle(.quaternary)
+                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [2, 3]))
+                    .foregroundStyle(.quaternary)
                 AxisValueLabel().font(.caption2).foregroundStyle(.tertiary)
             }
         }

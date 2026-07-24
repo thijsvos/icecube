@@ -41,34 +41,46 @@ struct SettingsWindowView: View {
         }
         .frame(width: 480)
         .fixedSize(horizontal: false, vertical: true)
+        // Every control (toggles, pickers, buttons) picks up the ice-blue brand
+        // accent instead of the system accent, so Settings matches the app.
+        .tint(Theme.accent)
     }
 
     private var tabBar: some View {
         HStack(spacing: 6) {
             ForEach(Tab.allCases) { item in
-                Button {
-                    // Instant switch — no animation. Animating the tab change
-                    // interpolates the whole layout while the window resizes,
-                    // which made the tab bar visibly shift ("move down").
-                    tab = item
-                } label: {
-                    VStack(spacing: 3) {
-                        Image(systemName: item.icon).font(.system(size: 16))
-                        Text(item.rawValue).font(.caption)
-                    }
-                    .frame(width: 92)
-                    .padding(.vertical, 7)
-                    .background(
-                        tab == item ? AnyShapeStyle(.selection) : AnyShapeStyle(.clear),
-                        in: RoundedRectangle(cornerRadius: 6)
-                    )
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(tab == item ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                tabButton(item)
             }
         }
         .padding(8)
+    }
+
+    /// One tab: a filled, brand-blue icon + bold label on a subtle blue pill
+    /// when selected; a quiet grey glyph otherwise.
+    private func tabButton(_ item: Tab) -> some View {
+        let selected = tab == item
+        let fill: AnyShapeStyle = selected ? AnyShapeStyle(Theme.accent.opacity(0.15)) : AnyShapeStyle(.clear)
+        let tintStyle: AnyShapeStyle = selected ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.secondary)
+        return Button {
+            // Instant switch — no animation. Animating the tab change
+            // interpolates the whole layout while the window resizes, which
+            // made the tab bar visibly shift ("move down").
+            tab = item
+        } label: {
+            VStack(spacing: 3) {
+                Image(systemName: item.icon)
+                    .font(.system(size: 16))
+                    .symbolVariant(selected ? .fill : .none)
+                Text(item.rawValue)
+                    .font(.caption.weight(selected ? .semibold : .regular))
+            }
+            .frame(width: 92)
+            .padding(.vertical, 7)
+            .background(fill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(tintStyle)
     }
 
     @ViewBuilder
@@ -121,6 +133,10 @@ struct SettingsWindowView: View {
                 HStack(spacing: 8) {
                     Button("Check for Updates…") { Task { await updates.check() } }
                         .controlSize(.small)
+                    Button("About…") {
+                        WindowOpener.open(WindowOpener.ID.about, using: openWindow)
+                    }
+                    .controlSize(.small)
                     updateStatusView
                 }
             }
@@ -143,6 +159,10 @@ struct SettingsWindowView: View {
                 Toggle("Fan controls", isOn: $chart.showControls)
                 Toggle("Full temperature list", isOn: $chart.showTemperatureList)
                 Toggle("Live charts", isOn: $chart.showCharts)
+                Toggle("Smoothly animate readings", isOn: $chart.smoothReadings)
+                    .help(
+                        "Numbers roll in place and gauge bars slide to each new reading; off makes them snap instantly"
+                    )
             }
             if chart.showCharts {
                 Section("Charts") {
@@ -199,8 +219,13 @@ struct SettingsWindowView: View {
                         .help("Force launchd to pick up a freshly built helper")
                     Button("Unregister") { Task { await state.helper.unregister() } }
                         .help("Remove the helper daemon; fans return to automatic")
+                    if state.helper.isReregistering {
+                        ProgressView().controlSize(.small)
+                        Text("Re-registering…").font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 .controlSize(.small)
+                .disabled(state.helper.isReregistering)
             }
         }
         .formStyle(.grouped)

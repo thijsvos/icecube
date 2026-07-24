@@ -1,5 +1,6 @@
 // HelperManager.swift — helper lifecycle: SMAppService registration, connection + handshake, heartbeat, status.
 
+import AppKit
 import Foundation
 import IceCubeKit
 import Observation
@@ -41,6 +42,10 @@ final class HelperManager {
     private let client = HelperClient()
     private let log = Logger(subsystem: "io.github.thijsvos.icecube", category: "xpc")
     @ObservationIgnored private var maintenanceTask: Task<Void, Never>?
+    @ObservationIgnored private var wakeObserver: NSObjectProtocol?
+    /// Guards against overlapping maintenance passes (the 5 s loop vs. an
+    /// on-demand refresh from wake / popover-open).
+    @ObservationIgnored private var isMaintaining = false
 
     init() {
         client.onDisconnect = { [weak self] in
@@ -57,6 +62,31 @@ final class HelperManager {
                 try? await Task.sleep(for: .seconds(HelperConstants.heartbeatInterval))
             }
         }
+        // React to system wake immediately instead of waiting for the next 5 s
+        // tick — reconnect + reconcile so the popover is correct the moment the
+        // lid opens. Purely an app-side responsiveness hook; the daemon and its
+        // safety timers are untouched.
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.refreshNow() }
+        }
+    }
+
+    deinit {
+        maintenanceTask?.cancel()
+        // `wakeObserver` is intentionally left registered: HelperManager lives
+        // for the whole app lifetime, and its block captures only a weak self,
+        // so it becomes inert on teardown. (A non-Sendable NSObjectProtocol
+        // can't be removed from a nonisolated deinit under Swift 6 anyway.)
+    }
+
+    /// Runs one maintenance pass right now (reconnect + status + reconcile)
+    /// without waiting for the loop — used on system wake and when the popover
+    /// opens so the UI reflects reality promptly. A pass already in flight is
+    /// skipped, so it's cheap and safe to call repeatedly.
+    func refreshNow() {
+        Task { await maintain() }
     }
 
     // MARK: - Registration (SMAppService)
@@ -101,11 +131,32 @@ final class HelperManager {
         refreshRegistration()
     }
 
+    /// True while a re-register is in flight, so the UI can show progress and
+    /// disable the button instead of flashing a misleading "not registered".
+    private(set) var isReregistering = false
+
     /// The #1 dev trap: after a rebuild, launchd may still run the OLD helper
     /// copy. Unregister + register forces the fresh binary (XCODE_GUIDE §4.4).
+    ///
+    /// SMAppService needs launchd to finish dropping the old daemon before it
+    /// will accept a fresh registration — registering too soon silently leaves
+    /// the status at `.notRegistered` (the "click Re-register twice" bug). We
+    /// retry `register()` with a short backoff so a single click does the whole
+    /// job, and only surface an error once the retries are exhausted.
     func reregister() async {
+        isReregistering = true
+        defer { isReregistering = false }
         await unregister()
-        register()
+        for attempt in 0 ..< 6 {
+            try? await Task.sleep(for: .milliseconds(attempt == 0 ? 300 : 500))
+            register()
+            // register() refreshes `registration`; anything past notRegistered
+            // (requiresApproval or enabled) means launchd accepted the new job.
+            if registration != .notRegistered {
+                lastError = nil
+                return
+            }
+        }
     }
 
     func openApprovalSettings() {
@@ -158,28 +209,54 @@ final class HelperManager {
         UserDefaults.standard.removeObject(forKey: Self.lastCurveKey)
     }
 
-    /// On the first connection of a session, reconcile the app with the daemon
-    /// using the stored curve profile:
-    /// - daemon idle in **auto**: resume the curve so opening Ice Cube starts
-    ///   cooling instead of leaving the machine on macOS's quiet auto behavior;
-    /// - daemon already running a **curve** (a persisted profile from boot):
-    ///   restore `lastAppliedConfig` (without re-applying) so the UI knows which
-    ///   preset is active and highlights it — otherwise the popover says "curve
-    ///   active" but no preset button lights up.
-    private func autoResumeIfNeeded() async {
-        guard !didAutoResume, let mode = status?.mode else { return }
-        didAutoResume = true
-        guard mode == .auto || mode == .curve else { return }
+    /// The last curve profile the app saved, with the current "Keep running"
+    /// preference applied (not whatever flag was stored with it).
+    private func storedCurveConfig() -> FanConfig? {
         guard let data = UserDefaults.standard.data(forKey: Self.lastCurveKey),
               var config = try? JSONDecoder().decode(FanConfig.self, from: data),
-              config.mode == .curve else { return }
-        // Honor the current "Keep running" preference, not whatever flag was
-        // stored with the curve (shares the "persistCurve" @AppStorage key).
+              config.mode == .curve else { return nil }
         config.persistsWithoutApp = UserDefaults.standard.bool(forKey: "persistCurve")
-        if mode == .auto {
-            await apply(config) // daemon idle → resume (starts cooling)
-        } else {
-            lastAppliedConfig = config // already running it → just restore the highlight
+        return config
+    }
+
+    /// Once per session, on the first connection: if the daemon is idle in auto
+    /// and we saved a curve, resume it so opening Ice Cube starts cooling instead
+    /// of leaving the machine on macOS's quiet auto behavior. The APPLY is
+    /// deliberately once-only; keeping the highlight in sync is `reconcileHighlight`.
+    private func autoResumeIfNeeded() async {
+        guard !didAutoResume, status != nil else { return }
+        didAutoResume = true
+        guard status?.mode == .auto, let stored = storedCurveConfig() else { return }
+        await apply(stored)
+    }
+
+    /// Keep the active-preset highlight in step with the mode the daemon is
+    /// ACTUALLY enforcing — on every status refresh, not just at launch.
+    /// Idempotent when already consistent (no view churn).
+    ///
+    /// Without this, closing the lid leaves the popover with NO preset lit: a
+    /// non-persistent curve gets reverted to auto by the daemon during sleep
+    /// (stale-heartbeat watchdog / XPC invalidation), but the app still remembers
+    /// the curve, which matches neither the curve preset nor Auto once the daemon
+    /// is back on auto.
+    private func reconcileHighlight() {
+        guard let mode = status?.mode else { return }
+        let reconciled = PresetHighlight.reconcile(
+            daemonMode: mode,
+            current: lastAppliedConfig,
+            storedCurve: storedCurveConfig(),
+            manualTargets: status?.appliedTargets ?? [:]
+        )
+        if lastAppliedConfig != reconciled {
+            // Auditable: makes the sleep/wake highlight correction visible in the
+            // unified log. Values are pulled into locals first so the os_log
+            // autoclosure needs no `self.` (which swiftformat would strip).
+            let was = lastAppliedConfig?.mode.rawValue ?? "none"
+            let now = reconciled?.mode.rawValue ?? "none"
+            log.notice(
+                "highlight reconciled — daemon=\(mode.rawValue, privacy: .public), was=\(was, privacy: .public), now=\(now, privacy: .public)"
+            )
+            lastAppliedConfig = reconciled // set only on change → no view churn
         }
     }
 
@@ -196,6 +273,11 @@ final class HelperManager {
     // MARK: - The maintenance loop
 
     private func maintain() async {
+        if isMaintaining {
+            return
+        } // don't let the loop and an on-demand refresh overlap
+        isMaintaining = true
+        defer { isMaintaining = false }
         refreshRegistration()
         guard registration == .enabled else {
             connection = .disconnected
@@ -218,6 +300,7 @@ final class HelperManager {
         client.heartbeat()
         await refreshStatus()
         await autoResumeIfNeeded()
+        reconcileHighlight()
     }
 
     private func refreshStatus() async {

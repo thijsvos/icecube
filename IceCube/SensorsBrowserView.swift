@@ -101,22 +101,35 @@ struct SensorsBrowserView: View {
     private var recognizedList: some View {
         List {
             Section("Temperatures") {
-                let temps = state.temperatures.sorted { $0.celsius > $1.celsius }
+                // Stable alphabetical order so rows never reshuffle as values
+                // change — sorting by temperature made the whole list jump every
+                // second. The hottest sensor is flagged in place instead.
+                let temps = state.temperatures.sorted { $0.label < $1.label }
                 if temps.isEmpty {
                     Text("No named temperature sensors on this model yet — Export Diagnostics to help add them.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 ForEach(temps) { reading in
-                    HStack {
+                    let isHottest = reading.id == state.hottest?.id
+                    HStack(spacing: 6) {
                         Text(reading.label)
+                            .fontWeight(isHottest ? .semibold : .regular)
+                        if isHottest {
+                            Image(systemName: "flame.fill")
+                                .font(.caption2)
+                                .foregroundStyle(Theme.temperatureColor(reading.celsius))
+                                .help("Hottest sensor right now")
+                        }
                         Spacer()
                         Text(state.temperatureUnit.text(reading.celsius))
                             .monospacedDigit()
-                            .foregroundStyle(reading.isDieSensor ? .primary : .secondary)
+                            .foregroundStyle(Theme.temperatureColor(reading.celsius))
                     }
                     .accessibilityElement(children: .combine)
-                    .accessibilityLabel("\(reading.label) \(Int(reading.celsius.rounded())) degrees")
+                    .accessibilityLabel(
+                        "\(reading.label) \(Int(reading.celsius.rounded())) degrees\(isHottest ? ", hottest" : "")"
+                    )
                 }
             }
             Section("Fans") {

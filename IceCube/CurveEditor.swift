@@ -101,6 +101,8 @@ struct CurveEditorView: View {
         }
         .padding(14)
         .frame(minWidth: 600, minHeight: 430)
+        // Sliders, toggle, and buttons all take the ice-blue brand accent.
+        .tint(Theme.accent)
         .onChange(of: state.snapshot) {
             if let die = state.hottestDie {
                 model.updatePreview(die: die)
@@ -112,26 +114,28 @@ struct CurveEditorView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Text("Load:")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            ForEach(
-                [("Quiet", FanCurve.quiet), ("Balanced", .balanced), ("Cold", .cold), ("Max", .max)],
-                id: \.0
-            ) { name, curve in
-                Button(name) {
-                    model.load(curve)
+            // The preset loaders live in a floating glass pod — a small hovering
+            // control cluster, distinct from the canvas it acts on.
+            HStack(spacing: 8) {
+                Text("Load").premiumSectionLabel()
+                ForEach(
+                    [("Quiet", FanCurve.quiet), ("Balanced", .balanced), ("Cold", .cold), ("Max", .max)],
+                    id: \.0
+                ) { name, curve in
+                    Button(name) { model.load(curve) }
+                        .buttonStyle(.borderless)
                 }
-                .controlSize(.small)
-            }
-            ForEach(state.presets.userPresets) { preset in
-                if let curve = preset.config.sharedCurve {
-                    Button(preset.name) {
-                        model.load(curve)
+                ForEach(state.presets.userPresets) { preset in
+                    if let curve = preset.config.sharedCurve {
+                        Button(preset.name) { model.load(curve) }
+                            .buttonStyle(.borderless)
                     }
-                    .controlSize(.small)
                 }
             }
+            .controlSize(.small)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .floatingGlass(in: Capsule())
             Spacer()
             Text("double-click: add · ⌫: remove · arrows: nudge")
                 .font(.caption2)
@@ -228,14 +232,16 @@ struct CurveEditorView: View {
     // MARK: - Drawing
 
     private func drawGrid(_ context: GraphicsContext, _ rect: CGRect) {
+        let gridStroke = StrokeStyle(lineWidth: 0.5, dash: [2, 3])
         for temp in stride(from: 30.0, through: 110.0, by: 10) {
             let x = position(of: CurvePoint(celsius: temp, fraction: 0), in: rect).x
             context.stroke(
                 Path { $0.move(to: CGPoint(x: x, y: rect.minY)); $0.addLine(to: CGPoint(x: x, y: rect.maxY)) },
-                with: .color(.gray.opacity(0.15))
+                with: .color(.gray.opacity(0.15)),
+                style: gridStroke
             )
             context.draw(
-                Text("\(Int(temp))°").font(.caption2).foregroundStyle(.secondary),
+                Text("\(Int(temp))°").font(.caption2).foregroundStyle(.tertiary),
                 at: CGPoint(x: x, y: rect.maxY + 9)
             )
         }
@@ -243,10 +249,11 @@ struct CurveEditorView: View {
             let y = rect.maxY - rect.height * fraction
             context.stroke(
                 Path { $0.move(to: CGPoint(x: rect.minX, y: y)); $0.addLine(to: CGPoint(x: rect.maxX, y: y)) },
-                with: .color(.gray.opacity(0.15))
+                with: .color(.gray.opacity(0.15)),
+                style: gridStroke
             )
             context.draw(
-                Text("\(Int(fraction * 100))%").font(.caption2).foregroundStyle(.secondary),
+                Text("\(Int(fraction * 100))%").font(.caption2).foregroundStyle(.tertiary),
                 at: CGPoint(x: rect.minX - 16, y: y)
             )
         }
@@ -272,31 +279,34 @@ struct CurveEditorView: View {
         fill.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
         fill.closeSubpath()
         context.fill(fill, with: .linearGradient(
-            Gradient(colors: [.teal.opacity(0.25), .teal.opacity(0.02)]),
+            Gradient(colors: [Theme.accent.opacity(0.28), Theme.accent.opacity(0.02)]),
             startPoint: CGPoint(x: rect.midX, y: rect.minY),
             endPoint: CGPoint(x: rect.midX, y: rect.maxY)
         ))
-        context.stroke(line, with: .color(.teal), lineWidth: 2)
+        context.stroke(line, with: .color(Theme.accent), lineWidth: 2)
     }
 
     private func drawLiveMarker(_ context: GraphicsContext, _ rect: CGRect) {
         guard let die = state.hottestDie else { return }
         let clamped = min(max(die, Self.tempRange.lowerBound), Self.tempRange.upperBound)
+        // The marker is a temperature, so it wears the thermal color — warm as
+        // the die heats — which also keeps it legible over the blue curve.
+        let heat = Theme.temperatureColor(die)
         let x = position(of: CurvePoint(celsius: clamped, fraction: 0), in: rect).x
         context.stroke(
             Path { $0.move(to: CGPoint(x: x, y: rect.minY)); $0.addLine(to: CGPoint(x: x, y: rect.maxY)) },
-            with: .color(.orange.opacity(0.6)),
+            with: .color(heat.opacity(0.7)),
             style: StrokeStyle(lineWidth: 1, dash: [4, 3])
         )
         context.draw(
-            Text("\(Int(die.rounded()))°").font(.caption2.bold()).foregroundStyle(.orange),
+            Text("\(Int(die.rounded()))°").font(.caption2.bold()).foregroundStyle(heat),
             at: CGPoint(x: x, y: rect.minY - 8)
         )
         // The "applied" dot: where hysteresis + ramp have actually gotten to.
         let dot = position(of: CurvePoint(celsius: clamped, fraction: model.previewFraction), in: rect)
         context.fill(
             Path(ellipseIn: CGRect(x: dot.x - 5, y: dot.y - 5, width: 10, height: 10)),
-            with: .color(.orange)
+            with: .color(heat)
         )
     }
 
@@ -306,12 +316,12 @@ struct CurveEditorView: View {
             let r: CGFloat = index == model.selected ? 8 : 6
             context.fill(
                 Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r)),
-                with: .color(.teal)
+                with: .color(Theme.accent)
             )
             if index == model.selected {
                 context.stroke(
                     Path(ellipseIn: CGRect(x: p.x - r - 3, y: p.y - r - 3, width: 2 * r + 6, height: 2 * r + 6)),
-                    with: .color(.orange),
+                    with: .color(.primary),
                     lineWidth: 2
                 )
             }

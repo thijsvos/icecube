@@ -22,6 +22,7 @@ struct FanControlSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            Text("Control").premiumSectionLabel()
             content
             if let error = helper.lastError {
                 Text(error)
@@ -29,13 +30,14 @@ struct FanControlSection: View {
                     .foregroundStyle(.orange)
             }
         }
-        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(Theme.Metrics.cardPadding)
         .background(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: Theme.Metrics.cornerRadius, style: .continuous)
                 .fill(isManual ? AnyShapeStyle(.orange.opacity(0.12)) : AnyShapeStyle(.quinary))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: Theme.Metrics.cornerRadius, style: .continuous)
                 .strokeBorder(isManual ? .orange.opacity(0.5) : .clear, lineWidth: 1)
         )
     }
@@ -58,10 +60,9 @@ struct FanControlSection: View {
         VStack(alignment: .leading, spacing: 6) {
             Label("Fan control is off", systemImage: "fan.slash")
                 .font(.callout.weight(.medium))
-            Text("Controlling fans needs a small helper that runs with " +
-                "administrator rights. It only ever writes clamped, safe fan " +
-                "speeds, reverts to automatic if Ice Cube stops, and you approve " +
-                "it once in System Settings.")
+            Text("A small admin helper does the fan writes — only safe, clamped "
+                + "speeds, and it reverts to automatic if Ice Cube stops. Approved "
+                + "once in System Settings.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -118,6 +119,48 @@ struct FanControlSection: View {
         helper.status?.mode == .curve
     }
 
+    /// The daemon's safety guardian is driving the fans itself under Auto —
+    /// the Mac got hot and macOS wasn't cooling it.
+    private var guardianCooling: Bool {
+        helper.status?.mode == .auto && (helper.status?.guardianActive ?? false)
+    }
+
+    private var statusText: String {
+        if isManual {
+            return "MANUAL fan control"
+        }
+        if isCurve {
+            return "Curve active"
+        }
+        if guardianCooling {
+            return "Automatic · cooling"
+        }
+        return "Automatic"
+    }
+
+    private var statusIcon: String {
+        if isManual {
+            return "hand.raised.fill"
+        }
+        if isCurve {
+            return "chart.xyaxis.line"
+        }
+        if guardianCooling {
+            return "wind"
+        }
+        return "gearshape"
+    }
+
+    private var statusColor: AnyShapeStyle {
+        if isManual {
+            return AnyShapeStyle(.orange)
+        }
+        if isCurve || guardianCooling {
+            return AnyShapeStyle(Theme.accent)
+        }
+        return AnyShapeStyle(.secondary)
+    }
+
     /// The preset quick-switch row (PLAN.md §1.2). Applying a curve preset
     /// needs the editor's persist setting, stored app-wide.
     @AppStorage("persistCurve") private var persistCurve = false
@@ -135,7 +178,7 @@ struct FanControlSection: View {
                     }
                 }
                 .buttonStyle(.bordered)
-                .tint(isActivePreset(preset) ? .teal : nil)
+                .tint(isActivePreset(preset) ? Theme.accent : nil)
             }
             Spacer(minLength: 0)
         }
@@ -157,18 +200,9 @@ struct FanControlSection: View {
         VStack(alignment: .leading, spacing: 8) {
             presetRow
             HStack {
-                Label(
-                    isManual ? "MANUAL fan control" : (isCurve ? "Curve control active" : "Fans on automatic"),
-                    systemImage: isManual ? "hand.raised.fill" : (isCurve ? "chart.xyaxis.line" : "gearshape")
-                )
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(isManual ? AnyShapeStyle(.orange) :
-                    (isCurve ? AnyShapeStyle(.teal) : AnyShapeStyle(.secondary)))
-                if let branch = helper.status?.unlockBranch, isManual {
-                    Text(branch == "ftst" ? "(unlock path)" : "(direct path)")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
+                Label(statusText, systemImage: statusIcon)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(statusColor)
                 Spacer()
                 Button("Curves…") {
                     WindowOpener.open(WindowOpener.ID.curves, using: openWindow)
@@ -189,16 +223,12 @@ struct FanControlSection: View {
                     .controlSize(.small)
                 }
             }
-            if isCurve, let targets = helper.status?.appliedTargets, !targets.isEmpty {
-                Text("Curve targets: " + targets.sorted { $0.key < $1.key }
-                    .map { entry in
-                        let name = fans.first { $0.id == entry.key }?.name ?? "Fan \(entry.key)"
-                        return "\(name) \(Int(entry.value))"
-                    }
-                    .joined(separator: " · "))
+            if guardianCooling {
+                Text("Ice Cube is cooling the Mac — macOS left the fans idle while it ran hot. "
+                    + "It hands back once things cool down.")
                     .font(.caption2)
-                    .monospacedDigit()
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if isManual {
                 ForEach(fans) { fan in

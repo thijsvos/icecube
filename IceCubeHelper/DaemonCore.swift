@@ -92,6 +92,7 @@ actor DaemonCore {
             config.manualTargets = outcome.clampedTargets
             verifyFailures = 0
             coolingOverride = false
+            guardianActive = false
             status.mode = .manual
             status.appliedTargets = outcome.clampedTargets
             status.unlockBranch = outcome.branch.rawValue
@@ -158,6 +159,9 @@ actor DaemonCore {
             record("SAFETY: reverting to auto — \(reason)")
             await revertEverything(reason: reason)
         }
+        // Mirror the guardian's live state into the reported status so the app
+        // can explain "Automatic, but Ice Cube is cooling."
+        status.guardianActive = guardianActive
     }
 
     /// Read-back + re-assert: firmware or thermalmonitord can silently take
@@ -222,9 +226,13 @@ actor DaemonCore {
         verifyFailures = 0
         followers = [:]
         curveTargets = [:]
+        guardianActive = false
+        guardianTargets = [:]
+        guardianTicks = 0
         ConfigStore.clear() // a revert always cancels the boot promise
         status.mode = .auto
         status.appliedTargets = [:]
+        status.guardianActive = false
         record("all fans auto (\(reason))")
     }
 
@@ -258,8 +266,12 @@ actor DaemonCore {
             )
             let fraction = follower.step(dieCelsius: dieHot, curve: curve)
             followers[fan.id] = follower
-            let raw = fan.minRPM + fraction * (fan.maxRPM - fan.minRPM)
-            targets[fan.id] = (raw / 50).rounded() * 50
+            // Quantize AND clamp to what the write path will actually send, so
+            // verifyCurveHeld compares read-back against the real command. A raw
+            // target at/just above Mn can quantize below Mn and get clamped up on
+            // write; the un-clamped value would then never verify (Quiet reverted
+            // to auto for exactly this reason).
+            targets[fan.id] = FanWriteSequencer.quantizedTarget(fraction: fraction, fan: fan)
         }
         guard !targets.isEmpty else { return }
 

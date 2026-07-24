@@ -12,7 +12,8 @@ public enum HelperConstants {
     public static let appBundleID = "io.github.thijsvos.icecube"
     /// Protocol version; both sides must agree (bump on breaking change).
     /// v2: FanConfig gained curve fields (Phase 4).
-    public static let protocolVersion = "2"
+    /// v3: HelperStatus gained `guardianActive`.
+    public static let protocolVersion = "3"
     /// How often the app sends a heartbeat while connected.
     public static let heartbeatInterval: TimeInterval = 5
     /// SAFETY: no heartbeat for this long → the daemon's watchdog reverts to
@@ -53,6 +54,10 @@ public struct HelperStatus: Codable, Sendable, Equatable {
     public var unlockBranch: String?
     /// Whether the last write sequence passed read-back verification.
     public var lastWriteVerified: Bool
+    /// True while the daemon's guardian is driving the fans itself in `.auto`
+    /// mode — i.e. the Mac is hot and macOS isn't cooling it. Lets the UI
+    /// explain "Automatic, but Ice Cube is actively cooling."
+    public var guardianActive: Bool
     /// Recent safety decisions, newest last (bounded), for UI + bug reports.
     public var recentEvents: [String]
 
@@ -62,6 +67,7 @@ public struct HelperStatus: Codable, Sendable, Equatable {
         appliedTargets: [Int: Double] = [:],
         unlockBranch: String? = nil,
         lastWriteVerified: Bool = false,
+        guardianActive: Bool = false,
         recentEvents: [String] = []
     ) {
         self.protocolVersion = protocolVersion
@@ -69,6 +75,7 @@ public struct HelperStatus: Codable, Sendable, Equatable {
         self.appliedTargets = appliedTargets
         self.unlockBranch = unlockBranch
         self.lastWriteVerified = lastWriteVerified
+        self.guardianActive = guardianActive
         self.recentEvents = recentEvents
     }
 

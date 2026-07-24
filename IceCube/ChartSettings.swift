@@ -43,6 +43,7 @@ final class ChartSettings {
         static let band = "charts.band", secondary = "charts.secondary"
         static let height = "charts.height", tempList = "charts.templist"
         static let controls = "menu.controls"
+        static let smooth = "menu.smoothReadings"
     }
 
     /// Master switch. Off → the popover hides the whole chart section for a
@@ -97,6 +98,13 @@ final class ChartSettings {
         didSet { defaults.set(showTemperatureList, forKey: Key.tempList) }
     }
 
+    /// Smoothly glide the live numbers and gauge bars to each new reading
+    /// (digits roll in place, the bar slides). Off → values snap instantly,
+    /// for anyone who prefers no motion at all.
+    var smoothReadings: Bool {
+        didSet { defaults.set(smoothReadings, forKey: Key.smooth) }
+    }
+
     private let defaults = UserDefaults.standard
 
     init() {
@@ -118,6 +126,7 @@ final class ChartSettings {
         showSecondary = bool(Key.secondary, true)
         height = ChartHeight(rawValue: d.string(forKey: Key.height) ?? "") ?? .regular
         showTemperatureList = bool(Key.tempList, false)
+        smoothReadings = bool(Key.smooth, true)
     }
 
     /// Whether a `ChartStore.Row` id passes the current row-visibility filter.

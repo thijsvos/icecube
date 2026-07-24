@@ -72,5 +72,11 @@ struct IceCubeApp: App {
         }
         .defaultSize(width: 480, height: 440)
         .windowResizability(.contentSize)
+
+        // About panel — identity, version, license.
+        Window("About Ice Cube", id: WindowOpener.ID.about) {
+            AboutView()
+        }
+        .windowResizability(.contentSize)
     }
 }

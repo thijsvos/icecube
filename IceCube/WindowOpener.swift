@@ -20,6 +20,7 @@ enum WindowOpener {
         /// ".v2" gives the settings window a fresh identity so macOS forgets the
         /// oversized frame earlier buggy versions saved for the old id.
         static let settings = "settings.v2"
+        static let about = "about"
     }
 
     /// Opens the window scene `id` and brings the app frontmost.

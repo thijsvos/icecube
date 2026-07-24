@@ -18,8 +18,14 @@ struct PopoverView: View {
     /// The shared observable state; owned by `IceCubeApp`.
     let state: AppState
 
+    /// The easing used for live readings, or `nil` when the user has turned the
+    /// "smooth readings" preference off (values then snap instantly).
+    private var readingAnimation: Animation? {
+        state.chartSettings.smoothReadings ? .easeInOut(duration: 0.35) : nil
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Metrics.sectionSpacing) {
             header
             if let errorMessage = state.errorMessage {
                 errorRow(errorMessage)
@@ -27,19 +33,17 @@ struct PopoverView: View {
             if state.snapshot == nil {
                 waitingRow
             } else {
-                fanSection
+                fanCard
                 if state.chartSettings.showControls {
                     FanControlSection(helper: state.helper, fans: state.fans)
                 }
                 if state.chartSettings.showCharts {
-                    Divider()
                     DashboardView(state: state)
                 } else {
-                    compactTemperatureLine
+                    compactTemperatureCard
                 }
                 if state.chartSettings.showTemperatureList {
-                    Divider()
-                    temperatureListSection
+                    temperatureListCard
                 }
             }
             Divider()
@@ -47,6 +51,38 @@ struct PopoverView: View {
         }
         .padding(14)
         .frame(width: 380)
+        // Opening the popover forces an immediate reconnect + reconcile, so the
+        // highlighted preset is correct the instant you look — no waiting for
+        // the 5 s maintenance tick after a wake.
+        .onAppear { state.helper.refreshNow() }
+    }
+
+    /// The fan readouts, grouped as a titled card.
+    private var fanCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Fans").premiumSectionLabel()
+            fanSection
+        }
+        .popoverCard()
+    }
+
+    /// The compact CPU/GPU line, grouped as a titled card (shown when the full
+    /// charts are hidden).
+    private var compactTemperatureCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Temperature").premiumSectionLabel()
+            compactTemperatureLine
+        }
+        .popoverCard()
+    }
+
+    /// The full per-sensor list, grouped as a titled card.
+    private var temperatureListCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Sensors").premiumSectionLabel()
+            temperatureListSection
+        }
+        .popoverCard()
     }
 
     // MARK: - Header
@@ -94,35 +130,57 @@ struct PopoverView: View {
     }
 
     private func fanRow(_ fan: Fan) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .firstTextBaseline) {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(fan.name)
                     .font(.callout.weight(.medium))
-                Text(fan.mode.displayName)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
                 Spacer()
-                Text("\(Int(fan.actualRPM)) → \(Int(fan.targetRPM)) RPM")
-                    .font(.callout)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel(
-                        "\(fan.name) fan: \(Int(fan.actualRPM)) RPM, target \(Int(fan.targetRPM)) RPM, \(fan.mode.displayName) mode"
-                    )
+                rpmReadout(fan)
             }
-            // A gauge-ish readout: actual RPM normalized into the fan's
-            // reported [min, max] range, clamped so out-of-range never breaks.
-            ProgressView(value: normalizedSpeed(of: fan))
-                .controlSize(.small)
-                .accessibilityHidden(true) // the RPM text above carries the value
+            FanSpeedBar(
+                fraction: normalizedSpeed(of: fan),
+                target: targetSpeed(of: fan),
+                animated: state.chartSettings.smoothReadings
+            )
         }
     }
 
-    /// `actualRPM` mapped into `[minRPM, maxRPM]` as 0…1, clamped.
+    /// The fan's target speed as 0…1 of max, for the gauge tick — nil when
+    /// there's nothing meaningful to aim at (no target reported).
+    private func targetSpeed(of fan: Fan) -> Double? {
+        guard fan.maxRPM > 0, fan.targetRPM > 0 else { return nil }
+        return min(max(fan.targetRPM / fan.maxRPM, 0), 1)
+    }
+
+    /// The current RPM, prominent, with a quiet unit label — and a fixed
+    /// layout. The digits glide (numericText) to each new reading, but the row
+    /// never reflows: the old "→ target" arrow toggled on and off every tick and
+    /// shoved the number sideways, which was hard on the eyes. The fan's motion
+    /// toward a target is shown by the sliding gauge bar below instead.
+    private func rpmReadout(_ fan: Fan) -> some View {
+        HStack(spacing: 3) {
+            Text("\(Int(fan.actualRPM))")
+                .font(.callout.weight(.semibold))
+                .monospacedDigit()
+                .contentTransition(.numericText())
+            Text("RPM")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .animation(readingAnimation, value: Int(fan.actualRPM))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "\(fan.name) fan: \(Int(fan.actualRPM)) RPM, target \(Int(fan.targetRPM)) RPM"
+        )
+    }
+
+    /// `actualRPM` as a fraction of the fan's maximum (0…1), measured from 0 —
+    /// NOT from the minimum. A fan spinning at its floor (e.g. Quiet parks it at
+    /// Mn) must still show a visibly partial bar, never an empty one that reads
+    /// as "stopped." The only empty bar is a genuinely stopped fan (0 RPM).
     private func normalizedSpeed(of fan: Fan) -> Double {
-        guard fan.maxRPM > fan.minRPM else { return 0 }
-        let fraction = (fan.actualRPM - fan.minRPM) / (fan.maxRPM - fan.minRPM)
-        return min(max(fraction, 0), 1)
+        guard fan.maxRPM > 0 else { return 0 }
+        return min(max(fan.actualRPM / fan.maxRPM, 0), 1)
     }
 
     // MARK: - Minimalist temperature views (when charts are hidden)
@@ -151,8 +209,11 @@ struct PopoverView: View {
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
             Text(state.temperatureUnit.text(celsius))
-                .font(.callout.weight(.medium))
+                .font(.callout.weight(.semibold))
                 .monospacedDigit()
+                .foregroundStyle(Theme.temperatureColor(celsius))
+                .contentTransition(.numericText())
+                .animation(readingAnimation, value: state.temperatureUnit.text(celsius))
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(label) \(Int(celsius.rounded())) degrees")
@@ -163,17 +224,20 @@ struct PopoverView: View {
     private var temperatureListSection: some View {
         VStack(alignment: .leading, spacing: 3) {
             ForEach(state.temperatures) { reading in
+                let isHottest = reading.id == state.hottest?.id
                 HStack {
                     Text(reading.label)
-                        .font(.caption)
-                        .foregroundStyle(reading.id == state.hottest?
-                            .id ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                        .font(.caption.weight(isHottest ? .medium : .regular))
+                        .foregroundStyle(isHottest ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                     Spacer()
+                    // Each value tinted by its own heat — the list reads as a
+                    // subtle thermal map instead of flat gray with one orange row.
                     Text(state.temperatureUnit.text(reading.celsius))
-                        .font(.caption)
+                        .font(.caption.weight(.medium))
                         .monospacedDigit()
-                        .foregroundStyle(reading.id == state.hottest?
-                            .id ? AnyShapeStyle(.orange) : AnyShapeStyle(.primary))
+                        .foregroundStyle(Theme.temperatureColor(reading.celsius))
+                        .contentTransition(.numericText())
+                        .animation(readingAnimation, value: state.temperatureUnit.text(reading.celsius))
                 }
             }
         }
@@ -220,16 +284,5 @@ struct PopoverView: View {
             .keyboardShortcut("q")
         }
         .controlSize(.small)
-    }
-}
-
-private extension FanMode {
-    /// Short human-readable mode name for the fan row's secondary label.
-    var displayName: String {
-        switch self {
-        case .auto: "Auto"
-        case .forced: "Manual"
-        case .system: "System"
-        }
     }
 }

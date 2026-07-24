@@ -100,6 +100,35 @@ struct FanWriteSequencerTests {
         #expect(try await firmware.readDouble("F0Tg") == 2317)
     }
 
+    @Test("Curve target at fraction 0 resolves to Mn, not a sub-Mn quantized value (the Quiet-reverts-to-auto bug)")
+    func quantizedTargetHoldsAtMinimum() {
+        let fan = testFans[0] // Mn 2317, Mx 6800
+        // A "Quiet" curve below its knee asks for fraction 0 → raw target == Mn
+        // (2317). Quantizing to 50 RPM rounds that DOWN to 2300 (below Mn); the
+        // write path then clamps up to 2317. If the loop stored 2300 and checked
+        // read-back against it, it would mismatch every tick and revert to auto.
+        let target = FanWriteSequencer.quantizedTarget(fraction: 0, fan: fan)
+        #expect(target == 2317, "must resolve to Mn, not the sub-Mn quantized 2300")
+        // The command must survive the write-path clamp unchanged, i.e. equal
+        // exactly what reads back — this is the invariant the bug violated.
+        #expect(FanWriteSequencer.clamp(target, to: fan) == target)
+    }
+
+    @Test("Curve target quantizes to 50 RPM and never lands outside the fan's range")
+    func quantizedTargetQuantizesAndClamps() {
+        let fan = testFans[0]
+        for step in 0 ... 20 {
+            let fraction = Double(step) / 20.0
+            let target = FanWriteSequencer.quantizedTarget(fraction: fraction, fan: fan)
+            #expect(target >= fan.minRPM && target <= fan.maxRPM)
+            #expect(
+                FanWriteSequencer.clamp(target, to: fan) == target,
+                "the commanded target must equal what the write path sends (fraction \(fraction))"
+            )
+        }
+        #expect(FanWriteSequencer.quantizedTarget(fraction: 1, fan: fan) == fan.maxRPM)
+    }
+
     @Test("M3-style firmware: 0x82 rejections escalate to the Ftst unlock branch")
     func ftstBranch() async throws {
         let firmware = FakeFirmware(generation: .m3, fans: testFans, pendingRejections: 3)

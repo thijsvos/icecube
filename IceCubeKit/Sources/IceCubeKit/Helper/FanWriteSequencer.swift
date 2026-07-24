@@ -175,4 +175,20 @@ public actor FanWriteSequencer {
         guard requested.isFinite else { return fan.minRPM }
         return requested.clamped(to: fan.minRPM ... fan.maxRPM)
     }
+
+    /// Maps a curve `fraction` (0…1) into an RPM target for `fan`: linear
+    /// across `[Mn, Mx]`, quantized to `step` RPM (so small temperature wiggles
+    /// don't churn writes), then clamped to the fan's range.
+    ///
+    /// The trailing clamp is essential and easy to miss: quantization can round
+    /// a low fraction (e.g. a "Quiet" curve at fraction 0, where the raw target
+    /// *is* `Mn`) to just **below** `Mn`. The write path then clamps it up to
+    /// `Mn`, so a control loop that verifies read-back against the un-clamped
+    /// value would mismatch every tick and revert to auto. Producing exactly the
+    /// value that will be written keeps command and verification in agreement.
+    public static func quantizedTarget(fraction: Double, fan: Fan, step: Double = 50) -> Double {
+        let raw = fan.minRPM + fraction * (fan.maxRPM - fan.minRPM)
+        let quantized = (raw / step).rounded() * step
+        return clamp(quantized, to: fan)
+    }
 }
