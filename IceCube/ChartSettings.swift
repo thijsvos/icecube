@@ -42,12 +42,20 @@ final class ChartSettings {
         static let cpu = "charts.cpu", gpu = "charts.gpu", fans = "charts.fans"
         static let band = "charts.band", secondary = "charts.secondary"
         static let height = "charts.height", tempList = "charts.templist"
+        static let controls = "menu.controls"
     }
 
     /// Master switch. Off → the popover hides the whole chart section for a
     /// minimalist menu-bar app (fans + control + a compact temp line only).
     var showCharts: Bool {
         didSet { defaults.set(showCharts, forKey: Key.show) }
+    }
+
+    /// Show the fan-control panel (presets, manual, curves) in the menu.
+    /// Off → a pure monitoring readout (temperatures + fan RPM only); control
+    /// still lives in the Settings window.
+    var showControls: Bool {
+        didSet { defaults.set(showControls, forKey: Key.controls) }
     }
 
     /// Default time window, as an index into `ChartStore.windows`.
@@ -100,6 +108,7 @@ final class ChartSettings {
             d.object(forKey: key) == nil ? def : d.bool(forKey: key)
         }
         showCharts = bool(Key.show, true)
+        showControls = bool(Key.controls, true)
         let storedWindow = d.object(forKey: Key.window) == nil ? 1 : d.integer(forKey: Key.window)
         windowIndex = min(max(storedWindow, 0), ChartStore.windows.count - 1)
         showCPU = bool(Key.cpu, true)

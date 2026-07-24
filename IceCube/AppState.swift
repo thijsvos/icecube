@@ -40,6 +40,20 @@ final class AppState {
             .map(\.celsius).max()
     }
 
+    /// Hottest CPU-core reading (`Tp*`/`Te*`), for the compact readout.
+    var cpuTempMax: Double? {
+        snapshot?.temperatures
+            .filter { $0.key.hasPrefix("Tp") || $0.key.hasPrefix("Te") }
+            .map(\.celsius).max()
+    }
+
+    /// Hottest GPU reading (`Tg*`), for the compact readout.
+    var gpuTempMax: Double? {
+        snapshot?.temperatures
+            .filter { $0.key.hasPrefix("Tg") }
+            .map(\.celsius).max()
+    }
+
     /// Short human-readable description of the last read failure, or `nil`
     /// when the latest poll succeeded.
     private(set) var errorMessage: String?

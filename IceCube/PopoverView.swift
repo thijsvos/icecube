@@ -28,7 +28,9 @@ struct PopoverView: View {
                 waitingRow
             } else {
                 fanSection
-                FanControlSection(helper: state.helper, fans: state.fans)
+                if state.chartSettings.showControls {
+                    FanControlSection(helper: state.helper, fans: state.fans)
+                }
                 if state.chartSettings.showCharts {
                     Divider()
                     DashboardView(state: state)
@@ -66,13 +68,9 @@ struct PopoverView: View {
                     .accessibilityLabel("Simulated data")
             }
             Spacer()
-            if let hottest = state.hottest {
-                badge("\(hottest.label) \(state.hottestText)")
-                    .foregroundStyle(.orange)
-                    .accessibilityLabel(
-                        "Hottest sensor: \(hottest.label), \(state.hottestText.replacingOccurrences(of: "°", with: " degrees Celsius"))"
-                    )
-            }
+            // No temperature here on purpose: the header is identity, not data.
+            // The hottest reading lives in the body (and the menu bar) once —
+            // showing it here too was the duplicate readout.
         }
     }
 
@@ -129,21 +127,35 @@ struct PopoverView: View {
 
     // MARK: - Minimalist temperature views (when charts are hidden)
 
-    /// A single compact line summarizing the hottest sensor — the whole
-    /// temperature story for someone running the minimalist menu.
+    /// A single compact CPU/GPU temperature readout — the whole temperature
+    /// story for the minimalist menu, shown once and grouped (not the obscure
+    /// hottest-core name, and not duplicated in the header).
     private var compactTemperatureLine: some View {
-        HStack {
-            Image(systemName: "thermometer.medium")
-                .foregroundStyle(.secondary)
-            if let hottest = state.hottest {
-                Text("\(hottest.label): \(state.temperatureUnit.text(hottest.celsius))")
-                    .font(.callout)
-            } else {
-                Text("—")
+        HStack(spacing: 14) {
+            if let cpu = state.cpuTempMax {
+                tempReadout("CPU", cpu)
+            }
+            if let gpu = state.gpuTempMax {
+                tempReadout("GPU", gpu)
+            }
+            if state.cpuTempMax == nil, state.gpuTempMax == nil {
+                Text("—").foregroundStyle(.secondary)
             }
             Spacer()
         }
-        .font(.callout)
+    }
+
+    private func tempReadout(_ label: String, _ celsius: Double) -> some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+            Text(state.temperatureUnit.text(celsius))
+                .font(.callout.weight(.medium))
+                .monospacedDigit()
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(label) \(Int(celsius.rounded())) degrees")
     }
 
     /// The full per-sensor list — opt-in for people who want every reading in

@@ -12,6 +12,28 @@ struct SettingsWindowView: View {
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var loginItemError: String?
     @State private var updates = UpdateChecker()
+    @Environment(\.openWindow) private var openWindow
+
+    /// Reflects/sets the active built-in preset (the same control the menu's
+    /// preset row offers, so hiding controls from the menu strands nothing).
+    private var presetBinding: Binding<String> {
+        Binding(
+            get: {
+                guard let applied = state.helper.lastAppliedConfig else { return "Auto" }
+                return PresetStore.builtins.first {
+                    $0.config.mode == applied.mode && $0.config.sharedCurve == applied.sharedCurve
+                }?.name ?? "Custom"
+            },
+            set: { name in
+                guard let preset = PresetStore.builtins.first(where: { $0.name == name }) else { return }
+                var config = preset.config
+                if config.mode == .curve {
+                    config.persistsWithoutApp = persistCurve
+                }
+                Task { await state.helper.apply(config) }
+            }
+        )
+    }
 
     @ViewBuilder
     private var updateStatusView: some View {
@@ -49,6 +71,23 @@ struct SettingsWindowView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Section("Fan control") {
+                if case .connected = state.helper.connection {
+                    Picker("Preset", selection: presetBinding) {
+                        ForEach(PresetStore.builtins) { preset in
+                            Text(preset.name).tag(preset.name)
+                        }
+                    }
+                    Button("Edit curves…") {
+                        WindowOpener.open(WindowOpener.ID.curves, using: openWindow)
+                    }
+                    .controlSize(.small)
+                } else {
+                    Text("Open the menu and enable fan control first.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
             Section("Display") {
                 Picker("Temperature unit", selection: $state.temperatureUnit) {
                     ForEach(TemperatureUnit.allCases) { unit in
@@ -68,11 +107,14 @@ struct SettingsWindowView: View {
                     }
                 }
             }
-            Section("Charts") {
+            Section("Menu appearance") {
+                Toggle("Show fan controls in the menu", isOn: $chart.showControls)
                 Toggle("Show live charts in the menu", isOn: $chart.showCharts)
-                Text("Off gives a minimal menu — fans, controls, and a compact temperature line only.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(
+                    "Turn both off for a pure monitoring menu — just temperatures and fan speeds. Fan control still lives here in Settings."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
                 if chart.showCharts {
                     Picker("Default time window", selection: $chart.windowIndex) {
                         ForEach(Array(DashboardView.windowTitles.enumerated()), id: \.offset) { index, title in
