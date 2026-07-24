@@ -8,7 +8,9 @@ import SwiftUI
 /// controls. Manual mode gets an unmissable orange tint (PLAN.md §1.2), and
 /// "Auto" is always the biggest, easiest action.
 struct FanControlSection: View {
-    @Bindable var helper: HelperManager
+    // A plain `let`: observation-driven redraw works without @Bindable, which
+    // exists only to project `$`-bindings — and this view forms none.
+    let helper: HelperManager
     /// Live fan readings (for slider ranges and current values).
     let fans: [Fan]
 
@@ -30,15 +32,11 @@ struct FanControlSection: View {
                     .foregroundStyle(.orange)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(Theme.Metrics.cardPadding)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.Metrics.cornerRadius, style: .continuous)
-                .fill(isManual ? AnyShapeStyle(.orange.opacity(0.12)) : AnyShapeStyle(.quinary))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Metrics.cornerRadius, style: .continuous)
-                .strokeBorder(isManual ? .orange.opacity(0.5) : .clear, lineWidth: 1)
+        // Same tokens as every other card in this VStack — a change to
+        // Theme.Metrics.cornerRadius now reaches all four, not three.
+        .popoverCard(
+            fill: isManual ? AnyShapeStyle(.orange.opacity(0.12)) : AnyShapeStyle(.quinary),
+            border: isManual ? .orange.opacity(0.5) : .clear
         )
     }
 
@@ -115,50 +113,68 @@ struct FanControlSection: View {
         }
     }
 
-    private var isCurve: Bool {
-        helper.status?.mode == .curve
+    /// What the panel is reporting right now, derived once.
+    ///
+    /// The label, glyph and tint used to be three independent if-ladders over
+    /// four booleans, each re-deriving the same precedence by hand and each
+    /// re-reading `helper.status?`. HelperStatus is versioned and grows (v3
+    /// added `guardianActive` itself), so a fifth state now becomes a compile
+    /// error in exactly the places that must handle it.
+    private enum ControlState {
+        case manual, curve, guardianCooling, automatic
+
+        var text: String {
+            switch self {
+            case .manual: "MANUAL fan control"
+            case .curve: "Curve active"
+            case .guardianCooling: "Automatic · cooling"
+            case .automatic: "Automatic"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .manual: "hand.raised.fill"
+            case .curve: "chart.xyaxis.line"
+            case .guardianCooling: "wind"
+            case .automatic: "gearshape"
+            }
+        }
+
+        var style: AnyShapeStyle {
+            switch self {
+            case .manual: AnyShapeStyle(.orange)
+            case .curve, .guardianCooling: AnyShapeStyle(Theme.accent)
+            case .automatic: AnyShapeStyle(.secondary)
+            }
+        }
     }
 
-    /// The daemon's safety guardian is driving the fans itself under Auto —
-    /// the Mac got hot and macOS wasn't cooling it.
-    private var guardianCooling: Bool {
-        helper.status?.mode == .auto && (helper.status?.guardianActive ?? false)
+    private var controlState: ControlState {
+        guard let status = helper.status else { return .automatic }
+        switch status.mode {
+        case .manual: return .manual
+        case .curve: return .curve
+        // The daemon's guardian is driving the fans itself under Auto — the
+        // Mac got hot and macOS wasn't cooling it.
+        case .auto: return status.guardianActive ? .guardianCooling : .automatic
+        }
+    }
+
+    private var isCurve: Bool {
+        controlState == .curve
     }
 
     private var statusText: String {
-        if isManual {
-            return "MANUAL fan control"
-        }
-        if isCurve {
-            return "Curve active"
-        }
-        if guardianCooling {
-            return "Automatic · cooling"
-        }
-        return "Automatic"
+        controlState.text
     }
 
     private var statusIcon: String {
-        if isManual {
-            return "hand.raised.fill"
-        }
-        if isCurve {
-            return "chart.xyaxis.line"
-        }
-        if guardianCooling {
-            return "wind"
-        }
-        return "gearshape"
+        controlState.icon
     }
 
     private var statusColor: AnyShapeStyle {
-        if isManual {
-            return AnyShapeStyle(.orange)
-        }
-        if isCurve || guardianCooling {
-            return AnyShapeStyle(Theme.accent)
-        }
-        return AnyShapeStyle(.secondary)
+        controlState.style
     }
 
     /// The preset quick-switch row (PLAN.md §1.2). Applying a curve preset
@@ -215,7 +231,7 @@ struct FanControlSection: View {
                     .controlSize(.small)
                 }
             }
-            if guardianCooling {
+            if controlState == .guardianCooling {
                 Text("Ice Cube is cooling the Mac — macOS left the fans idle while it ran hot. "
                     + "It hands back once things cool down.")
                     .font(.caption2)

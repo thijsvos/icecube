@@ -230,7 +230,7 @@ struct PopoverView: View {
                 HStack {
                     Text(reading.label)
                         .font(.caption.weight(isHottest ? .medium : .regular))
-                        .foregroundStyle(isHottest ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                        .foregroundStyle(isHottest ? HierarchicalShapeStyle.primary : .secondary)
                     Spacer()
                     // Each value tinted by its own heat — the list reads as a
                     // subtle thermal map instead of flat gray with one orange row.

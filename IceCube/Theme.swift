@@ -61,13 +61,20 @@ extension View {
     /// Wraps content as a subtle grouped "card" — the popover's composed-surface
     /// look, matching the fan-control panel so every section shares one visual
     /// language. Full-width so all cards align to the same edges.
-    func popoverCard() -> some View {
-        frame(maxWidth: .infinity, alignment: .leading)
+    ///
+    /// Parameterized so a card that needs a different fill (manual mode's
+    /// orange tint) still shares the radius and padding tokens, instead of
+    /// re-spelling the whole stack by hand. The defaults render exactly as
+    /// before: `.quinary` fill, no border.
+    func popoverCard(
+        fill: some ShapeStyle = HierarchicalShapeStyle.quinary,
+        border: Color = .clear
+    ) -> some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.Metrics.cornerRadius, style: .continuous)
+        return frame(maxWidth: .infinity, alignment: .leading)
             .padding(Theme.Metrics.cardPadding)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.Metrics.cornerRadius, style: .continuous)
-                    .fill(.quinary)
-            )
+            .background(shape.fill(fill))
+            .overlay(shape.strokeBorder(border, lineWidth: 1))
     }
 
     /// A quiet uppercase section label — the hierarchy cue that turns a flat

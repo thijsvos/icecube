@@ -12,7 +12,9 @@ import UniformTypeIdentifiers
 /// resizes while you watch.
 struct DashboardView: View {
     /// The shared observable state; owned by `IceCubeApp`.
-    @Bindable var state: AppState
+    // Plain `let`: @Bindable exists to project `$`-bindings, and this view
+    // forms none — it only reads and calls methods.
+    let state: AppState
 
 
     /// CSV export flow state.

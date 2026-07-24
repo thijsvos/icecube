@@ -60,7 +60,7 @@ struct SettingsWindowView: View {
     /// when selected; a quiet grey glyph otherwise.
     private func tabButton(_ item: Tab) -> some View {
         let selected = tab == item
-        let fill: AnyShapeStyle = selected ? AnyShapeStyle(Theme.accent.opacity(0.15)) : AnyShapeStyle(.clear)
+        let fill: Color = selected ? Theme.accent.opacity(0.15) : .clear
         let tintStyle: AnyShapeStyle = selected ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.secondary)
         return Button {
             // Instant switch — no animation. Animating the tab change
