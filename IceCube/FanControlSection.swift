@@ -329,9 +329,12 @@ struct FanControlSection: View {
     /// skipped it. Filling from the live readings keeps the map complete.
     private func commitTargets() {
         guard !fans.isEmpty else { return }
-        let targets = Dictionary(uniqueKeysWithValues: fans.map { fan in
-            (fan.id, sliderTargets[fan.id] ?? FanWriteSequencer.clamp(fan.actualRPM, to: fan))
-        })
+        let targets = Dictionary(
+            fans.map { fan in
+                (fan.id, sliderTargets[fan.id] ?? FanWriteSequencer.clamp(fan.actualRPM, to: fan))
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
         Task { await helper.applyManual(targets: targets) }
     }
 }

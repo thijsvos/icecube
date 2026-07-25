@@ -371,7 +371,12 @@ public actor DaemonCore {
     private func forceMaximumCooling() async {
         let generation = revertGeneration
         guard let fans = try? await readFans() else { return }
-        let maxTargets = Dictionary(uniqueKeysWithValues: fans.map { ($0.id, $0.maxRPM) })
+        // Never `uniqueKeysWithValues` here: it traps on a duplicate fan id,
+        // and this is the 95 °C emergency-cooling path — the very last place
+        // that may crash.
+        let maxTargets = Dictionary(
+            fans.map { ($0.id, $0.maxRPM) }, uniquingKeysWith: { first, _ in first }
+        )
         await engage(targets: maxTargets, fans: fans, since: generation)
     }
 

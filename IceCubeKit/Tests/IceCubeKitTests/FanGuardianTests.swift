@@ -93,23 +93,62 @@ struct FanGuardianTests {
         #expect(guardian.isActive == false)
     }
 
-    @Test("Releases only below 65 °C, not merely below the 75 °C engage point")
+    /// Written against the configured limits rather than literals, so tuning
+    /// the thresholds cannot silently invalidate the property being tested —
+    /// which is "there is a wide band", not "the band is 65…75".
+    @Test("Releases only below the release point, not merely below the engage point")
     func releaseHysteresis() {
+        let limits = FanGuardian.Limits()
         var guardian = FanGuardian()
         let hot = [fan(actual: 0)]
-        _ = guardian.evaluate(fans: hot, dieCelsius: 80)
-        _ = guardian.evaluate(fans: hot, dieCelsius: 80)
+        _ = guardian.evaluate(fans: hot, dieCelsius: limits.engageCelsius + 5)
+        _ = guardian.evaluate(fans: hot, dieCelsius: limits.engageCelsius + 5)
         #expect(guardian.isActive)
 
-        // 70 °C is below the engage threshold but inside the hysteresis band.
-        if case .release = guardian.evaluate(fans: hot, dieCelsius: 70) {
+        // Just under the engage point is still inside the band: releasing here
+        // would hand back and immediately re-engage.
+        if case .release = guardian.evaluate(fans: hot, dieCelsius: limits.engageCelsius - 1) {
             Issue.record("released inside the hysteresis band — this flaps")
         }
         #expect(guardian.isActive)
 
-        guard case .release = guardian.evaluate(fans: hot, dieCelsius: 64) else {
-            Issue.record("should release below 65 °C")
+        guard case .release = guardian.evaluate(fans: hot, dieCelsius: limits.releaseCelsius - 1) else {
+            Issue.record("should release below \(limits.releaseCelsius) °C")
             return
+        }
+        #expect(guardian.isActive == false)
+    }
+
+    /// The band must stay wide enough that ordinary temperature noise cannot
+    /// walk across it, whatever the thresholds are tuned to.
+    @Test("The hysteresis band stays wide enough to prevent flapping")
+    func hysteresisBandIsWide() {
+        let limits = FanGuardian.Limits()
+        #expect(limits.engageCelsius - limits.releaseCelsius >= 8)
+    }
+
+    /// The regression that prompted lowering the threshold: macOS holding both
+    /// fans at 0 RPM with the die at 69.9 °C, which the old 75 °C floor sat out.
+    @Test("Engages when macOS parks the fans at zero in the high 60s")
+    func engagesWhenFansParkedInHighSixties() {
+        var guardian = FanGuardian()
+        let parked = [fan(id: 0, actual: 0), fan(id: 1, actual: 0)]
+        _ = guardian.evaluate(fans: parked, dieCelsius: 69.9)
+        guard case .engage = guardian.evaluate(fans: parked, dieCelsius: 69.9) else {
+            Issue.record("stopped fans at 69.9 °C must not be left alone")
+            return
+        }
+        #expect(guardian.isActive)
+    }
+
+    /// The counterweight: a lower floor must not turn the guardian into a
+    /// second curve that overrides a macOS which is actually doing its job.
+    @Test("A warm machine whose fans macOS is already spinning is left alone")
+    func doesNotFightWorkingSystemControl() {
+        var guardian = FanGuardian()
+        let cooling = [fan(actual: 3000)] // comfortably above the floor demand
+        for _ in 0 ..< 4 {
+            #expect(guardian.evaluate(fans: cooling, dieCelsius: 69) == .idle)
         }
         #expect(guardian.isActive == false)
     }

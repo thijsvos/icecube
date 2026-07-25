@@ -8,8 +8,13 @@ import Foundation
 /// macOS never intervening, mode 3 notwithstanding. "Hand back and hope" is
 /// therefore not a safety strategy. Whenever the config is auto and the machine
 /// is warm while nothing spins, the daemon drives the fans itself along a
-/// built-in curve (gentle at 70 °C, maximum by 95 °C) and releases once the die
-/// is truly cool.
+/// built-in curve (the fan floor up to 70 °C, then ramping to maximum by 95 °C)
+/// and releases once the die is truly cool.
+///
+/// The engage floor was lowered 75 -> 68 °C on 2026-07-26: macOS was observed
+/// holding BOTH fans at 0 RPM with the die at 69.9 °C, which the old threshold
+/// deliberately ignored. See ``Limits/engageCelsius`` for why a lower floor
+/// cannot turn this into a second curve.
 ///
 /// Pure decision engine, shaped exactly like ``SafetyMonitor``: readings in, an
 /// action out, no I/O and no clock — so every rung of the escalation ladder is
@@ -33,9 +38,26 @@ public struct FanGuardian: Sendable {
     /// Tunables, overridable in tests only — release code uses the defaults.
     public struct Limits: Sendable {
         /// Guardian considers engaging at this die temperature…
-        public var engageCelsius: Double = 75
+        ///
+        /// Lowered from 75 on 2026-07-26 after observing the exact failure this
+        /// exists to catch, just under the old line: macOS holding BOTH fans at
+        /// 0 RPM with the die at 69.9 °C. The guardian sat it out by design and
+        /// the machine simply stayed hot.
+        ///
+        /// Safe to lower because temperature is only half the test. Engaging
+        /// also needs `nobodyCooling`, which requires a fan to trail demand by
+        /// `coolingSlackRPM`; demand below 70 °C is just the fan floor, so this
+        /// can only fire when the fans are essentially STOPPED. A macOS that is
+        /// genuinely cooling — at any speed within 400 RPM of the floor — is
+        /// never overridden. This is a floor for "nobody is cooling a warm
+        /// machine", not a second curve.
+        public var engageCelsius: Double = 68
         /// …and releases below this one (wide hysteresis, no flapping).
-        public var releaseCelsius: Double = 65
+        ///
+        /// Kept 10 °C below engage, as before. The gap is what stops the
+        /// guardian handing back the moment it has helped and then immediately
+        /// re-engaging.
+        public var releaseCelsius: Double = 58
         /// Consecutive warm-and-nobody-cooling ticks required to engage.
         public var engageDebounceTicks = 2
         /// Consecutive ticks with a cool orphaned fan before the ladder starts.
@@ -137,9 +159,14 @@ public struct FanGuardian: Sendable {
             return .reparkOrphans(orphaned)
         }
         return .holdAtFloor(
-            targets: Dictionary(uniqueKeysWithValues: fans.lazy
-                .filter { $0.minRPM > 0 }
-                .map { ($0.id, $0.minRPM) })
+            // `uniquingKeysWith` rather than `uniqueKeysWithValues`: the
+            // latter TRAPS on a duplicate fan id. Ids come from `0..<FNum` so
+            // a duplicate is not reachable today, but a trap is a crash, and
+            // daemon code paths must never crash on unexpected firmware data.
+            targets: Dictionary(
+                fans.lazy.filter { $0.minRPM > 0 }.map { ($0.id, $0.minRPM) },
+                uniquingKeysWith: { first, _ in first }
+            )
         )
     }
 
@@ -162,10 +189,11 @@ public struct FanGuardian: Sendable {
         } else {
             min(1.0, 0.2 + 0.8 * (dieCelsius - 70.0) / 25.0)
         }
-        return Dictionary(uniqueKeysWithValues: fans.lazy
-            .filter(\.hasUsableRange)
-            .map { fan in
+        return Dictionary(
+            fans.lazy.filter(\.hasUsableRange).map { fan in
                 (fan.id, FanWriteSequencer.quantizedTarget(fraction: fraction, fan: fan, step: 100))
-            })
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
     }
 }
