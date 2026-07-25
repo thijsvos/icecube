@@ -71,6 +71,21 @@ public struct Fan: Identifiable, Sendable, Codable, Equatable {
         self.minRPM = minRPM
         self.maxRPM = maxRPM
     }
+
+    /// Whether this fan's `[minRPM, maxRPM]` range read well enough to drive it.
+    ///
+    /// SAFETY: `Mn` and `Mx` are read with independent `try?`s that each fall
+    /// back to 0 ("degrade per-key rather than losing the whole fan"), so three
+    /// bad shapes are all modelled outcomes: both zero, inverted, and — the one
+    /// that used to slip through — **only `Mn` failed**. The old guards all
+    /// tested `maxRPM > minRPM`, which is *true* for `(0, 6800)`: the clamp range
+    /// then became `0...6800`, i.e. no floor at all, and a commanded 0 RPM
+    /// reached the wire. Requiring a positive floor is what closes that.
+    ///
+    /// A fan that fails this must be **skipped**, never driven.
+    public var hasUsableRange: Bool {
+        minRPM > 0 && maxRPM > minRPM
+    }
 }
 
 /// One temperature sensor reading.

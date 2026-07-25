@@ -163,7 +163,7 @@ public struct FanGuardian: Sendable {
             min(1.0, 0.2 + 0.8 * (dieCelsius - 70.0) / 25.0)
         }
         return Dictionary(uniqueKeysWithValues: fans.lazy
-            .filter { $0.maxRPM > $0.minRPM }
+            .filter(\.hasUsableRange)
             .map { fan in
                 (fan.id, FanWriteSequencer.quantizedTarget(fraction: fraction, fan: fan, step: 100))
             })

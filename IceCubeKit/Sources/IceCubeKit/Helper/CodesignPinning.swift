@@ -54,8 +54,40 @@ public enum CodesignPinning {
     }
 
     /// The requirement to impose on a peer with `identifier`, pinned to *our
-    /// own* team — or `nil` when we're unsigned (pinning impossible).
+    /// own* team — or `nil` when we're unsigned, or when the inputs would not
+    /// produce a requirement the Security framework accepts.
+    ///
+    /// The nil-on-invalid path matters more than it looks: both
+    /// `NSXPCConnection.setCodeSigningRequirement` and the listener equivalent
+    /// raise an **Objective-C exception** on a malformed requirement string,
+    /// which Swift cannot catch — in the daemon that is a crash, and under
+    /// launchd a crash loop. Callers already treat nil as "pinning
+    /// unavailable" and fail closed in release, so validating here converts an
+    /// unrecoverable crash into the safe refusal that is already handled.
     public static func requirementForPeer(identifier: String) -> String? {
-        currentTeamID().map { developmentRequirement(identifier: identifier, teamID: $0) }
+        guard let teamID = currentTeamID(),
+              isSafeRequirementComponent(teamID),
+              isSafeRequirementComponent(identifier)
+        else { return nil }
+        let requirement = developmentRequirement(identifier: identifier, teamID: teamID)
+        return isValidRequirement(requirement) ? requirement : nil
+    }
+
+    /// Rejects anything that could break out of the quoted literal it gets
+    /// interpolated into (or is simply empty). Real Team IDs are 10 alphanumeric
+    /// characters and bundle ids are reverse-DNS, so this excludes nothing
+    /// legitimate — it just means a surprising value fails closed instead of
+    /// producing a malformed requirement.
+    static func isSafeRequirementComponent(_ value: String) -> Bool {
+        guard !value.isEmpty, value.count <= 255 else { return false }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: ".-_"))
+        return value.unicodeScalars.allSatisfy { allowed.contains($0) }
+    }
+
+    /// Whether the Security framework can actually compile this requirement.
+    static func isValidRequirement(_ requirement: String) -> Bool {
+        var parsed: SecRequirement?
+        return SecRequirementCreateWithString(requirement as NSString, [], &parsed) == errSecSuccess
+            && parsed != nil
     }
 }

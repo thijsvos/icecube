@@ -69,6 +69,37 @@ public enum SMCKeyMaps {
         m2GenerationModels.contains(model) ? m2GenerationSensors : nil
     }
 
+    /// Candidate keys to *probe* when the model has no curated map.
+    ///
+    /// The app can afford the real fallback — enumerate every `T***` key of
+    /// type `flt` (`SystemSMCProvider.enumeratedTemperatureSensors`). The root
+    /// daemon deliberately cannot: `SMCWritePort` is a minimal write surface
+    /// with no key-enumeration API, and giving the daemon one is a larger
+    /// change than a safety fix should smuggle in.
+    ///
+    /// So the daemon probes this superset with `hasKey` instead. It is not
+    /// exhaustive and the labels are approximate — but the alternative is what
+    /// shipped before: on any non-M2 Mac the daemon read **zero** sensors
+    /// forever, which silently disabled the temperature ceiling AND the
+    /// guardian while the app's UI showed correct temperatures. Probing a
+    /// superset is strictly better than being blind.
+    ///
+    /// Keys beyond the M2 list are the P/E-core and GPU blocks that recur
+    /// across M1/M3/M4 with shifted suffixes, plus the stable non-core sensors.
+    public static let fallbackCandidateSensors: [SensorDescriptor] = {
+        var candidates = m2GenerationSensors
+        let extraCores = [
+            "Tp02", "Tp06", "Tp0A", "Tp0E", "Tp0M", "Tp0T", "Tp0Y", "Tp0c",
+            "Tp0g", "Tp0k", "Tp1a", "Tp1e", "Tp1i", "Tp1m", "Tp1q", "Tp1u",
+        ]
+        let extraGPU = ["Tg0G", "Tg0H", "Tg0K", "Tg0L", "Tg1f", "Tg1j"]
+        let extraOther = ["TaLC", "TaRC", "Ts0S", "Ts1S", "TH0a", "TH0b", "Tm0P"]
+        candidates += extraCores.map { SensorDescriptor(key: $0, label: "CPU core \($0)") }
+        candidates += extraGPU.map { SensorDescriptor(key: $0, label: "GPU \($0)") }
+        candidates += extraOther.map { SensorDescriptor(key: $0, label: $0) }
+        return candidates
+    }()
+
     /// The sanity filter for the enumeration fallback (and for dropping
     /// glitched readings): a real Mac temperature is above 10 °C (a dead or
     /// unpopulated sensor reads 0) and below 120 °C (beyond silicon limits).

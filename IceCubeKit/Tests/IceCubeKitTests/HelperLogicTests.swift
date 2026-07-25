@@ -64,6 +64,14 @@ private actor FakeFirmware: SMCControlPort {
     func writtenKeys() -> [String] {
         writes.map(\.key)
     }
+
+    /// Simulates a key becoming unreachable, so reads and writes to it throw.
+    func removeKey(_ key: String) {
+        values[key] = nil
+    }
+
+    /// The sequencer never resets the port; `DaemonCoreTests` exercises that.
+    func reset() async {}
 }
 
 private let testFans = [
@@ -156,6 +164,32 @@ struct FanWriteSequencerTests {
         #expect(FanWriteSequencer.clamp(.infinity, to: healthy) == healthy.minRPM)
     }
 
+    /// The asymmetric case that used to slip through every guard: `Mx` reads
+    /// fine, `Mn` throws and falls back to 0. `maxRPM > minRPM` is TRUE for
+    /// (0, 6800), so the old admission checks admitted the fan and the clamp
+    /// range became `0...6800` — no floor at all — letting a commanded 0 RPM
+    /// reach the wire from both the manual slider and a curve at fraction 0.
+    @Test("A fan whose Mn alone failed to read is skipped, never driven at 0 RPM")
+    func halfReadRangeIsSkipped() async throws {
+        let halfRead = Fan(
+            id: 0, name: "Left", mode: .system,
+            actualRPM: 3000, targetRPM: 3000, minRPM: 0, maxRPM: 6800
+        )
+        #expect(!halfRead.hasUsableRange, "a missing floor must disqualify the fan")
+
+        // The write path must not touch it, even when explicitly asked for 0.
+        let firmware = FakeFirmware(generation: .m2, fans: [halfRead])
+        let sequencer = FanWriteSequencer(port: firmware, sleep: instantSleep)
+        let outcome = try await sequencer.engageManual(targets: [0: 0], fans: [halfRead])
+        #expect(outcome.clampedTargets.isEmpty, "no target may be produced for an unusable fan")
+        let writes = await firmware.writes.filter { $0.key.hasSuffix("Tg") }
+        #expect(writes.isEmpty, "a 0-RPM target must never be written for a half-read fan")
+
+        // The curve path maps fraction 0 to the floor, which is exactly the
+        // value that does not exist here — so this fan must not be curved either.
+        #expect(FanGuardian.curveTargets(for: [halfRead], dieCelsius: 60).isEmpty)
+    }
+
     @Test("M3-style firmware: 0x82 rejections escalate to the Ftst unlock branch")
     func ftstBranch() async throws {
         let firmware = FakeFirmware(generation: .m3, fans: testFans, pendingRejections: 3)
@@ -194,10 +228,33 @@ struct FanWriteSequencerTests {
         #expect(zeroTargets.isEmpty, "a 0-RPM target must never be written, not even on revert")
     }
 
+    /// The mode-0 write used to be an un-suppressed `try` between two `try?`s,
+    /// so the first fan that refused it abandoned the loop — later fans kept
+    /// their forced mode and `Ftst` stayed latched, while `DaemonCore`'s
+    /// `try? await revertAllAuto(...)` swallowed the throw and logged "all fans
+    /// auto". A revert must reach every fan even when one of them fails.
+    @Test("One fan refusing mode 0 does not abandon the revert of the others")
+    func revertIsBestEffortAcrossFans() async throws {
+        let firmware = FakeFirmware(generation: .m2, fans: testFans)
+        let sequencer = FanWriteSequencer(port: firmware, sleep: instantSleep)
+        _ = try await sequencer.engageManual(targets: [0: 4000, 1: 4000], fans: testFans)
+        // Fan 0's mode key disappears — every write to it now throws.
+        await firmware.removeKey("F0Md")
+
+        await #expect(throws: IceCubeError.self) {
+            try await sequencer.revertAllAuto(fans: testFans)
+        }
+        // Fan 1 must still have been reverted and handed back.
+        #expect(try await firmware.readDouble("F1Md") == 3, "later fans still revert")
+        #expect(try await firmware.readDouble("F1Tg") == 2317, "later fans still park at Mn")
+    }
+
     @Test("A machine with no mode key at all refuses manual mode")
     func noModeKey() async throws {
-        let firmware = FakeFirmware(generation: .m2, fans: testFans)
-        _ = try? await firmware.writeDouble("F0Md", value: 3, as: .uint8) // leave key present
+        // A `FakeFirmware` seeded with no fans has no `F{i}Md`/`F{i}md` key at
+        // all, which is what makes `resolveModeKeySuffix` throw. (Two lines of
+        // setup building a *healthy* firmware used to sit here unused, which
+        // made the test read as though it exercised a key-present case too.)
         let broken = FakeFirmware(generation: .m2, fans: [])
         let sequencer = FanWriteSequencer(port: broken, sleep: instantSleep)
         await #expect(throws: IceCubeError.self) {

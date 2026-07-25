@@ -72,10 +72,11 @@ public actor FanWriteSequencer {
 
         for fan in fans {
             guard let requested = targets[fan.id], requested.isFinite else { continue }
-            // SAFETY: a fan whose [Mn,Mx] range didn't read (both 0, or
-            // inverted) is SKIPPED — clamping into a 0…0 range would command
-            // 0 RPM, the one thing Ice Cube must never write.
-            guard fan.maxRPM > fan.minRPM else { continue }
+            // SAFETY: a fan whose [Mn,Mx] range didn't read cleanly is SKIPPED —
+            // clamping into a range with no positive floor would command 0 RPM,
+            // the one thing Ice Cube must never write. See `Fan.hasUsableRange`
+            // for why a missing `Mn` alone is enough to disqualify a fan.
+            guard fan.hasUsableRange else { continue }
             let target = Self.clamp(requested, to: fan)
             clamped[fan.id] = target
             let modeKey = "F\(fan.id)\(suffix)"
@@ -107,17 +108,37 @@ public actor FanWriteSequencer {
     /// it, the floor spins — never silence), then mode 0, then attempt mode 3
     /// (explicitly returning the fan to macOS; some generations refuse, which
     /// is fine). `DaemonCore` adds a tick-level safety net on top.
+    /// SAFETY: a revert is **best-effort across every fan**. The mode-0 write
+    /// used to be an un-suppressed `try` sandwiched between two `try?`s, so one
+    /// fan failing abandoned the loop — every later fan kept its forced mode,
+    /// `Ftst` was never cleared, and `DaemonCore`'s `try? await revertAllAuto`
+    /// swallowed the throw and recorded "all fans auto" regardless. Now every
+    /// fan is attempted, `Ftst` is always cleared, and the failures are reported
+    /// afterwards so the caller can escalate instead of believing it succeeded.
     public func revertAllAuto(fans: [Fan]) async throws {
         guard let suffix = try? await resolveModeKeySuffix(fanIDs: fans.map(\.id)) else { return }
+        var firstFailure: Error?
         for fan in fans {
             if fan.minRPM > 0 {
                 try? await port.writeDouble("F\(fan.id)Tg", value: fan.minRPM, as: .float)
             }
-            try await port.writeDouble("F\(fan.id)\(suffix)", value: 0, as: .uint8)
+            do {
+                try await port.writeDouble("F\(fan.id)\(suffix)", value: 0, as: .uint8)
+            } catch {
+                // Keep going: the remaining fans still need handing back.
+                firstFailure = firstFailure ?? error
+            }
             try? await port.writeDouble("F\(fan.id)\(suffix)", value: 3, as: .uint8)
         }
+        // Cleared even when a fan failed above: leaving the unlock latched is
+        // strictly worse than reporting the failure.
         if knownBranch == .ftst, await port.hasKey("Ftst") {
-            try await port.writeDouble("Ftst", value: 0, as: .uint8)
+            try? await port.writeDouble("Ftst", value: 0, as: .uint8)
+        }
+        // Reported only after every fan has been attempted, and it is the real
+        // firmware error rather than a fabricated one.
+        if let firstFailure {
+            throw firstFailure
         }
     }
 
@@ -171,7 +192,7 @@ public actor FanWriteSequencer {
     /// callers must additionally skip fans with an unreadable range so this
     /// never has to invent a value for a `0…0` range (see `engageManual`).
     public static func clamp(_ requested: Double, to fan: Fan) -> Double {
-        guard fan.maxRPM > fan.minRPM else { return fan.maxRPM }
+        guard fan.hasUsableRange else { return fan.maxRPM }
         guard requested.isFinite else { return fan.minRPM }
         return requested.clamped(to: fan.minRPM ... fan.maxRPM)
     }

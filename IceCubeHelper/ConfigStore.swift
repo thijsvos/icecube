@@ -14,9 +14,9 @@ import os
 /// - Anything invalid, corrupt, or from a future schema loads as `nil` → the
 ///   daemon starts in auto. A broken file must cost the boot promise, never
 ///   safety.
-enum ConfigStore {
+struct ConfigStore: FanConfigStoring {
     private static let directory = URL(fileURLWithPath: "/Library/Application Support/IceCube")
-    private static let file = directory.appendingPathComponent("config.json")
+    private static let file = Self.directory.appendingPathComponent("config.json")
     private static let log = Logger(subsystem: "io.github.thijsvos.icecube", category: "curve")
 
     private struct Envelope: Codable {
@@ -25,26 +25,26 @@ enum ConfigStore {
     }
 
     /// Saves `config` if it qualifies for persistence; clears otherwise.
-    static func save(_ config: FanConfig) {
+    func save(_ config: FanConfig) {
         guard config.mode == .curve, config.persistsWithoutApp, config.isUsableCurveConfig else {
             clear()
             return
         }
         do {
             try FileManager.default.createDirectory(
-                at: directory,
+                at: Self.directory,
                 withIntermediateDirectories: true,
                 attributes: [.posixPermissions: 0o755] // root-owned, not group/other-writable
             )
             let data = try JSONEncoder().encode(Envelope(schemaVersion: 1, config: config))
             // Atomic: write a temp file, then rename over the target.
-            let temp = directory.appendingPathComponent("config.json.tmp")
+            let temp = Self.directory.appendingPathComponent("config.json.tmp")
             try data.write(to: temp, options: [])
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: temp.path)
-            _ = try FileManager.default.replaceItemAt(file, withItemAt: temp)
-            log.notice("persisted curve config (survives reboot)")
+            _ = try FileManager.default.replaceItemAt(Self.file, withItemAt: temp)
+            Self.log.notice("persisted curve config (survives reboot)")
         } catch {
-            log.error("could not persist config: \(error.localizedDescription, privacy: .public)")
+            Self.log.error("could not persist config: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -56,20 +56,20 @@ enum ConfigStore {
     /// a non-root user could otherwise plant a config the daemon runs at boot.
     /// (The blast radius is bounded anyway — a poisoned curve still can't
     /// exceed the clamp or the ceiling — but flying-blind-trust is avoidable.)
-    static func load() -> FanConfig? {
-        guard isTrustworthy(file) else {
-            log.error("persisted config is not root-owned / is writable by others — ignoring it")
+    func load() -> FanConfig? {
+        guard Self.isTrustworthy(Self.file) else {
+            Self.log.error("persisted config is not root-owned / is writable by others — ignoring it")
             clear()
             return nil
         }
-        guard let data = try? Data(contentsOf: file) else { return nil }
+        guard let data = try? Data(contentsOf: Self.file) else { return nil }
         guard let envelope = try? JSONDecoder().decode(Envelope.self, from: data),
               envelope.schemaVersion == 1,
               envelope.config.mode == .curve,
               envelope.config.persistsWithoutApp,
               envelope.config.isUsableCurveConfig
         else {
-            log.error("persisted config invalid or from an unknown schema — ignoring it (starting in auto)")
+            Self.log.error("persisted config invalid or from an unknown schema — ignoring it (starting in auto)")
             clear()
             return nil
         }
@@ -77,8 +77,8 @@ enum ConfigStore {
     }
 
     /// Removes the persisted config (revert-to-auto, unregister, corruption).
-    static func clear() {
-        try? FileManager.default.removeItem(at: file)
+    func clear() {
+        try? FileManager.default.removeItem(at: Self.file)
     }
 
     /// True only if `url` and its parent directory are owned by root (uid 0)

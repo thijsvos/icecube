@@ -35,9 +35,15 @@ final class HelperService: NSObject, NSXPCListenerDelegate, HelperProtocol, Send
             // impossible.
             #if DEBUG
                 // Don't accept ANY local process — at least require the caller
-                // to run as the same user, so a DEBUG build isn't wide open.
-                guard connection.effectiveUserIdentifier == getuid() else {
-                    log.fault("DEBUG: rejecting XPC from a different user (uid \(connection.effectiveUserIdentifier))")
+                // to be a real console user rather than a system daemon.
+                //
+                // This used to compare against `getuid()`, but *we* are the root
+                // daemon, so that read as "the caller must be root" — the exact
+                // opposite of the intent, and it rejected the very app it exists
+                // to admit. Root and the system-service range are what we want to
+                // exclude here; the app runs as the logged-in user (uid >= 501).
+                guard connection.effectiveUserIdentifier >= 501 else {
+                    log.fault("DEBUG: rejecting XPC from a system uid (\(connection.effectiveUserIdentifier))")
                     return false
                 }
                 log.fault("DEBUG build without a Team ID — accepting same-user XPC WITHOUT pinning. Never ship this.")

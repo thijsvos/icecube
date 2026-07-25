@@ -1,0 +1,399 @@
+// DaemonCoreTests.swift — the daemon's safety invariants, finally testable: revert paths, boot promise, wake, watchdog.
+
+import Foundation
+@testable import IceCubeKit
+import Testing
+
+/// A scripted SMC that can be made to fail on demand.
+///
+/// Richer than `HelperLogicTests`' sequencer fake: it also serves `FNum`, the
+/// per-fan read keys and temperature sensors, because `DaemonCore` reads the
+/// hardware itself rather than being handed a fan list.
+private actor FakeSMC: SMCControlPort {
+    private(set) var values: [String: Double] = [:]
+    private(set) var writes: [(key: String, value: Double)] = []
+    private(set) var resetCount = 0
+    /// Keys that throw on read, simulating a transient SMC failure.
+    private var unreadable: Set<String> = []
+    /// Keys that throw on write, simulating firmware refusal.
+    private var unwritable: Set<String> = []
+
+    init(fanCount: Int = 2, minRPM: Double = 2317, maxRPM: Double = 6800, temperature: Double = 55) {
+        values["FNum"] = Double(fanCount)
+        for i in 0 ..< fanCount {
+            values["F\(i)Md"] = 3 // system-controlled
+            values["F\(i)Ac"] = 3000
+            values["F\(i)Tg"] = 3000
+            values["F\(i)Mn"] = minRPM
+            values["F\(i)Mx"] = maxRPM
+        }
+        values["Ftst"] = 0
+        // Present in both the curated M2 map and the fallback candidate list,
+        // so these tests do not depend on the host's hw.model.
+        values["Tp01"] = temperature
+        values["Tg0f"] = temperature - 5
+    }
+
+    func hasKey(_ key: String) async -> Bool {
+        values[key] != nil
+    }
+
+    func readDouble(_ key: String) async throws -> Double {
+        if unreadable.contains(key) {
+            throw IceCubeError.smcCallFailed(key: key, kernReturn: -1)
+        }
+        guard let value = values[key] else { throw IceCubeError.smcKeyNotFound(key: key) }
+        return value
+    }
+
+    func writeDouble(_ key: String, value: Double, as _: SMCDataType) async throws {
+        if unwritable.contains(key) {
+            throw IceCubeError.smcFirmwareRejected(key: key, result: SMCResult(rawValue: 0x84))
+        }
+        guard values[key] != nil else { throw IceCubeError.smcKeyNotFound(key: key) }
+        values[key] = value
+        writes.append((key, value))
+    }
+
+    func reset() async {
+        resetCount += 1
+    }
+
+    // MARK: - Failure injection
+
+    func breakRead(_ key: String) {
+        unreadable.insert(key)
+    }
+
+    func fixRead(_ key: String) {
+        unreadable.remove(key)
+    }
+
+    func breakWrite(_ key: String) {
+        unwritable.insert(key)
+    }
+
+    func setTemperature(_ celsius: Double, key: String = "Tp01") {
+        values[key] = celsius
+    }
+
+    func modeWrites(fan: Int) -> [Double] {
+        writes.filter { $0.key == "F\(fan)Md" }.map(\.value)
+    }
+
+    func clearWrites() {
+        writes.removeAll()
+    }
+}
+
+/// In-memory persistence with the *same* admission rules as the real
+/// `ConfigStore` (curve + persists + usable), so tests exercise the real
+/// policy rather than a permissive stand-in.
+///
+/// A lock-guarded final class rather than an actor: `FanConfigStoring`'s
+/// methods are synchronous by design (the daemon reads it during `start()`
+/// before any concurrency exists), so an actor cannot conform.
+private final class MemoryConfigStore: FanConfigStoring, @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: FanConfig?
+
+    init(seeded: FanConfig? = nil) {
+        stored = seeded
+    }
+
+    func load() -> FanConfig? {
+        lock.lock(); defer { lock.unlock() }
+        return stored
+    }
+
+    func save(_ config: FanConfig) {
+        guard config.mode == .curve, config.persistsWithoutApp, config.isUsableCurveConfig else {
+            clear()
+            return
+        }
+        lock.lock(); defer { lock.unlock() }
+        stored = config
+    }
+
+    func clear() {
+        lock.lock(); defer { lock.unlock() }
+        stored = nil
+    }
+}
+
+private let instantSleep: @Sendable (Duration) async -> Void = { _ in }
+
+private func makeCore(
+    smc: FakeSMC,
+    store: MemoryConfigStore = MemoryConfigStore()
+) -> DaemonCore {
+    DaemonCore(port: smc, store: store, sleep: instantSleep)
+}
+
+private func manualConfig(_ rpm: Double = 4000) -> FanConfig {
+    FanConfig(mode: .manual, manualTargets: [0: rpm, 1: rpm])
+}
+
+private func curveConfig(persists: Bool) -> FanConfig {
+    var config = FanConfig(mode: .curve, persistsWithoutApp: persists)
+    config.sharedCurve = FanCurve.balanced
+    return config
+}
+
+@Suite("DaemonCore — revert invariants")
+struct DaemonCoreRevertTests {
+    /// INVARIANT 2: the daemon reverts to auto on XPC invalidation.
+    @Test("Losing the app connection in manual mode hands the fans back")
+    func revertsOnInvalidation() async throws {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(manualConfig())
+        #expect(await core.config.mode == .manual)
+
+        await core.connectionInvalidated()
+        #expect(await core.config.mode == .auto)
+        #expect(await smc.modeWrites(fan: 0).contains(0), "fan handed back to the system")
+        #expect(await smc.resetCount > 0, "SMC connection released so thermalmonitord resumes")
+    }
+
+    /// A persisting curve is explicitly allowed to outlive the app.
+    @Test("Losing the connection does NOT revert a curve that persists without the app")
+    func persistingCurveSurvivesInvalidation() async throws {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(curveConfig(persists: true))
+        await core.connectionInvalidated()
+        #expect(await core.config.mode == .curve, "the whole point of persist-without-app")
+    }
+
+    /// INVARIANT 2 + the C6 regression: shutdown reverts the *hardware* but must
+    /// not delete the persisted curve — launchd SIGTERMs the daemon on every
+    /// orderly reboot, which is precisely what the boot promise exists to survive.
+    @Test("Shutdown reverts the fans but keeps the persisted curve")
+    func shutdownKeepsBootPromise() async throws {
+        let smc = FakeSMC()
+        let store = MemoryConfigStore()
+        let core = DaemonCore(port: smc, store: store, sleep: instantSleep)
+        await core.heartbeat()
+        try await core.apply(curveConfig(persists: true))
+        #expect(store.load() != nil, "a persisting curve is saved when applied")
+
+        await core.shutdown()
+        let modes = await smc.modeWrites(fan: 0)
+        #expect(modes.contains(0) || modes.contains(3), "the fans are still handed back")
+        #expect(store.load() != nil, "SIGTERM must NOT cancel the boot promise")
+    }
+
+    /// A user- or safety-driven revert *does* cancel it.
+    @Test("An explicit revert to auto clears the persisted curve")
+    func explicitRevertClearsPersistence() async throws {
+        let smc = FakeSMC()
+        let store = MemoryConfigStore()
+        let core = DaemonCore(port: smc, store: store, sleep: instantSleep)
+        await core.heartbeat()
+        try await core.apply(curveConfig(persists: true))
+        #expect(store.load() != nil)
+
+        await core.setAllAuto()
+        #expect(store.load() == nil, "asking for auto cancels the boot promise")
+    }
+
+    /// C2: a revert whose fan read fails writes NOTHING. It must not then
+    /// declare `.auto` — doing so disarms the watchdog, the ceiling AND the
+    /// guardian for fans that are still physically forced.
+    @Test("A revert that cannot read the fans keeps control instead of declaring auto")
+    func failedRevertDoesNotDeclareAuto() async throws {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(manualConfig())
+        await smc.clearWrites()
+
+        await smc.breakRead("FNum") // the fan list is now unreadable
+        await core.setAllAuto()
+
+        #expect(await core.config.mode == .manual, "must NOT claim auto it did not reach")
+        #expect(await core.revertPending, "the revert is deferred, not forgotten")
+        #expect(await smc.modeWrites(fan: 0).isEmpty, "no writes actually landed")
+    }
+
+    /// …and the deferred revert must actually converge once the SMC recovers.
+    @Test("A deferred revert lands on a later tick once the fans read again")
+    func deferredRevertConverges() async throws {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(manualConfig())
+        await smc.breakRead("FNum")
+        await core.setAllAuto()
+        #expect(await core.revertPending)
+
+        await smc.fixRead("FNum")
+        await core.tick(sleptFor: .zero)
+
+        #expect(await core.revertPending == false, "retry succeeded")
+        #expect(await core.config.mode == .auto)
+        #expect(await smc.modeWrites(fan: 0).contains(0), "the fans really were handed back")
+    }
+
+    /// A fanless Mac (the M2 Air is in the curated model set) reports FNum 0.
+    /// That is a real answer, not a failed read — it must not pin the daemon
+    /// in a permanent retry loop.
+    @Test("A fanless Mac reverts cleanly rather than deferring forever")
+    func fanlessMacRevertsCleanly() async {
+        let smc = FakeSMC(fanCount: 0)
+        let core = makeCore(smc: smc)
+        await core.setAllAuto()
+        #expect(await core.revertPending == false, "nothing to hand back is success, not failure")
+        #expect(await core.config.mode == .auto)
+    }
+
+    /// C4: `engageManual` forces fans one at a time, so a throw can land after
+    /// earlier fans are already `.forced`. Walking away there strands them at a
+    /// fixed RPM with `config == .auto`, where no safety net ever looks again.
+    @Test("A mid-sequence write failure unwinds instead of stranding forced fans")
+    func partialEngageUnwinds() async {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        await smc.breakWrite("F1Md") // fan 0 succeeds, fan 1 refuses
+
+        _ = try? await core.apply(manualConfig())
+
+        #expect(await core.config.mode == .auto, "no half-applied manual state")
+        // Fan 0 was forced mid-sequence; the unwind must hand it back.
+        let fan0Modes = await smc.modeWrites(fan: 0)
+        #expect(fan0Modes.contains(0), "the already-forced fan was reverted, not abandoned")
+    }
+}
+
+@Suite("DaemonCore — boot, wake and the safety tick")
+struct DaemonCoreTickTests {
+    /// INVARIANT 2, start case: with no persisted config the daemon wipes
+    /// whatever a crash or power loss left behind.
+    @Test("Start with no persisted config reverts everything to auto")
+    func startRevertsWhenNothingPersisted() async {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        await core.start()
+        #expect(await core.config.mode == .auto)
+        #expect(await smc.modeWrites(fan: 0).contains(0))
+        await core.shutdown()
+    }
+
+    /// The Phase 4 boot promise: a persisted curve is live before the app exists.
+    @Test("Start with a persisted curve resumes it instead of reverting")
+    func startResumesPersistedCurve() async {
+        let smc = FakeSMC(temperature: 80) // hot enough for the curve to drive
+        let store = MemoryConfigStore(seeded: curveConfig(persists: true))
+        let core = DaemonCore(port: smc, store: store, sleep: instantSleep)
+        await core.start()
+        #expect(await core.config.mode == .curve, "the boot promise")
+        await core.shutdown()
+    }
+
+    /// INVARIANT 7: manual mode is never the persisted default.
+    @Test("Manual mode is never written to persistent storage")
+    func manualNeverPersists() async throws {
+        let smc = FakeSMC()
+        let store = MemoryConfigStore()
+        let core = DaemonCore(port: smc, store: store, sleep: instantSleep)
+        await core.heartbeat()
+        var manual = manualConfig()
+        manual.persistsWithoutApp = true // even when the user asks for it
+        try await core.apply(manual)
+        #expect(store.load() == nil, "manual must never survive the app")
+    }
+
+    /// INVARIANT 1: no heartbeat for 15 s in manual mode → revert.
+    @Test("The watchdog reverts manual mode when the app never heartbeats")
+    func watchdogRevertsManual() async throws {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        // Deliberately no `heartbeat()`: a config applied by an app that then
+        // goes silent is exactly what the watchdog exists to catch, and a
+        // never-heard heartbeat is its strongest case.
+        try await core.apply(manualConfig())
+        #expect(await core.config.mode == .manual)
+
+        await core.tick(sleptFor: .zero)
+        #expect(await core.config.mode == .auto, "watchdog must fire without a heartbeat")
+        #expect(await smc.modeWrites(fan: 0).contains(0))
+    }
+
+    /// The counterpart: a persisting curve is explicitly exempt from the
+    /// watchdog, and must survive an app-less tick.
+    @Test("A persisting curve survives ticks with no heartbeat at all")
+    func persistingCurveExemptFromWatchdog() async throws {
+        let smc = FakeSMC(temperature: 75)
+        let core = makeCore(smc: smc)
+        try await core.apply(curveConfig(persists: true))
+        await core.tick(sleptFor: .zero)
+        #expect(await core.config.mode == .curve, "curve mode may run app-less")
+    }
+
+    /// INVARIANT 3: over the ceiling → maximum cooling, whatever the user asked for.
+    @Test("A sensor over its ceiling forces maximum cooling regardless of the user's targets")
+    func ceilingForcesMaxCooling() async throws {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(manualConfig(2500)) // user wants quiet
+        await smc.clearWrites()
+
+        await smc.setTemperature(110) // die sensor well over the 104 ceiling
+        for _ in 0 ..< 4 {
+            await core.heartbeat()
+            await core.tick(sleptFor: .zero)
+        }
+        let targets = await smc.writes.filter { $0.key == "F0Tg" }.map(\.value)
+        #expect(targets.contains(6800), "the ceiling overrides the user's 2500 RPM")
+    }
+
+    /// INVARIANT 6: firmware silently drops manual control across sleep, so a
+    /// wake must re-assert (or revert).
+    @Test("Waking from sleep re-asserts manual control")
+    func wakeReassertsManual() async throws {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(manualConfig())
+        await smc.clearWrites()
+
+        await core.heartbeat()
+        // Slept far longer than one tick interval → treated as a real wake.
+        await core.tick(sleptFor: .seconds(HelperConstants.tickInterval * 10))
+
+        #expect(await smc.modeWrites(fan: 0).contains(1), "manual mode re-asserted after wake")
+        #expect(await core.config.mode == .manual)
+    }
+
+    /// C7: an empty sensor probe is "unresolved", not "this Mac has no sensors".
+    /// Caching it blinded the daemon permanently — the ceiling and the guardian
+    /// both go inert while the app UI still shows temperatures.
+    @Test("An empty sensor probe is retried rather than cached forever")
+    func emptySensorProbeIsNotCached() async throws {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        // Both seeded sensors unreadable → the probe resolves to nothing.
+        await smc.breakRead("Tp01")
+        await smc.breakRead("Tg0f")
+        try await core.apply(manualConfig())
+        await core.tick(sleptFor: .zero)
+
+        // Sensors come back; the very next tick must see them again.
+        await smc.fixRead("Tp01")
+        await smc.fixRead("Tg0f")
+        await smc.setTemperature(110)
+        await core.heartbeat()
+        for _ in 0 ..< 4 {
+            await core.heartbeat()
+            await core.tick(sleptFor: .zero)
+        }
+        let targets = await smc.writes.filter { $0.key == "F0Tg" }.map(\.value)
+        #expect(targets.contains(6800), "sensors were re-probed, so the ceiling still works")
+    }
+}
