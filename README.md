@@ -104,8 +104,8 @@ scavenger hunt.
 
 ## Uninstall
 
-1. Ice Cube popover → Settings… → Helper daemon → **Unregister** (returns fans
-   to macOS and removes the daemon).
+1. Ice Cube popover → Settings… → Fan Control Setup → **Turn Off Fan Control**
+   (hands the fans back to macOS and removes the background service).
 2. Quit Ice Cube, delete `/Applications/Ice Cube.app`.
 3. Optional leftovers: `~/Library/Application Support/IceCube` (your presets)
    and `sudo rm -rf "/Library/Application Support/IceCube"` (the daemon's

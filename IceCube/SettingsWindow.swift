@@ -223,20 +223,38 @@ struct SettingsWindowView: View {
                         Task { await state.helper.setPersist(on) }
                     }
             }
-            Section("Helper daemon") {
-                LabeledContent("Status", value: helperStateText)
+            // Was "Helper daemon" with Re-register / Unregister buttons and a
+            // status reading "not registered · disconnected". Every word of
+            // that describes the implementation. The actions are legitimate —
+            // one turns fan control off, one repairs it — they just had names
+            // only the author could parse.
+            Section("Fan Control Setup") {
+                LabeledContent("Status", value: setupStatusText)
                 HStack(spacing: 8) {
-                    Button("Re-register") { Task { await state.helper.reregister() } }
-                        .help("Force launchd to pick up a freshly built helper")
-                    Button("Unregister") { Task { await state.helper.unregister() } }
-                        .help("Remove the helper daemon; fans return to automatic")
+                    Button(state.helper.registration == .enabled ? "Repair…" : "Set Up…") {
+                        WindowOpener.open(WindowOpener.ID.setup, using: openWindow)
+                    }
+                    Button("Turn Off Fan Control") {
+                        Task { await state.helper.unregister() }
+                    }
+                    .help("Fans go back to being managed by macOS. Monitoring keeps working.")
                     if state.helper.isReregistering {
                         ProgressView().controlSize(.small)
-                        Text("Re-registering…").font(.caption).foregroundStyle(.secondary)
+                        Text("Working…").font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 .controlSize(.small)
                 .disabled(state.helper.isReregistering)
+
+                // The technical state stays, demoted: it is what a good bug
+                // report needs, and the "new Mac model" issue template asks
+                // for it. It just isn't the headline any more.
+                LabeledContent("Details") {
+                    Text(helperStateText)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .textSelection(.enabled)
+                }
             }
         }
         .formStyle(.grouped)
@@ -253,6 +271,20 @@ struct SettingsWindowView: View {
         case .upToDate: Text("Up to date").font(.caption).foregroundStyle(.secondary)
         case let .available(version, url): Link("v\(version) available", destination: url).font(.caption)
         case let .failed(message): Text(message).font(.caption).foregroundStyle(Theme.warning)
+        }
+    }
+
+    /// The one-line answer to "is fan control working?", in plain language.
+    private var setupStatusText: String {
+        switch state.helper.registration {
+        case .enabled:
+            switch state.helper.connection {
+            case .connected: "On"
+            case .versionMismatch: "Update needed"
+            case .disconnected: "Starting up…"
+            }
+        case .requiresApproval: "Waiting for your approval"
+        case .notRegistered, .unknown: "Off"
         }
     }
 

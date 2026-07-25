@@ -47,4 +47,7 @@ ditto "$APP" "/Applications/Ice Cube.app"
 
 echo "==> Launching"
 open "/Applications/Ice Cube.app"
-echo "Done. Now: popover → Enable Fan Control → approve in System Settings (XCODE_GUIDE §4)."
+echo "Done. Ice Cube opens its setup window if fan control needs attention."
+echo "Note: replacing the app does NOT restart the running background service."
+echo "The app detects the stale version and offers 'Update Now' — take it, or"
+echo "fan control keeps running the PREVIOUS build (XCODE_GUIDE §4.4)."
