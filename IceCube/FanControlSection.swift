@@ -191,19 +191,36 @@ struct FanControlSection: View {
     /// needs the editor's persist setting, stored app-wide.
     @AppStorage("persistCurve") private var persistCurve = false
 
+    /// The preset row, split into "hand the fans back" and "Ice Cube drives".
+    ///
+    /// Those are different KINDS of choice, not five points on one scale, and
+    /// the row previously read as a single spectrum — which is how people came
+    /// to pick the hand-back option believing it was the app's smart mode. The
+    /// rule is one short line and a little air, sized so it reads as a grouping
+    /// cue rather than a rule across the card.
     private var presetRow: some View {
         HStack(spacing: 6) {
-            ForEach(PresetStore.builtins) { preset in
-                Button(preset.name) {
-                    Task { await helper.applyPreset(preset, persistCurve: persistCurve) }
-                }
-                .buttonStyle(.bordered)
-                .tint(isActivePreset(preset) ? Theme.accent : nil)
-                .help(preset.kind.explanation)
+            ForEach(PresetStore.builtins.filter { $0.kind == .auto }) { preset in
+                presetButton(preset)
+            }
+            Divider()
+                .frame(height: 14)
+                .padding(.horizontal, 1)
+            ForEach(PresetStore.builtins.filter { $0.kind != .auto }) { preset in
+                presetButton(preset)
             }
             Spacer(minLength: 0)
         }
         .controlSize(.small)
+    }
+
+    private func presetButton(_ preset: Preset) -> some View {
+        Button(preset.name) {
+            Task { await helper.applyPreset(preset, persistCurve: persistCurve) }
+        }
+        .buttonStyle(.bordered)
+        .tint(isActivePreset(preset) ? Theme.accent : nil)
+        .help(preset.kind.explanation)
     }
 
     @Environment(\.openWindow) private var openWindow
@@ -229,28 +246,40 @@ struct FanControlSection: View {
     private var controls: some View {
         VStack(alignment: .leading, spacing: 8) {
             presetRow
+            // On its OWN line. This is the most important sentence in the card
+            // — whether Ice Cube is driving your fans or not — and sharing a
+            // row with two buttons truncated it to "macOS is controlli…",
+            // which tells the user nothing at exactly the moment they need to
+            // know. A full-width line also means the wording can be chosen for
+            // clarity instead of for character count.
+            Label(statusText, systemImage: statusIcon)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(statusColor)
+                .fixedSize(horizontal: false, vertical: true)
             HStack {
-                Label(statusText, systemImage: statusIcon)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(statusColor)
-                Spacer()
                 Button("Curves…") {
                     WindowOpener.open(WindowOpener.ID.curves, using: openWindow)
                 }
                 .controlSize(.small)
                 .help("Edit the temperature→fan curve")
+                Spacer()
                 if isManual || isCurve {
-                    Button("Revert to Auto") {
+                    // Was "Revert to Auto", left stale by renaming the preset:
+                    // there is no "Auto" in this UI any more, and the point of
+                    // the rename was that "auto" is what people misread.
+                    Button("Hand Back to macOS") {
                         Task { await helper.revertToAuto() }
                     }
                     .controlSize(.small)
                     .tint(Theme.warning)
                     .keyboardShortcut(.escape, modifiers: [])
+                    .help("Stop controlling the fans and let macOS manage them again")
                 } else {
                     Button("Take Manual Control") {
                         engageManual()
                     }
                     .controlSize(.small)
+                    .help("Set each fan's speed by hand")
                 }
             }
             if controlState == .guardianCooling {
