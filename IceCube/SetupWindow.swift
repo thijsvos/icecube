@@ -61,6 +61,14 @@ struct SetupWindowView: View {
         if let model {
             VStack(alignment: .leading, spacing: Theme.Metrics.sectionSpacing) {
                 stepRow(model)
+                if model.needsApprovalDirections {
+                    Label(SetupGuidance.approvalDirections, systemImage: "arrow.right.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .popoverCard()
+                        .transition(.opacity)
+                }
                 if model.isComplete {
                     completionNote
                 } else {

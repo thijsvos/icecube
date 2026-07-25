@@ -97,6 +97,22 @@ struct SetupGuidanceTests {
         #expect(SetupGuidance.actionTitle(for: .connecting) == nil)
     }
 
+    /// The directions are shown only to someone who is stuck, so they must
+    /// actually be directions — and must obey the same no-jargon rule as
+    /// everything else the user reads.
+    @Test("The stuck-on-approval directions name the real place to click")
+    func approvalDirectionsAreSpecific() {
+        let text = SetupGuidance.approvalDirections
+        #expect(text.contains("Login Items"))
+        #expect(text.contains("Allow in the Background"))
+        for word in ["daemon", "XPC", "launchd", "register", "plist"] {
+            #expect(!text.lowercased().contains(word.lowercased()), "leaks '\(word)'")
+        }
+        // Long enough to be reading time, short enough not to be abandonment.
+        #expect(SetupGuidance.approvalHelpDelay >= 10)
+        #expect(SetupGuidance.approvalHelpDelay <= 30)
+    }
+
     @Test("The unsigned-build failure becomes advice, not an error code")
     func humanizesCodesigning() {
         let technical = "Registration failed (-67056): Codesigning failure loading plist"

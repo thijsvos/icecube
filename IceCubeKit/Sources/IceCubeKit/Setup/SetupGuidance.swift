@@ -86,6 +86,24 @@ public enum SetupGuidance {
         }
     }
 
+    /// Extra directions for someone who has been on the approval step long
+    /// enough that they are plainly not finding the switch.
+    ///
+    /// The short message deliberately does not spell out the whole path —
+    /// most people follow the opened pane fine, and a wall of directions is
+    /// its own obstacle. This appears only once waiting stops looking like
+    /// "reading" and starts looking like "stuck", so the flow never becomes a
+    /// spinner with no way forward.
+    public static let approvalDirections = """
+    In System Settings, go to General → Login Items & Extensions. \
+    Scroll to “Allow in the Background” and switch on Ice Cube. \
+    If it isn’t listed, quit Ice Cube and open it again.
+    """
+
+    /// How long to wait on the approval step before offering the directions
+    /// above.
+    public static let approvalHelpDelay: TimeInterval = 15
+
     /// Rewrites a developer-facing failure into something a user can act on.
     ///
     /// The technical text still goes to the log; this is what a person sees.

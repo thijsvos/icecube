@@ -25,6 +25,16 @@ final class SetupModel {
     private(set) var hasRequestedPermission = false
     /// A relocation attempt that failed; the user must drag it themselves.
     private(set) var relocationFailure: String?
+    /// When the approval step started, so a stall can be distinguished from
+    /// someone simply reading.
+    private var awaitingSince: Date?
+
+    /// True once the user has been on the approval step long enough that they
+    /// are evidently not finding the switch.
+    var needsApprovalDirections: Bool {
+        guard step == .awaitingApproval, let awaitingSince else { return false }
+        return Date().timeIntervalSince(awaitingSince) > SetupGuidance.approvalHelpDelay
+    }
 
     init(helper: HelperManager) {
         self.helper = helper
@@ -130,6 +140,15 @@ final class SetupModel {
     func refresh() async {
         helper.refreshRegistration()
         await helper.maintainOnce()
+        // Stamped here rather than in `step` — a computed property that
+        // recorded state would set the clock on every render.
+        if step == .awaitingApproval {
+            if awaitingSince == nil {
+                awaitingSince = Date()
+            }
+        } else {
+            awaitingSince = nil
+        }
     }
 
     // MARK: - Relocation
@@ -158,11 +177,27 @@ final class SetupModel {
             NSWorkspace.shared.activateFileViewerSelecting([source])
             return
         }
+        // SAFETY: never delete anything we cannot replace.
+        //
+        // Moving to where we already are would remove the source and then fail
+        // the move — deleting the user's app. `verdict` should never route us
+        // here, but the consequence is severe enough that it must not depend on
+        // a caller three layers away staying correct.
+        guard source.standardizedFileURL != destination.standardizedFileURL else {
+            log.notice("relocation skipped: already at \(destination.path, privacy: .public)")
+            return
+        }
         do {
             if FileManager.default.fileExists(atPath: destination.path) {
-                try FileManager.default.removeItem(at: destination)
+                // An existing install is replaced ATOMICALLY rather than
+                // removed-then-moved. The old sequence destroyed a working
+                // installed copy before the new one was in place, so a move
+                // that then failed left the user with nothing in /Applications
+                // — strictly worse off than before they clicked the button.
+                _ = try FileManager.default.replaceItemAt(destination, withItemAt: source)
+            } else {
+                try FileManager.default.moveItem(at: source, to: destination)
             }
-            try FileManager.default.moveItem(at: source, to: destination)
             log.notice("relocated to \(destination.path, privacy: .public); relaunching")
             relaunch(from: destination)
         } catch {
