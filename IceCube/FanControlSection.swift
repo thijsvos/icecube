@@ -205,11 +205,22 @@ struct FanControlSection: View {
 
     @Environment(\.openWindow) private var openWindow
 
-    /// Highlight from the last config this app sent, cross-checked against
-    /// the mode the daemon actually reports.
+    /// Which preset to light up.
+    ///
+    /// Prefers what the DAEMON says it is enforcing, falling back to the last
+    /// config this app sent. It used to consult only the app's own memory, so
+    /// anything the daemon was running that the app had not personally sent —
+    /// a curve resumed at boot before the app even launched — left every
+    /// button unlit while the fans audibly ran. The truth about what is being
+    /// enforced lives in the daemon; the app's memory is a cache of it.
     private func isActivePreset(_ preset: Preset) -> Bool {
-        helper.status?.mode == preset.config.mode
-            && PresetHighlight.matches(preset, applied: helper.lastAppliedConfig)
+        guard let status = helper.status, status.mode == preset.config.mode else {
+            return false
+        }
+        if status.mode == .curve, let active = status.activeCurve {
+            return active == preset.config.sharedCurve
+        }
+        return PresetHighlight.matches(preset, applied: helper.lastAppliedConfig)
     }
 
     private var controls: some View {

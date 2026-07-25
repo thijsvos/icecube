@@ -95,6 +95,7 @@ public actor DaemonCore {
             // app ever launches. Anything else starts from clean auto.
             config = persisted
             status.mode = .curve
+            status.activeCurve = persisted.sharedCurve
             record("boot: resuming persisted curve config")
             await runCurveTick()
         } else {
@@ -257,6 +258,7 @@ public actor DaemonCore {
             guardian.reset()
             monitor = SafetyMonitor()
             status.mode = .manual
+            status.activeCurve = nil
             status.appliedTargets = outcome.clampedTargets
             status.unlockBranch = outcome.branch.rawValue
             status.lastWriteVerified = outcome.verified
@@ -275,6 +277,7 @@ public actor DaemonCore {
             guardian.reset()
             monitor = SafetyMonitor()
             status.mode = .curve
+            status.activeCurve = newConfig.sharedCurve
             store.save(newConfig) // persists only when the rules allow
             await runCurveTick()
             record("curve engaged (persists without app: \(newConfig.persistsWithoutApp))")
@@ -517,6 +520,7 @@ public actor DaemonCore {
             store.clear() // a user/safety revert cancels the boot promise
         }
         status.mode = .auto
+        status.activeCurve = nil
         status.appliedTargets = [:]
         status.guardianActive = false
         record("all fans auto (\(reason))")

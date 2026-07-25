@@ -195,6 +195,37 @@ struct DaemonCoreRevertTests {
         #expect(store.load() != nil, "SIGTERM must NOT cancel the boot promise")
     }
 
+    /// The app cannot light up the right preset unless the daemon says what it
+    /// is enforcing. Before this, a curve resumed at boot — before the app even
+    /// launched — left every preset button unlit while the fans audibly ran,
+    /// because the app consulted only its own memory of what it had sent.
+    @Test("The daemon reports the curve it is enforcing, including one resumed at boot")
+    func statusReportsActiveCurve() async {
+        let smc = FakeSMC(temperature: 80)
+        let store = MemoryConfigStore(seeded: curveConfig(persists: true))
+        let core = DaemonCore(port: smc, store: store, sleep: instantSleep)
+        await core.start()
+        let status = await core.currentStatus()
+        #expect(status.mode == .curve)
+        #expect(status.activeCurve == FanCurve.balanced, "the app needs this to highlight a preset")
+        await core.shutdown()
+    }
+
+    @Test("Manual mode and auto report no active curve")
+    func statusClearsCurveOutsideCurveMode() async throws {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(curveConfig(persists: false))
+        #expect(await core.currentStatus().activeCurve != nil)
+
+        try await core.apply(manualConfig())
+        #expect(await core.currentStatus().activeCurve == nil, "manual is not a curve")
+
+        await core.setAllAuto()
+        #expect(await core.currentStatus().activeCurve == nil, "auto is not a curve")
+    }
+
     /// A user- or safety-driven revert *does* cancel it.
     @Test("An explicit revert to auto clears the persisted curve")
     func explicitRevertClearsPersistence() async throws {

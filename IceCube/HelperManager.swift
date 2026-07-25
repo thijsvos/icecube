@@ -170,6 +170,23 @@ final class HelperManager {
     }
 
     func unregister() async {
+        // Tell the daemon to go to auto FIRST, which also clears its persisted
+        // curve. Turning fan control off must mean off — not "paused until you
+        // turn it on again".
+        //
+        // The daemon cannot work this out for itself: unregistering and
+        // rebooting both arrive as SIGTERM, and shutdown deliberately KEEPS the
+        // persisted curve so a restart doesn't destroy the boot promise. Only
+        // the app knows the user asked to stop, so only the app can say so.
+        // Without this, turning fan control off and on again silently resumed a
+        // curve the user had already dismissed — with no preset lit, because
+        // the app had no memory of a curve it never sent.
+        if case .connected = connection {
+            await run { try await self.client.setAllAuto() }
+        }
+        lastAppliedConfig = nil
+        UserDefaults.standard.removeObject(forKey: Self.lastCurveKey)
+
         client.disconnect()
         do {
             try await service.unregister()

@@ -23,7 +23,12 @@ public enum HelperConstants {
     /// v3: HelperStatus gained `guardianActive`.
     /// v4: daemon safety behaviour changed (revert/engage race guards, sensor
     ///     discovery, boot-promise handling) with no interface change.
-    public static let protocolVersion = "4"
+    /// v5: HelperStatus reports `activeCurve`. Additive and optional, so an old
+    ///     daemon does not *break* a new app — but without the bump the app
+    ///     silently keeps talking to a daemon that never sends it, and the
+    ///     preset highlight it fixes stays broken for everyone who upgrades.
+    ///     "It still decodes" is not the bar; "the user gets the fix" is.
+    public static let protocolVersion = "5"
     /// How often the app sends a heartbeat while connected.
     public static let heartbeatInterval: TimeInterval = 5
     /// SAFETY: no heartbeat for this long → the daemon's watchdog reverts to
@@ -70,6 +75,15 @@ public struct HelperStatus: Codable, Sendable, Equatable {
     public var guardianActive: Bool
     /// Recent safety decisions, newest last (bounded), for UI + bug reports.
     public var recentEvents: [String]
+    /// The curve the daemon is enforcing right now, when `mode == .curve`.
+    ///
+    /// Reported so the app can show which preset is active even when it did not
+    /// send it — after a reboot the daemon resumes a persisted curve before the
+    /// app exists, and an app with no memory of it used to leave every preset
+    /// button unlit while the fans audibly ran. **Optional on purpose**: a
+    /// missing key decodes to nil, so adding it cannot break a peer that
+    /// predates it.
+    public var activeCurve: FanCurve?
 
     public init(
         protocolVersion: String = HelperConstants.protocolVersion,
@@ -78,7 +92,8 @@ public struct HelperStatus: Codable, Sendable, Equatable {
         unlockBranch: String? = nil,
         lastWriteVerified: Bool = false,
         guardianActive: Bool = false,
-        recentEvents: [String] = []
+        recentEvents: [String] = [],
+        activeCurve: FanCurve? = nil
     ) {
         self.protocolVersion = protocolVersion
         self.mode = mode
@@ -87,6 +102,7 @@ public struct HelperStatus: Codable, Sendable, Equatable {
         self.lastWriteVerified = lastWriteVerified
         self.guardianActive = guardianActive
         self.recentEvents = recentEvents
+        self.activeCurve = activeCurve
     }
 
     public func jsonData() throws -> Data {
