@@ -16,11 +16,18 @@ struct IceCubeApp: App {
     @State private var appState: AppState
     @Environment(\.openWindow) private var openWindow
 
-    /// Whether the guided setup has been shown once. A menu-bar app gives no
-    /// hint that fan control exists or that it needs one permission — the old
-    /// flow required the user to open the popover and notice a small card, so
-    /// most people would simply never find it.
-    @AppStorage("hasShownSetup") private var hasShownSetup = false
+    /// Whether the user has actually CLOSED the guided setup — not merely that
+    /// it was displayed once.
+    ///
+    /// It used to mean "shown", set the moment the window opened, which the
+    /// relocation flow then broke: moving to /Applications relaunches the app,
+    /// so the pre-move instance spent the one-shot flag and the relaunched one
+    /// — the instance the user actually interacts with — decided setup had
+    /// already been handled and showed nothing. The user was left in a menu-bar
+    /// app with no visible way forward, immediately after being told setup
+    /// would continue. Recording *dismissal* instead survives any number of
+    /// relaunches and still never nags someone who said no.
+    @AppStorage("hasDismissedSetup") private var hasDismissedSetup = false
 
     init() {
         // CompositionRoot decides simulated vs real; the app never chooses.
@@ -68,17 +75,20 @@ struct IceCubeApp: App {
                     false
                 }
                 let notSetUp = appState.helper.registration != .enabled
-                guard needsUpdate || (notSetUp && !hasShownSetup) else {
-                    hasShownSetup = true
-                    Logger(subsystem: "io.github.thijsvos.icecube", category: "ui")
-                        .notice("setup: not shown (registration ok, versions match)")
+                let log = Logger(subsystem: "io.github.thijsvos.icecube", category: "ui")
+                guard needsUpdate || (notSetUp && !hasDismissedSetup) else {
+                    // Say the ACTUAL reason. The old message asserted
+                    // "registration ok, versions match" for every non-open,
+                    // including the case where registration was plainly not ok
+                    // — which sent me looking in the wrong place.
+                    log.notice(
+                        "setup: not shown (notSetUp: \(notSetUp, privacy: .public), dismissed: \(hasDismissedSetup, privacy: .public))"
+                    )
                     return
                 }
-                hasShownSetup = true
-                Logger(subsystem: "io.github.thijsvos.icecube", category: "ui")
-                    .notice(
-                        "setup: opening (needsUpdate: \(needsUpdate, privacy: .public), notSetUp: \(notSetUp, privacy: .public))"
-                    )
+                log.notice(
+                    "setup: opening (needsUpdate: \(needsUpdate, privacy: .public), notSetUp: \(notSetUp, privacy: .public))"
+                )
                 WindowOpener.open(WindowOpener.ID.setup, using: openWindow)
             }
             .task {

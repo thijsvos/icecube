@@ -14,6 +14,14 @@ struct SetupWindowView: View {
     let state: AppState
     @State private var model: SetupModel?
     @Environment(\.dismiss) private var dismiss
+    /// Set only when the user closes this window, so a relaunch mid-flow (the
+    /// move to /Applications) reopens it rather than assuming it was handled.
+    @AppStorage("hasDismissedSetup") private var hasDismissedSetup = false
+
+    private func close() {
+        hasDismissedSetup = true
+        dismiss()
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -77,11 +85,11 @@ struct SetupWindowView: View {
                 HStack {
                     if model.isComplete {
                         Spacer()
-                        Button("Done") { dismiss() }
+                        Button("Done") { close() }
                             .keyboardShortcut(.defaultAction)
                             .primaryGlassButton()
                     } else {
-                        Button("Not Now") { dismiss() }
+                        Button("Not Now") { close() }
                         Spacer()
                         if let action = model.actionTitle {
                             Button(action) { model.performAction() }
