@@ -309,7 +309,15 @@ final class HelperManager {
         if config.mode == .curve {
             config.persistsWithoutApp = persistCurve
         }
+        // Timestamped either side of the call so click-to-command latency can be
+        // measured from the log. Without this, the daemon's own timestamps
+        // cannot be told apart from the user's time between two clicks — which
+        // is exactly the ambiguity that made "is it slow?" unanswerable.
+        let started = ContinuousClock.now
+        log.notice("preset: sending \(preset.name, privacy: .public)")
         await apply(config)
+        let ms = (ContinuousClock.now - started).components.attoseconds / 1_000_000_000_000_000
+        log.notice("preset: \(preset.name, privacy: .public) applied in \(ms, privacy: .public) ms")
     }
 
     /// Re-applies the currently active curve with a new persist setting, so
