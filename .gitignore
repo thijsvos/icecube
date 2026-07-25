@@ -17,3 +17,6 @@ IceCubeKit/.build/
 
 # macOS
 .DS_Store
+
+# Release builds staged for install testing (scripts/install-debug.sh uses build/).
+build-release/

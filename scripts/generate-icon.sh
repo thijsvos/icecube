@@ -19,8 +19,22 @@ let entries: [(name: String, px: Int)] = [
 
 for entry in entries {
     let px = CGFloat(entry.px)
-    let image = NSImage(size: NSSize(width: px, height: px))
-    image.lockFocus()
+    // Draw into an EXPLICITLY sized bitmap, not NSImage.lockFocus().
+    //
+    // lockFocus() renders at the current display's backing scale factor, so on
+    // a Retina Mac every tile came out at exactly 2x its declared size —
+    // icon_16x16.png was 32x32, icon_512x512@2x.png was 2048x2048. iconutil
+    // silently DROPS entries whose pixels disagree with their name, which is
+    // why the shipped .icns was missing 16x16 and 128x128 entirely: the two
+    // sizes macOS uses for Finder lists and System Settings → Login Items,
+    // i.e. the one screen every new user has to visit.
+    let rep = NSBitmapImageRep(
+        bitmapDataPlanes: nil, pixelsWide: entry.px, pixelsHigh: entry.px,
+        bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+        colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+    )!
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
 
     // Rounded-square glacial gradient background (macOS icon convention).
     let inset = px * 0.05
@@ -41,12 +55,13 @@ for entry in entries {
     shadow.set()
     source.draw(in: dst)
 
-    image.unlockFocus()
+    NSGraphicsContext.restoreGraphicsState()
 
-    guard let tiff = image.tiffRepresentation,
-          let rep = NSBitmapImageRep(data: tiff),
-          let png = rep.representation(using: .png, properties: [:]) else {
+    guard let png = rep.representation(using: .png, properties: [:]) else {
         fatalError("render failed at \(entry.px)px")
+    }
+    guard rep.pixelsWide == entry.px, rep.pixelsHigh == entry.px else {
+        fatalError("\(entry.name) rendered at \(rep.pixelsWide)px, expected \(entry.px)px")
     }
     try! png.write(to: URL(fileURLWithPath: "build/AppIcon.iconset/\(entry.name).png"))
 }
