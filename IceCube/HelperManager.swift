@@ -35,6 +35,12 @@ final class HelperManager {
     private(set) var status: HelperStatus?
     private(set) var lastError: String?
 
+    /// Clears a failure the user has acknowledged, so a retry starts from a
+    /// clean slate rather than re-showing the previous attempt's message.
+    func clearError() {
+        lastError = nil
+    }
+
     private let service = SMAppService.daemon(
         plistName: "io.github.thijsvos.icecube.helper.plist"
     )

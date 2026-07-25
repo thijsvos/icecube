@@ -10,10 +10,20 @@ public enum HelperConstants {
     public static let helperBundleID = "io.github.thijsvos.icecube.helper"
     /// The app's bundle identifier (what the helper pins incoming callers to).
     public static let appBundleID = "io.github.thijsvos.icecube"
-    /// Protocol version; both sides must agree (bump on breaking change).
+    /// Protocol version; both sides must agree.
+    ///
+    /// Bump on any change to what the daemon DOES, not merely to the shape of
+    /// this interface. Replacing the app does not restart the running daemon —
+    /// launchd keeps the old one — and if the version still matches, the app
+    /// connects happily to stale code. That cost three manual re-registrations
+    /// while verifying the safety fixes below, each time silently testing the
+    /// previous build. A mismatch is cheap: the setup flow offers one button.
+    ///
     /// v2: FanConfig gained curve fields (Phase 4).
     /// v3: HelperStatus gained `guardianActive`.
-    public static let protocolVersion = "3"
+    /// v4: daemon safety behaviour changed (revert/engage race guards, sensor
+    ///     discovery, boot-promise handling) with no interface change.
+    public static let protocolVersion = "4"
     /// How often the app sends a heartbeat while connected.
     public static let heartbeatInterval: TimeInterval = 5
     /// SAFETY: no heartbeat for this long → the daemon's watchdog reverts to

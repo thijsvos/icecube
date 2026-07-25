@@ -1,6 +1,7 @@
 // IceCubeApp.swift — the @main entry point: a menu-bar-only app showing a fan glyph + hottest temperature.
 
 import IceCubeKit
+import os
 import SwiftUI
 
 /// Ice Cube lives entirely in the menu bar (`LSUIElement` — no Dock icon).
@@ -13,6 +14,13 @@ import SwiftUI
 struct IceCubeApp: App {
     /// The single source of truth the label and popover both observe.
     @State private var appState: AppState
+    @Environment(\.openWindow) private var openWindow
+
+    /// Whether the guided setup has been shown once. A menu-bar app gives no
+    /// hint that fan control exists or that it needs one permission — the old
+    /// flow required the user to open the popover and notice a small card, so
+    /// most people would simply never find it.
+    @AppStorage("hasShownSetup") private var hasShownSetup = false
 
     init() {
         // CompositionRoot decides simulated vs real; the app never chooses.
@@ -39,6 +47,40 @@ struct IceCubeApp: App {
                     .monospacedDigit()
             }
             .accessibilityLabel("Ice Cube, hottest sensor \(appState.hottestText)")
+            .task {
+                // Two reasons to surface setup automatically, both cases the
+                // user cannot discover on their own in a menu-bar-only app:
+                //
+                //   1. First launch, fan control not set up yet.
+                //   2. The app was updated while its background service kept
+                //      running the old version — invisible, and the only fix is
+                //      a button they would never think to look for.
+                //
+                // Wait for the connection handshake first: immediately after
+                // launch the state is "disconnected but fine", which would
+                // either nag an existing user or miss the mismatch entirely.
+                for _ in 0 ..< 12 where appState.helper.connection == .disconnected {
+                    try? await Task.sleep(for: .milliseconds(500))
+                }
+                let needsUpdate = if case .versionMismatch = appState.helper.connection {
+                    true
+                } else {
+                    false
+                }
+                let notSetUp = appState.helper.registration != .enabled
+                guard needsUpdate || (notSetUp && !hasShownSetup) else {
+                    hasShownSetup = true
+                    Logger(subsystem: "io.github.thijsvos.icecube", category: "ui")
+                        .notice("setup: not shown (registration ok, versions match)")
+                    return
+                }
+                hasShownSetup = true
+                Logger(subsystem: "io.github.thijsvos.icecube", category: "ui")
+                    .notice(
+                        "setup: opening (needsUpdate: \(needsUpdate, privacy: .public), notSetUp: \(notSetUp, privacy: .public))"
+                    )
+                WindowOpener.open(WindowOpener.ID.setup, using: openWindow)
+            }
             .task {
                 // Widen the status item's click mask so right-click opens the
                 // popover too. Polled rather than guessed: 500 ms was a bet on
@@ -87,6 +129,15 @@ struct IceCubeApp: App {
         // About panel — identity, version, license.
         Window("About Ice Cube", id: WindowOpener.ID.about) {
             AboutView()
+        }
+        .windowResizability(.contentSize)
+
+        // The guided fan-control setup. A window rather than a popover sheet
+        // because the user has to leave for System Settings and come back —
+        // a popover would dismiss itself the moment they clicked away, which
+        // is exactly where the old flow lost people.
+        Window("Set Up Ice Cube", id: WindowOpener.ID.setup) {
+            SetupWindowView(state: appState)
         }
         .windowResizability(.contentSize)
     }

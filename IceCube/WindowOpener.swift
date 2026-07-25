@@ -20,6 +20,8 @@ enum WindowOpener {
         /// oversized frame earlier buggy versions saved for the old id.
         static let settings = "settings.v2"
         static let about = "about"
+        /// The guided fan-control setup flow.
+        static let setup = "setup"
     }
 
     /// Opens the window scene `id` and brings the app frontmost.

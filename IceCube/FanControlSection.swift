@@ -54,35 +54,43 @@ struct FanControlSection: View {
 
     // MARK: - Onboarding & approval
 
+    /// Both pre-enabled states hand off to the guided setup window rather than
+    /// trying to run the flow inside a popover. The popover dismisses itself
+    /// whenever the user clicks away — including when they go to System
+    /// Settings to grant the permission — so the one moment they most need
+    /// guidance was the one moment this card could not be on screen.
     private var onboarding: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label("Fan control is off", systemImage: "fan.slash")
-                .font(.callout.weight(.medium))
-            Text("A small admin helper does the fan writes — only safe, clamped "
-                + "speeds, and it reverts to automatic if Ice Cube stops. Approved "
-                + "once in System Settings.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Button("Enable Fan Control") {
-                helper.register()
-            }
-            .controlSize(.small)
-            .primaryGlassButton()
-        }
+        setupPrompt(
+            title: "Fan control is off",
+            icon: "fan.slash",
+            message: "Ice Cube can run your fans quieter or cooler. It needs your "
+                + "permission once — takes about ten seconds.",
+            button: "Set Up Fan Control…"
+        )
     }
 
     private var approvalPrompt: some View {
+        setupPrompt(
+            title: "Almost there",
+            icon: "checkmark.shield",
+            message: "Just needs your approval in System Settings. Ice Cube will "
+                + "walk you through it.",
+            button: "Finish Setup…"
+        )
+    }
+
+    private func setupPrompt(
+        title: String, icon: String, message: String, button: String
+    ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Label("One approval needed", systemImage: "checkmark.shield")
+            Label(title, systemImage: icon)
                 .font(.callout.weight(.medium))
-            Text("macOS wants your OK: System Settings → General → " +
-                "Login Items & Extensions → allow “Ice Cube” in the background.")
+            Text(message)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Button("Open System Settings") {
-                helper.openApprovalSettings()
+            Button(button) {
+                WindowOpener.open(WindowOpener.ID.setup, using: openWindow)
             }
             .controlSize(.small)
             .primaryGlassButton()
@@ -98,16 +106,16 @@ struct FanControlSection: View {
             Label("Helper enabled — connecting…", systemImage: "bolt.horizontal")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-        case let .versionMismatch(helperVersion):
-            VStack(alignment: .leading, spacing: 6) {
-                Label("Helper is outdated (v\(helperVersion))", systemImage: "arrow.triangle.2.circlepath")
-                    .font(.caption)
-                    .foregroundStyle(Theme.warning)
-                Button("Update Helper (Re-register)") {
-                    Task { await helper.reregister() }
-                }
-                .controlSize(.small)
-            }
+        case .versionMismatch:
+            // The version number was the whole message before. It told the user
+            // nothing they could act on and read as a fault they had caused.
+            setupPrompt(
+                title: "Update needed",
+                icon: "arrow.triangle.2.circlepath",
+                message: "Ice Cube was updated. One more step finishes it — fan "
+                    + "control is paused until then.",
+                button: "Finish Update…"
+            )
         case .connected:
             controls
         }

@@ -85,8 +85,22 @@ sh scripts/set-team.sh YOURTEAMID   # your Apple Development team (free ID works
 sh scripts/install-debug.sh          # builds, installs to /Applications, launches
 ```
 
-Then: menu-bar fan icon → **Enable Fan Control** → approve in System
-Settings. Monitoring works without any of that; only control needs the helper.
+### First run
+
+Ice Cube opens a short setup window by itself and walks you through the one
+permission it needs. It watches for your approval and moves on as soon as you
+give it — no restarting, no hunting through menus. If the app isn't in your
+Applications folder yet, it offers to move itself there first.
+
+**Monitoring works immediately without any of this.** The permission is only
+for *changing* fan speeds, and you can skip it and turn it on later from the
+Ice Cube menu.
+
+Behind the scenes that permission registers a small background service
+(`SMAppService`), which macOS requires you to approve once under System
+Settings → General → Login Items & Extensions. That's an Apple rule, not an
+Ice Cube one — the setup flow just makes it a single button instead of a
+scavenger hunt.
 
 ## Uninstall
 
