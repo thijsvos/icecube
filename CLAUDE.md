@@ -18,8 +18,8 @@ Read **PLAN.md** for the full roadmap and technical reference. **XCODE_GUIDE.md*
 3. **Simulated mode must always work.** `ICECUBE_SIMULATED=1` (env var or `--simulated` launch arg) swaps in `MockSMCProvider`. Every feature must be demonstrable in simulated mode with no root, no helper, no real SMC. CI runs simulated only.
 4. **Safety invariants are non-negotiable.** Never remove, weaken, or bypass:
    - Daemon-side watchdog: no app heartbeat for 15 s **and** config does not persist without app → revert to auto. Manual (fixed-RPM) mode is **always** watchdogged regardless of the persist toggle — only curve mode may run app-less.
-   - Daemon reverts to auto on XPC invalidation, on its own shutdown, and on first launch.
-   - Temperature ceiling: any monitored temp ≥ 95 °C → daemon forces max fans / auto regardless of user curve.
+   - Daemon reverts to auto on XPC invalidation, on its own shutdown, and on start — **unless** a valid persisted curve config loads, which it resumes instead (the Phase 4 boot promise, PLAN.md §4.3.3).
+   - Temperature ceiling: **per sensor class**, with an N-tick debounce so one glitched reading can't slam the fans — die sensors 104 °C, everything else 95 °C (`SafetyMonitor.Limits`, PLAN.md §4.3.2). Over ceiling → daemon forces max fans regardless of user curve, releasing only 5 °C below. Die sensors legitimately run 95–105 °C under load, which is why they are not held to the 95 °C bar.
    - All RPM writes clamped to the SMC-reported `[F{i}Mn, F{i}Mx]` range for that fan.
    - `F{i}Mn`/`F{i}Mx` are **advisory** in firmware (0 RPM can be accepted) — the daemon clamp is the only real guard.
    - On system wake, re-verify and re-assert or revert (firmware silently resets manual control across sleep).
@@ -34,17 +34,24 @@ Read **PLAN.md** for the full roadmap and technical reference. **XCODE_GUIDE.md*
 IceCube.xcodeproj
 ├── Ice Cube            SwiftUI app: MenuBarExtra UI, charts, curve editor,
 │                     settings, read-only SMC polling for display
-├── IceCubeHelper      Root LaunchDaemon (SMAppService): owns ALL SMC writes,
-│                     runs the fan-curve control loop, enforces safety
+├── IceCubeHelper      Root LaunchDaemon (SMAppService). Holds the ONLY SMC
+│                     writer (SMCWritePort — raw IOKit, never linked into the
+│                     app), the XPC listener, and the root-owned ConfigStore.
+│                     Deliberately thin: policy lives in IceCubeKit.
 └── IceCubeKit         Local Swift package (no UI, no root): SMC key parsing,
                       encodings, curve math, models, XPC protocol, mock provider,
                       read-only SMC access (SMCConnection/SystemSMCProvider —
                       reads need no root; there is deliberately NO write method),
+                      AND the daemon's brain — DaemonCore, SafetyMonitor,
+                      FanGuardian, FanWriteSequencer — which drive hardware only
+                      through the `SMCControlPort` protocol
                       plus the `icecube-diag` CLI (swift run icecube-diag)
                       → this is where unit tests live
 ```
 
 The app never writes to the SMC. It sends the desired curve/preset over XPC; the daemon runs the control loop (~2 s tick) so curves keep working even if the app quits (user-configurable).
+
+**Why the daemon's logic lives in IceCubeKit, not IceCubeHelper:** a command-line tool target cannot be unit-tested, and safety code that cannot be tested is safety code that silently rots. `DaemonCore` takes `any SMCControlPort` + `any FanConfigStoring`, so every invariant (watchdog, ceiling, revert-on-invalidation, wake re-assert, the revert/engage race guards) is exercised against a scripted fake firmware in `DaemonCoreTests`. The *capability* boundary is unchanged and still enforced: only `IceCubeHelper` contains a concrete writer, so the app binary has no way to write the SMC even though it links the orchestration code. Verify with `nm -a "…/Ice Cube.app/Contents/MacOS/Ice Cube" | grep -c SMCWritePort` → must be 0.
 
 ## Build & test commands
 
@@ -73,7 +80,7 @@ If a build needs signing (running the real helper), tell the owner to do it in X
 - SwiftUI + `@Observable` for app state; `@MainActor` for anything touching UI.
 - Default isolation: app target uses **MainActor default isolation**; IceCubeHelper + IceCubeKit use **nonisolated default**.
 - `HelperProtocol` reply closures are `@escaping @Sendable`.
-- Actors for polling/IO (`SMCPollingActor`); models are `Sendable` value types.
+- Actors for polling/IO (`SMCPoller` in the app, `SMCWritePort` in the daemon); models are `Sendable` value types.
 - **No third-party dependencies. Period.** (Sparkle dropped — Phase 6 uses a hand-rolled GitHub Releases version check.) Foundation/AppKit/SwiftUI/Charts only.
 - Errors: typed `IceCubeError` enum in IceCubeKit; never `fatalError` in daemon code paths.
 - Every SMC call checks the firmware result byte (`SMCResult`), not just `kern_return_t`.

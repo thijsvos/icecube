@@ -68,7 +68,7 @@ This document is the single source of truth for Claude Code. Companion docs: `CL
 │  IceCubeHelper (root LaunchDaemon via SMAppService)                    │
 │  ControlLoop (2 s): sensor read → active curve → clamp → SMC write    │
 │  SafetyMonitor: watchdog, temp ceiling, revert-on-exit                │
-│  SMCService (READ+WRITE, the only writer in the system)               │
+│  SMCWritePort (READ+WRITE, the only writer in the system)            │
 └───────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -213,8 +213,8 @@ Work in order. Each phase ends with its acceptance criteria demonstrably true (s
 - **Accept:** popover dashboard looks and feels Afterburner-grade in simulated mode; no dropped frames on an idle machine with the point budget enforced.
 
 ### Phase 3 — Helper, XPC, manual control **[HW]**
-- [x] IceCubeHelper: XPC listener + codesign pinning (TN3127 dev variant, §4.2), `SMCService` write path = the generation-aware Apple Silicon state machine (§3.2: casing probe → direct mode write → Ftst unlock fallback), result-byte checking on every call, read-back + behavioral verification.
-- [x] SafetyMonitor per §4.3, with unit-tested state machine in IceCubeKit (time + temps injected).
+- [x] IceCubeHelper: XPC listener + codesign pinning (TN3127 dev variant, §4.2), `SMCWritePort` + `FanWriteSequencer` write path = the generation-aware Apple Silicon state machine (§3.2: casing probe → direct mode write → Ftst unlock fallback), result-byte checking on every call, read-back + behavioral verification.
+- [x] SafetyMonitor per §4.3, with unit-tested state machine in IceCubeKit (time + temps injected). *(2026-07-25: `DaemonCore` + `ConfigStore` also moved into IceCubeKit behind `SMCControlPort`/`FanConfigStoring`, so the daemon's own revert/wake/watchdog paths are unit-tested too — see `DaemonCoreTests`. `SMCWritePort` stays helper-only; the app binary contains no writer.)*
 - [x] SMAppService registration flow (or the Phase 0.5 fallback) + onboarding sheet + Debug menu (register/unregister/status).
 - [x] App `HelperClient`: connection lifecycle, heartbeat (5 s), reconnect/backoff, version handshake.
 - [x] Manual mode UI: per-fan sliders, prominent revert-to-auto, warning tint.
@@ -257,7 +257,7 @@ Work in order. Each phase ends with its acceptance criteria demonstrably true (s
 - **SMC keys vary wildly per model** → curated map + fallback enumeration + community diagnostics pipeline (§3.3). Biggest ongoing cost; design for it.
 - **Free-Apple-ID helper approval unproven** → Phase 0.5 spike with the fallback documented *before* it runs (manual `sudo launchctl bootstrap` install for Phases 3–5).
 - **macOS 26.4.x BTM corruption bug** → registration/approval may misbehave for reasons unrelated to our code; `sfltool resetbtm` + reboot is the last resort (resets background-item approvals for ALL apps).
-- **Apple changes SMC/BTM behavior in new macOS** → keep write paths isolated in `SMCService`; CI on latest macOS runner; release notes discipline. Point updates have broken write paths before (macOS 15.3/15.4) — hence the §4.3.6 post-update self-test.
+- **Apple changes SMC/BTM behavior in new macOS** → keep write paths isolated in `SMCWritePort`; CI on latest macOS runner; release notes discipline. Point updates have broken write paths before (macOS 15.3/15.4) — hence the §4.3.6 post-update self-test.
 - **Signing cert expiry mid-project** → owner's Apple Development cert expires **2026-08-15**; Xcode auto-renews, but if XPC pinning suddenly fails around that date, suspect certificate renewal — not code.
 - **Helper approval UX friction** → onboarding invests here; Debug re-register; XCODE_GUIDE troubleshooting §7.
 - **Forced-fan misuse (user sets 0 %)** → clamp to `F{i}Mn` (the firmware won't stop us — §3.2 — so the clamp is THE guard), ceiling override, warning UI in manual mode.
