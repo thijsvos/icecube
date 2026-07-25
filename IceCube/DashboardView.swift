@@ -21,14 +21,21 @@ struct DashboardView: View {
     @State private var exportDocument: DiagnosticsDocument?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Theme.Metrics.cardContentSpacing) {
             controls
                 .fileExporter(
                     isPresented: $isExportingCSV,
                     document: exportDocument,
                     contentType: .commaSeparatedText,
                     defaultFilename: "icecube-history"
-                ) { _ in }
+                ) { result in
+                    // A failed export used to vanish entirely — the sheet closed
+                    // and nothing was written or said. Surface it the same way
+                    // every other app-side failure is surfaced.
+                    if case let .failure(error) = result {
+                        state.reportError("Could not export history: \(error.localizedDescription)")
+                    }
+                }
             if state.chartRows.isEmpty {
                 collectingPlaceholder
             } else {
@@ -46,6 +53,12 @@ struct DashboardView: View {
         // any of them changes so the popover reflects the new choice at once.
         .onChange(of: state.chartSettings.window) { state.refreshCharts() }
         .onChange(of: chartFilterSignature) { state.refreshCharts() }
+        // Charts were the one popover section that sat bare in the stack while
+        // Fans, Control and Sensors were all grouped cards — and because the
+        // compact temperature line that replaces this section *is* a card, the
+        // "Show charts" toggle silently changed whether that slot had a card at
+        // all. Same treatment now, either way.
+        .popoverCard()
     }
 
     /// A value that changes whenever a row-visibility toggle flips — cheaper
@@ -58,9 +71,12 @@ struct DashboardView: View {
 
     private var controls: some View {
         HStack(spacing: 8) {
-            Text("\(state.chartSettings.window.title) history")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            // Doubles as this card's title, so it wears the same quiet
+            // uppercase treatment as FANS / CONTROL / SENSORS rather than the
+            // one-off secondary caption it used to be. Still carries the live
+            // window ("1 MIN HISTORY"), which is the only place that shows.
+            Text("\(state.chartSettings.window.title) History")
+                .premiumSectionLabel()
             Spacer()
             Button {
                 Task {

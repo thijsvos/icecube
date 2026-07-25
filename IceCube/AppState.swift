@@ -52,6 +52,13 @@ final class AppState {
     /// when the latest poll succeeded.
     private(set) var errorMessage: String?
 
+    /// Surfaces a user-facing failure that did not come from polling — e.g. a
+    /// file export that the system refused. The popover shows it like any other
+    /// error; the next successful poll clears it.
+    func reportError(_ message: String) {
+        errorMessage = message
+    }
+
     // MARK: - Charts (Phase 2)
 
     /// The dashboard's chart rows for the selected window, ready to render —
@@ -147,11 +154,20 @@ final class AppState {
         let interval = PollInterval(
             rawValue: UserDefaults.standard.integer(forKey: Self.intervalKey)
         ) ?? .oneSecond
-        poller = SMCPoller(provider: provider, interval: .seconds(interval.rawValue))
-        pollInterval = interval
-        menuBarDisplay = MenuBarDisplayMode(
+        let display = MenuBarDisplayMode(
             rawValue: UserDefaults.standard.string(forKey: Self.menuBarDisplayKey) ?? ""
         ) ?? .temperature
+        // Built from the SAME rule `restartPolling()` uses. This used to pass
+        // `interval.rawValue` straight through, and since the downshift lived
+        // only in a `didSet` — which does not fire during init — an icon-only
+        // user relaunching (the normal login-item case) polled at 1 Hz for the
+        // whole session and never got the energy win the setting promises.
+        poller = SMCPoller(
+            provider: provider,
+            interval: .seconds(Self.effectiveSeconds(interval: interval, display: display))
+        )
+        pollInterval = interval
+        menuBarDisplay = display
         temperatureUnit = TemperatureUnit(
             rawValue: UserDefaults.standard.string(forKey: Self.unitKey) ?? ""
         ) ?? .celsius
@@ -160,10 +176,12 @@ final class AppState {
     /// Rebuilds the polling stream with the effective cadence. Icon-only
     /// display needs no 1 Hz updates while the popover is closed, so it
     /// polls at ≥ 5 s — a real energy win for a menu-bar resident.
+    private static func effectiveSeconds(interval: PollInterval, display: MenuBarDisplayMode) -> Int {
+        display == .iconOnly ? max(interval.rawValue, 5) : interval.rawValue
+    }
+
     private func restartPolling() {
-        let seconds = menuBarDisplay == .iconOnly
-            ? max(pollInterval.rawValue, 5)
-            : pollInterval.rawValue
+        let seconds = Self.effectiveSeconds(interval: pollInterval, display: menuBarDisplay)
         pollTask?.cancel()
         pollTask = nil
         poller = SMCPoller(provider: provider, interval: .seconds(seconds))

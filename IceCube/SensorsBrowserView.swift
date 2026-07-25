@@ -71,7 +71,7 @@ struct SensorsBrowserView: View {
             if state.isSimulated {
                 Text("SIMULATED")
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Theme.warning)
             }
             Spacer()
             if let exportMessage {
@@ -200,9 +200,15 @@ struct SensorsBrowserView: View {
     }
 }
 
-/// A JSON payload for `fileExporter` — write-only, never opened.
+/// An export payload for `fileExporter` — write-only, never opened.
+///
+/// Declares **both** types it is used for: the sensors browser exports JSON
+/// diagnostics, the dashboard exports CSV history. It previously declared only
+/// `.json` while `DashboardView` asked the exporter for `.commaSeparatedText`,
+/// so the document and the exporter disagreed about what was being written.
+/// `fileExporter(contentType:)` selects from this list per call site.
 struct DiagnosticsDocument: FileDocument {
-    static let readableContentTypes: [UTType] = [.json]
+    static let readableContentTypes: [UTType] = [.json, .commaSeparatedText]
 
     let data: Data
 

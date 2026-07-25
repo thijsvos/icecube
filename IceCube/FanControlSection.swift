@@ -23,20 +23,20 @@ struct FanControlSection: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Theme.Metrics.cardContentSpacing) {
             Text("Control").premiumSectionLabel()
             content
             if let error = helper.lastError {
                 Text(error)
                     .font(.caption2)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Theme.warning)
             }
         }
         // Same tokens as every other card in this VStack — a change to
         // Theme.Metrics.cornerRadius now reaches all four, not three.
         .popoverCard(
-            fill: isManual ? AnyShapeStyle(.orange.opacity(0.12)) : AnyShapeStyle(.quinary),
-            border: isManual ? .orange.opacity(0.5) : .clear
+            fill: isManual ? AnyShapeStyle(Theme.warning.opacity(0.12)) : AnyShapeStyle(.quinary),
+            border: isManual ? Theme.warning.opacity(0.5) : .clear
         )
     }
 
@@ -102,7 +102,7 @@ struct FanControlSection: View {
             VStack(alignment: .leading, spacing: 6) {
                 Label("Helper is outdated (v\(helperVersion))", systemImage: "arrow.triangle.2.circlepath")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Theme.warning)
                 Button("Update Helper (Re-register)") {
                     Task { await helper.reregister() }
                 }
@@ -143,7 +143,7 @@ struct FanControlSection: View {
 
         var style: AnyShapeStyle {
             switch self {
-            case .manual: AnyShapeStyle(.orange)
+            case .manual: AnyShapeStyle(Theme.warning)
             case .curve, .guardianCooling: AnyShapeStyle(Theme.accent)
             case .automatic: AnyShapeStyle(.secondary)
             }
@@ -222,7 +222,7 @@ struct FanControlSection: View {
                         Task { await helper.revertToAuto() }
                     }
                     .controlSize(.small)
-                    .tint(.orange)
+                    .tint(Theme.warning)
                     .keyboardShortcut(.escape, modifiers: [])
                 } else {
                     Button("Take Manual Control") {
@@ -248,7 +248,7 @@ struct FanControlSection: View {
                         systemImage: "exclamationmark.triangle"
                     )
                     .font(.caption2)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Theme.warning)
                 }
             }
         }
@@ -298,9 +298,21 @@ struct FanControlSection: View {
         commitTargets()
     }
 
+    /// Sends a target for **every** fan, not just the sliders the user touched.
+    ///
+    /// `sliderTargets` is `@State`, and since the off-screen popover
+    /// optimization the whole content subtree is torn down when the popover
+    /// closes — so this map starts empty on every reopen. Sending it verbatim
+    /// meant that after a reopen, moving one slider committed a single-entry
+    /// map: `engageManual` skips fans missing from `targets`, so the other fan
+    /// stayed physically forced but dropped out of the daemon's tracked config,
+    /// where `verifyManualState` then reported it as held and wake re-assert
+    /// skipped it. Filling from the live readings keeps the map complete.
     private func commitTargets() {
-        let targets = sliderTargets
-        guard !targets.isEmpty else { return }
+        guard !fans.isEmpty else { return }
+        let targets = Dictionary(uniqueKeysWithValues: fans.map { fan in
+            (fan.id, sliderTargets[fan.id] ?? FanWriteSequencer.clamp(fan.actualRPM, to: fan))
+        })
         Task { await helper.applyManual(targets: targets) }
     }
 }

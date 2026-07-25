@@ -20,6 +20,9 @@ public actor SystemSMCProvider: SMCProviding {
     /// Resolved once on first use.
     private var discoveredFans: [FanDescriptor]?
     private var discoveredSensors: [SMCKeyMaps.SensorDescriptor]?
+    /// Sensor discovery currently in flight, so concurrent callers join it
+    /// instead of each running the full sweep. See ``sensorDescriptors()``.
+    private var sensorDiscovery: Task<[SMCKeyMaps.SensorDescriptor], any Error>?
     /// Last plausible value per sensor key — what a glitched read falls back
     /// to so the sensor list never shrinks (see `SensorStabilizer`).
     private var lastGoodTemperatures: [String: Double] = [:]
@@ -193,6 +196,40 @@ public actor SystemSMCProvider: SMCProviding {
         if let discoveredSensors {
             return discoveredSensors
         }
+        // ACTOR REENTRANCY: every line below suspends, and the cache is only
+        // assigned at the end — so two callers arriving before the first
+        // finishes both saw nil and both ran the whole sweep (which, on an
+        // unmapped model, enumerates EVERY SMC key). Awaiting an in-flight
+        // discovery makes the second caller join rather than duplicate it.
+        if let sensorDiscovery {
+            return try await Self.value(of: sensorDiscovery)
+        }
+        let discovery = Task<[SMCKeyMaps.SensorDescriptor], any Error> {
+            try await self.performSensorDiscovery()
+        }
+        sensorDiscovery = discovery
+        defer { sensorDiscovery = nil }
+        let resolved = try await Self.value(of: discovery)
+        discoveredSensors = resolved
+        return resolved
+    }
+
+    /// Re-narrows a `Task`'s `any Error` back to `IceCubeError`.
+    ///
+    /// `Task` has no typed-throws initializer, so an in-flight discovery has to
+    /// be stored as `Task<_, any Error>` even though the work only ever throws
+    /// `IceCubeError`. This keeps the callers' typed-throws signatures intact.
+    private static func value<T>(of task: Task<T, any Error>) async throws(IceCubeError) -> T {
+        do {
+            return try await task.value
+        } catch let error as IceCubeError {
+            throw error
+        } catch {
+            throw IceCubeError.smcKeyNotFound(key: "T***")
+        }
+    }
+
+    private func performSensorDiscovery() async throws(IceCubeError) -> [SMCKeyMaps.SensorDescriptor] {
         var resolved: [SMCKeyMaps.SensorDescriptor] = []
         if let curated = SMCKeyMaps.curatedSensors(forModel: HostInfo.modelIdentifier()) {
             // Admission requires a plausible first READ, not mere existence:
@@ -209,7 +246,6 @@ public actor SystemSMCProvider: SMCProviding {
         if resolved.count < 3 {
             resolved = try await enumeratedTemperatureSensors()
         }
-        discoveredSensors = resolved
         return resolved
     }
 

@@ -21,6 +21,22 @@ final class PresetStore {
 
     private(set) var userPresets: [Preset] = []
 
+    /// Set when `presets.json` could not be read, naming the backup we moved it
+    /// to. The Curves window surfaces this so a load failure is visible rather
+    /// than looking like "you never saved anything".
+    private(set) var loadFailure: String?
+
+    /// Bumped only when the on-disk shape changes incompatibly.
+    private static let schemaVersion = 1
+
+    /// The persisted shape. Versioned so a future field can be migrated instead
+    /// of silently failing to decode — the previous format was a bare
+    /// `[Preset]` with no version at all, which `load()` still accepts.
+    private struct Envelope: Codable {
+        let schemaVersion: Int
+        let presets: [Preset]
+    }
+
     private static let file = FileManager.default
         .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("IceCube/presets.json")
@@ -48,11 +64,41 @@ final class PresetStore {
 
     private func load() {
         guard let data = try? Data(contentsOf: Self.file) else { return }
+        let decoder = JSONDecoder()
+        // Current format first, then the original un-versioned `[Preset]` so
+        // existing installs keep their curves across this change.
+        if let envelope = try? decoder.decode(Envelope.self, from: data) {
+            userPresets = envelope.presets.filter { $0.config.mode != .manual }
+            return
+        }
+        if let legacy = try? decoder.decode([Preset].self, from: data) {
+            userPresets = legacy.filter { $0.config.mode != .manual }
+            persist() // migrate forward so the next read takes the fast path
+            return
+        }
+        // SAFETY FOR USER DATA: do NOT leave the file in place to be silently
+        // overwritten by the next `persist()`. That turned one unreadable file
+        // into permanent, invisible loss of every saved curve. Move it aside so
+        // it is recoverable, and surface that in the UI.
+        quarantineUnreadableFile()
+    }
+
+    private func quarantineUnreadableFile() {
+        let stamp = ISO8601DateFormatter().string(from: Date())
+            .replacingOccurrences(of: ":", with: "-")
+        let backup = Self.file.deletingLastPathComponent()
+            .appendingPathComponent("presets.corrupt-\(stamp).json")
         do {
-            userPresets = try JSONDecoder().decode([Preset].self, from: data)
-                .filter { $0.config.mode != .manual } // manual presets are forbidden
+            try FileManager.default.moveItem(at: Self.file, to: backup)
+            loadFailure = backup.lastPathComponent
+            log.error("presets.json unreadable — kept a copy at \(backup.lastPathComponent, privacy: .public)")
         } catch {
-            log.error("presets.json unreadable (\(error.localizedDescription, privacy: .public)) — starting empty")
+            // Could not move it: still better to report than to overwrite.
+            loadFailure = Self.file.lastPathComponent
+            log
+                .error(
+                    "presets.json unreadable and could not be backed up: \(error.localizedDescription, privacy: .public)"
+                )
         }
     }
 
@@ -61,7 +107,8 @@ final class PresetStore {
             try FileManager.default.createDirectory(
                 at: Self.file.deletingLastPathComponent(), withIntermediateDirectories: true
             )
-            try JSONEncoder().encode(userPresets).write(to: Self.file, options: .atomic)
+            let envelope = Envelope(schemaVersion: Self.schemaVersion, presets: userPresets)
+            try JSONEncoder().encode(envelope).write(to: Self.file, options: .atomic)
         } catch {
             log.error("could not save presets: \(error.localizedDescription, privacy: .public)")
         }

@@ -98,10 +98,20 @@ final class HelperManager {
         if let pass = maintenancePass {
             return await pass.value
         }
-        let pass = Task { await self.maintain() }
+        // The task clears the reference as its OWN last statement, not after
+        // `await pass.value` below. Clearing afterwards left a window where the
+        // pass had finished but `maintenancePass` still pointed at it, so a
+        // caller arriving in that window joined an already-completed task and
+        // returned without refreshing anything — silently losing the very
+        // refresh this hook exists to force. Because the assignment happens
+        // inside the closure, the task's value is not observable until after
+        // the reference is nil: a later caller always starts a fresh pass.
+        let pass = Task {
+            await self.maintain()
+            self.maintenancePass = nil
+        }
         maintenancePass = pass
         await pass.value
-        maintenancePass = nil
     }
 
     // MARK: - Registration (SMAppService)
@@ -218,12 +228,20 @@ final class HelperManager {
     @ObservationIgnored private var didAutoResume = false
 
     func apply(_ config: FanConfig) async {
-        await run {
+        let applied = await run {
             try await self.client.apply(config)
             self.lastAppliedConfig = config
         }
         // Remember a curve profile so a later launch can resume it; a
         // deliberate Auto forgets it (the user wants macOS in control).
+        //
+        // Only on SUCCESS. This write used to run unconditionally, outside the
+        // error handling above — so a curve the daemon REJECTED (bad config, or
+        // the connection dropping mid-call) was still stored, and
+        // `autoResumeIfNeeded()` silently applied it on the next launch. The
+        // user would get fan control they never successfully engaged, resumed
+        // without any interaction, after being shown an error saying it failed.
+        guard applied else { return }
         let defaults = UserDefaults.standard
         if config.mode == .curve, let data = try? JSONEncoder().encode(config) {
             defaults.set(data, forKey: Self.lastCurveKey)
@@ -318,13 +336,19 @@ final class HelperManager {
         }
     }
 
-    private func run(_ operation: () async throws -> Void) async {
+    /// Runs `operation`, funnelling any throw into `lastError`.
+    /// - Returns: whether it succeeded, so callers can avoid acting on a
+    ///   command the daemon actually rejected.
+    @discardableResult
+    private func run(_ operation: () async throws -> Void) async -> Bool {
         do {
             try await operation()
             lastError = nil
             await refreshStatus()
+            return true
         } catch {
             lastError = error.localizedDescription
+            return false
         }
     }
 

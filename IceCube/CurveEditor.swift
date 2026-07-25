@@ -15,11 +15,22 @@ struct CurveEditorView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
+            // A preset file we could not read is real data loss — say so here
+            // rather than only in the log, and name the recoverable copy.
+            if let failure = state.presets.loadFailure {
+                Label(
+                    "Saved presets could not be read. The old file was kept as “\(failure)”.",
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.caption)
+                .foregroundStyle(Theme.warning)
+                .fixedSize(horizontal: false, vertical: true)
+            }
             CurveCanvas(model: model, hottestDie: state.hottestDie)
                 .frame(minHeight: 240)
             footer
         }
-        .padding(14)
+        .padding(Theme.Metrics.popoverPadding)
         .frame(minWidth: 600, minHeight: 430)
         // Sliders, toggle, and buttons all take the ice-blue brand accent.
         .tint(Theme.accent)
@@ -90,7 +101,7 @@ struct CurveEditorView: View {
                 if state.isSimulated {
                     Text("SIMULATED")
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(Theme.warning)
                         .help("Applying a curve needs real hardware")
                 }
             }

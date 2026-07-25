@@ -45,6 +45,11 @@ struct SettingsWindowView: View {
         // Every control (toggles, pickers, buttons) picks up the ice-blue brand
         // accent instead of the system accent, so Settings matches the app.
         .tint(Theme.accent)
+        // `launchAtLogin` seeds from SMAppService at view-init only, and this
+        // window's view can outlive a change made elsewhere — System Settings →
+        // Login Items, or a failed registration. Re-reading on appear keeps the
+        // toggle from displaying (and then acting on) a stale value.
+        .onAppear { launchAtLogin = SMAppService.mainApp.status == .enabled }
     }
 
     private var tabBar: some View {
@@ -102,7 +107,7 @@ struct SettingsWindowView: View {
                 Toggle("Launch Ice Cube at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, enabled in setLaunchAtLogin(enabled) }
                 if let loginItemError {
-                    Text(loginItemError).font(.caption).foregroundStyle(.orange)
+                    Text(loginItemError).font(.caption).foregroundStyle(Theme.warning)
                 }
             }
             Section {
@@ -127,7 +132,7 @@ struct SettingsWindowView: View {
                 }
                 if state.alerts.permissionDenied {
                     Text("Notifications are denied — allow Ice Cube in System Settings → Notifications.")
-                        .font(.caption).foregroundStyle(.orange)
+                        .font(.caption).foregroundStyle(Theme.warning)
                 }
             }
             Section("Updates") {
@@ -247,7 +252,7 @@ struct SettingsWindowView: View {
         case .checking: ProgressView().controlSize(.small)
         case .upToDate: Text("Up to date").font(.caption).foregroundStyle(.secondary)
         case let .available(version, url): Link("v\(version) available", destination: url).font(.caption)
-        case let .failed(message): Text(message).font(.caption).foregroundStyle(.orange)
+        case let .failed(message): Text(message).font(.caption).foregroundStyle(Theme.warning)
         }
     }
 
