@@ -23,7 +23,8 @@ Read **PLAN.md** for the full roadmap and technical reference. **XCODE_GUIDE.md*
    - All RPM writes clamped to the SMC-reported `[F{i}Mn, F{i}Mx]` range for that fan.
    - `F{i}Mn`/`F{i}Mx` are **advisory** in firmware (0 RPM can be accepted) — the daemon clamp is the only real guard.
    - On system wake, re-verify and re-assert or revert (firmware silently resets manual control across sleep).
-   - Manual mode is never the persisted default; a fresh install starts in Auto.
+   - **Manual mode is never the persisted default** — no app launch may put the fans under fixed-RPM control on its own. (`StartupPolicy` can only ever produce a curve; unit-tested.)
+   - A user who has never chosen a mode starts in the **Balanced curve**, not Auto (owner decision, 2026-07-25). Auto is macOS's own policy — let it get hot, then spin hard — which is what people install this app to avoid. An **explicit** Auto choice is recorded and honoured forever; "never chose" and "chose Auto" are deliberately distinct states, because conflating them made a default override the user on every launch.
 5. Never modify code-signing settings, team IDs, or entitlements without asking. Never commit certificates, notary credentials, or private keys. Never run `sudo`, installers, or `sfltool` yourself — hand those commands to the owner.
 6. Don't copy code from GPL projects (smcFanControl). MIT-licensed references (Stats, SMCKit, agoodkind/macos-smc-fan) may inform the approach; write our own implementation and attribute inspirations in `docs/CREDITS.md`.
 7. **The Xcode project is GENERATED**: edit `project.yml` and run `xcodegen generate` — never change build settings, schemes, or file membership in the Xcode GUI (wiped on regeneration). The signing team lives only in gitignored `Configs/Local.xcconfig`.

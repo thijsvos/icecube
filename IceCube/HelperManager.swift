@@ -186,6 +186,10 @@ final class HelperManager {
         }
         lastAppliedConfig = nil
         UserDefaults.standard.removeObject(forKey: Self.lastCurveKey)
+        // Turning the feature off is a clean slate, not a pause. Leaving a
+        // preference behind would mean re-enabling later silently resurrects a
+        // curve from a session the user has long forgotten.
+        UserDefaults.standard.removeObject(forKey: Self.preferenceKey)
 
         client.disconnect()
         do {
@@ -261,6 +265,8 @@ final class HelperManager {
     private(set) var lastAppliedConfig: FanConfig?
 
     private static let lastCurveKey = "lastCurveConfig"
+    /// The user's last deliberate mode choice. See ``storedPreference()``.
+    private static let preferenceKey = "startupPreference"
     /// Guards the once-per-session auto-resume of the last curve on launch.
     @ObservationIgnored private var didAutoResume = false
 
@@ -279,6 +285,7 @@ final class HelperManager {
         // user would get fan control they never successfully engaged, resumed
         // without any interaction, after being shown an error saying it failed.
         guard applied else { return }
+        rememberPreference(for: config)
         let defaults = UserDefaults.standard
         if config.mode == .curve, let data = try? JSONEncoder().encode(config) {
             defaults.set(data, forKey: Self.lastCurveKey)
@@ -319,6 +326,9 @@ final class HelperManager {
             try await self.client.setAllAuto()
             self.lastAppliedConfig = .auto
         }
+        // A deliberate choice, and recorded as one: the next launch must leave
+        // the fans to macOS rather than "helpfully" restoring a curve.
+        rememberPreference(for: .auto)
         UserDefaults.standard.removeObject(forKey: Self.lastCurveKey)
     }
 
@@ -332,15 +342,64 @@ final class HelperManager {
         return config
     }
 
-    /// Once per session, on the first connection: if the daemon is idle in auto
-    /// and we saved a curve, resume it so opening Ice Cube starts cooling instead
-    /// of leaving the machine on macOS's quiet auto behavior. The APPLY is
-    /// deliberately once-only; keeping the highlight in sync is `reconcileHighlight`.
+    /// Once per session, on the first connection: put the fans into whatever
+    /// the user last chose — or, if they have never chosen, a Balanced curve
+    /// rather than macOS's Automatic.
+    ///
+    /// Automatic is not a neutral starting point. It is macOS's own policy,
+    /// which lets the machine get hot and then spins the fans hard; nobody
+    /// installs a fan-control app to get that. So absence of a preference now
+    /// means "give them the point of the app", not "do nothing".
+    ///
+    /// The apply is deliberately once-only, and `StartupPolicy` refuses to
+    /// touch anything the daemon is already enforcing — a curve resumed at
+    /// boot, or manual control in active use. Keeping the highlight in step
+    /// afterwards is `reconcileHighlight`.
     private func autoResumeIfNeeded() async {
-        guard !didAutoResume, status != nil else { return }
+        guard !didAutoResume, let status else { return }
         didAutoResume = true
-        guard status?.mode == .auto, let stored = storedCurveConfig() else { return }
-        await apply(stored)
+        let decision = StartupPolicy.decide(
+            daemonMode: status.mode,
+            preference: storedPreference(),
+            storedCurve: storedCurveConfig(),
+            fallback: Self.defaultStartupCurve
+        )
+        guard case let .apply(config) = decision else { return }
+        log.notice("startup: applying \(config.mode.rawValue, privacy: .public) config")
+        await apply(config)
+    }
+
+    /// The curve a user who has never chosen gets. Balanced by name and by
+    /// intent: quieter than macOS at idle, and ramping before the die is hot
+    /// rather than after.
+    static let defaultStartupCurve = FanCurve.balanced
+
+    /// What the user last deliberately selected, or `nil` if they never have.
+    ///
+    /// Stored separately from the curve itself because deleting the curve is
+    /// how "Automatic" used to be recorded, which made a deliberate Automatic
+    /// indistinguishable from a fresh install.
+    private func storedPreference() -> StartupPolicy.Preference? {
+        UserDefaults.standard.string(forKey: Self.preferenceKey)
+            .flatMap(StartupPolicy.Preference.init(rawValue:))
+    }
+
+    /// Records a deliberate choice. Manual is not a startup mode — it is
+    /// watchdogged and must never be what an app launch puts you in — so it
+    /// leaves the stored preference untouched.
+    private func rememberPreference(for config: FanConfig) {
+        switch config.mode {
+        case .curve:
+            UserDefaults.standard.set(
+                StartupPolicy.Preference.curve.rawValue, forKey: Self.preferenceKey
+            )
+        case .auto:
+            UserDefaults.standard.set(
+                StartupPolicy.Preference.automatic.rawValue, forKey: Self.preferenceKey
+            )
+        case .manual:
+            break
+        }
     }
 
     /// Keep the active-preset highlight in step with the mode the daemon is
