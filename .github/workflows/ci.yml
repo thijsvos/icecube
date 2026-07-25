@@ -1,6 +1,8 @@
-# CI for Ice Cube. The repo is local-only right now — this workflow activates
-# automatically on the first push to GitHub. Builds unsigned (no Local.xcconfig
-# on CI), runs the IceCubeKit unit tests, and verifies the app bundle layout.
+# CI for Ice Cube. Builds unsigned (no Local.xcconfig on CI), runs the
+# IceCubeKit unit tests, lints, and verifies the app bundle — including the
+# capability boundary that keeps the SMC writer out of the app binary.
+#
+# CI has no fans and no root: everything here must pass on a bare runner.
 name: CI
 
 on:
@@ -8,25 +10,53 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+# A rapid series of pushes should not queue N full builds; keep the newest.
+# `main` is exempt so every landed commit gets a real result.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
 
 jobs:
   build-and-test:
     runs-on: macos-26
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
-      # The runner image's default Xcode may lag the 26.6 this project is
-      # developed with. If this exact path ever disappears from the image,
-      # list the installed versions with `ls /Applications | grep Xcode` and
-      # pick the closest 26.x.
-      - name: Select Xcode 26.6
-        run: sudo xcode-select -s /Applications/Xcode_26.6.app
+      # Pick the newest installed Xcode 26.x rather than pinning an exact
+      # path: runner images retire point releases without notice, and a hard
+      # path turns that into a red build with a misleading error.
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          latest=$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort -V | tail -1)
+          if [ -z "$latest" ]; then
+            echo "No Xcode 26.x on this image; available:" >&2
+            find /Applications -maxdepth 1 -name 'Xcode*.app' >&2 || true
+            exit 1
+          fi
+          echo "Using $latest"
+          sudo xcode-select -s "$latest"
+          xcodebuild -version
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
+      - name: Install tools
+        run: brew install xcodegen swiftformat
 
       - name: Generate Xcode project
         run: xcodegen generate
+
+      # Lint before building: a formatting failure should not cost a full
+      # compile to discover.
+      - name: Lint
+        run: swiftformat --lint .
+
+      - name: Run IceCubeKit tests
+        run: cd IceCubeKit && swift test
 
       - name: Build app (unsigned)
         run: >
@@ -34,8 +64,33 @@ jobs:
           -configuration Debug -derivedDataPath build
           build CODE_SIGNING_ALLOWED=NO
 
-      - name: Run IceCubeKit tests
-        run: cd IceCubeKit && swift test
-
-      - name: Verify bundle layout
+      # Layout + the capability boundary (app must link no SMC writer).
+      - name: Verify bundle
         run: sh scripts/verify-bundle.sh
+
+      # Simulated mode is a hard project rule: every feature must be
+      # demonstrable with no root, no helper and no real SMC. If the app
+      # cannot even stay up under ICECUBE_SIMULATED=1, that rule is broken.
+      - name: Smoke-test simulated mode
+        run: |
+          set -euo pipefail
+          APP="build/Build/Products/Debug/Ice Cube.app/Contents/MacOS/Ice Cube"
+          ICECUBE_SIMULATED=1 "$APP" > /tmp/icecube-sim.log 2>&1 &
+          pid=$!
+          sleep 15
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "ok: simulated mode ran for 15s without exiting"
+            kill "$pid" || true
+          else
+            echo "FAIL: app exited under ICECUBE_SIMULATED=1" >&2
+            cat /tmp/icecube-sim.log >&2
+            exit 1
+          fi
+
+      - name: Upload simulated-mode log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulated-mode-log
+          path: /tmp/icecube-sim.log
+          if-no-files-found: ignore

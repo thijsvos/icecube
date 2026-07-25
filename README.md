@@ -1,5 +1,10 @@
 # Ice Cube
 
+[![CI](https://github.com/thijsvos/icecube/actions/workflows/ci.yml/badge.svg)](https://github.com/thijsvos/icecube/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+![Platform: macOS 14+](https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey)
+![Apple Silicon](https://img.shields.io/badge/arch-Apple%20Silicon-black)
+
 An open-source menu-bar fan controller and thermal monitor for **Apple Silicon
 MacBooks**. Live stacked temperature/RPM charts, a draggable fan-curve editor,
 one-click presets — built on a hardened privilege split: the app only ever
@@ -61,8 +66,16 @@ directions. The app itself contains **no fan-write code at all**.
 
 ## Install
 
-Ice Cube is not in the App Store (sandboxed apps cannot touch the SMC) and
-release builds are not yet notarized. Building from source:
+Ice Cube is not in the App Store (sandboxed apps cannot touch the SMC).
+
+**Building from source is the recommended path, and currently the only one
+that gives you fan control.** Prebuilt archives on the
+[Releases](https://github.com/thijsvos/icecube/releases) page are unsigned
+until the project moves to a paid Apple Developer account: macOS will quarantine
+them, and — more importantly — the root helper will only register on a Mac that
+trusts the identity that signed it, which in practice is the machine that built
+it. Downloaded builds therefore give you **monitoring only**. Building from
+source signs with your own Apple ID (a free one works) and everything runs.
 
 ```bash
 git clone https://github.com/thijsvos/icecube && cd icecube

@@ -1,0 +1,254 @@
+# Release automation for Ice Cube.
+#
+# TWO MODES, chosen automatically by whether the signing secrets exist:
+#
+#   * Developer ID present  -> signed, notarized, stapled .dmg
+#   * Developer ID absent   -> unsigned .zip, clearly labelled as such
+#
+# The second mode is the current reality: the project is developed on a free
+# Apple ID, which cannot notarize. Rather than failing every tag until that
+# changes, this workflow produces the same artifact the interim process in
+# docs/RELEASING.md produces by hand, and says plainly in the release notes
+# that it is unsigned. Add the secrets below and the signed path switches on
+# with no edit to this file.
+#
+# Secrets (Settings -> Secrets and variables -> Actions):
+#   DEVELOPER_ID_CERT_P12        base64 of the Developer ID Application .p12
+#   DEVELOPER_ID_CERT_PASSWORD   its export password
+#   DEVELOPER_ID_TEAM_ID         10-character team ID
+#   NOTARY_KEY_P8                base64 of the App Store Connect .p8 key
+#   NOTARY_KEY_ID                the key's ID
+#   NOTARY_ISSUER_ID             the issuer UUID
+#
+# Everything lands as a DRAFT release: nothing is published without a human
+# reading the notes and pressing the button.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          latest=$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort -V | tail -1)
+          [ -n "$latest" ] || { echo "No Xcode 26.x on this image" >&2; exit 1; }
+          sudo xcode-select -s "$latest"
+
+      - name: Install tools
+        run: brew install xcodegen swiftformat
+
+      # A tag that disagrees with the bundle version ships a build labelled
+      # one thing and reporting another, which makes every future bug report
+      # ambiguous. Cheapest possible guard, run before anything expensive.
+      - name: Check tag matches CFBundleShortVersionString
+        id: version
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          version="${tag#v}"
+          plist_version=$(grep -E 'CFBundleShortVersionString:' project.yml \
+            | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "tag=$tag"           >> "$GITHUB_OUTPUT"
+          echo "version=$version"   >> "$GITHUB_OUTPUT"
+          if [ "$version" != "$plist_version" ]; then
+            echo "FAIL: tag '$tag' implies version '$version', but project.yml" >&2
+            echo "      declares CFBundleShortVersionString '$plist_version'." >&2
+            echo "      Bump project.yml (see docs/RELEASING.md) or retag." >&2
+            exit 1
+          fi
+          echo "ok: $tag matches project.yml version $plist_version"
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      # Release gates. A tagged build that skips these is how a broken release
+      # gets published at 2am.
+      - name: Lint
+        run: swiftformat --lint .
+
+      - name: Run IceCubeKit tests
+        run: cd IceCubeKit && swift test
+
+      - name: Detect signing capability
+        id: signing
+        env:
+          CERT: ${{ secrets.DEVELOPER_ID_CERT_P12 }}
+          NOTARY: ${{ secrets.NOTARY_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          if [ -n "${CERT:-}" ] && [ -n "${NOTARY:-}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "Developer ID secrets present — building a signed, notarized DMG."
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "No Developer ID secrets — building an UNSIGNED zip (see docs/RELEASING.md)."
+          fi
+
+      # ---------------------------------------------------------------- signed
+
+      - name: Import Developer ID certificate
+        if: steps.signing.outputs.available == 'true'
+        env:
+          CERT_P12: ${{ secrets.DEVELOPER_ID_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.DEVELOPER_ID_CERT_PASSWORD }}
+          TEAM_ID: ${{ secrets.DEVELOPER_ID_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          # A throwaway keychain, unlocked only for this job.
+          KEYCHAIN=$RUNNER_TEMP/build.keychain
+          KEYCHAIN_PASSWORD=$(uuidgen)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          # Prepend ours while keeping the existing search list. Word splitting
+          # is deliberate here: each keychain must arrive as its own argument.
+          # shellcheck disable=SC2046
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12"
+          # The team lives in the gitignored xcconfig locally; recreate it here.
+          sh scripts/set-team.sh "$TEAM_ID"
+
+      - name: Build signed Release
+        if: steps.signing.outputs.available == 'true'
+        run: |
+          set -euo pipefail
+          xcodebuild -project IceCube.xcodeproj -scheme IceCube \
+            -configuration Release -derivedDataPath build build \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Developer ID Application"
+
+      - name: Verify bundle
+        if: steps.signing.outputs.available == 'true'
+        run: sh scripts/verify-bundle.sh "build/Build/Products/Release/Ice Cube.app"
+
+      - name: Notarize and staple
+        if: steps.signing.outputs.available == 'true'
+        env:
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          APP="build/Build/Products/Release/Ice Cube.app"
+          echo "$NOTARY_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          # notarytool takes a zip; the DMG is built from the STAPLED app after.
+          ditto -c -k --keepParent "$APP" "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --key "$RUNNER_TEMP/notary.p8" \
+            --key-id "$NOTARY_KEY_ID" \
+            --issuer "$NOTARY_ISSUER_ID" \
+            --wait
+          xcrun stapler staple "$APP"
+          xcrun stapler validate "$APP"
+          rm -f "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/notarize.zip"
+
+      - name: Package DMG
+        if: steps.signing.outputs.available == 'true'
+        run: |
+          set -euo pipefail
+          V="${{ steps.version.outputs.version }}"
+          STAGE=$RUNNER_TEMP/dmg
+          mkdir -p "$STAGE"
+          cp -R "build/Build/Products/Release/Ice Cube.app" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          hdiutil create -volname "Ice Cube $V" -srcfolder "$STAGE" \
+            -ov -format UDZO "Ice-Cube-$V.dmg"
+          shasum -a 256 "Ice-Cube-$V.dmg" | tee "Ice-Cube-$V.dmg.sha256"
+
+      # -------------------------------------------------------------- unsigned
+
+      - name: Build unsigned Release
+        if: steps.signing.outputs.available != 'true'
+        run: >
+          xcodebuild -project IceCube.xcodeproj -scheme IceCube
+          -configuration Release -derivedDataPath build
+          build CODE_SIGNING_ALLOWED=NO
+
+      - name: Verify bundle (unsigned)
+        if: steps.signing.outputs.available != 'true'
+        run: sh scripts/verify-bundle.sh "build/Build/Products/Release/Ice Cube.app"
+
+      - name: Package zip
+        if: steps.signing.outputs.available != 'true'
+        run: |
+          set -euo pipefail
+          V="${{ steps.version.outputs.version }}"
+          ditto -c -k --keepParent "build/Build/Products/Release/Ice Cube.app" \
+            "Ice-Cube-$V-unsigned.zip"
+          shasum -a 256 "Ice-Cube-$V-unsigned.zip" | tee "Ice-Cube-$V-unsigned.zip.sha256"
+
+      # ----------------------------------------------------------------- draft
+
+      - name: Compose release notes
+        id: notes
+        run: |
+          set -euo pipefail
+          V="${{ steps.version.outputs.version }}"
+          {
+            echo "## Ice Cube $V"
+            echo
+            if [ "${{ steps.signing.outputs.available }}" = "true" ]; then
+              echo "Signed with Developer ID, notarized and stapled. Open the DMG"
+              echo "and drag Ice Cube to Applications."
+            else
+              echo "> **This build is UNSIGNED and NOT notarized.**"
+              echo ">"
+              echo "> macOS Gatekeeper will refuse it until you clear quarantine:"
+              echo "> \`xattr -dr com.apple.quarantine \"/Applications/Ice Cube.app\"\`"
+              echo ">"
+              echo "> Helper registration (fan control) will only work on a Mac that"
+              echo "> trusts the signing identity — in practice the machine that built"
+              echo "> it. **For fan control on your own Mac, build from source**"
+              echo "> (see the README). Monitoring works either way."
+            fi
+            echo
+            echo "### Safety"
+            echo
+            echo "Fan control is enforced daemon-side: writes are clamped to the"
+            echo "firmware-reported range, a debounced temperature ceiling overrides"
+            echo "any user setting, and manual mode reverts to automatic if the app"
+            echo "stops heartbeating for 15 s."
+            echo
+            echo "### Changes"
+            echo
+            git log --pretty='- %s' "$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)..HEAD" \
+              | grep -vE '^- (chore|ci):' || echo "- Initial release"
+          } > RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Ice Cube ${{ steps.version.outputs.version }}
+          body_path: RELEASE_NOTES.md
+          draft: true
+          prerelease: ${{ steps.signing.outputs.available != 'true' }}
+          files: |
+            Ice-Cube-*.dmg
+            Ice-Cube-*.zip
+            Ice-Cube-*.sha256

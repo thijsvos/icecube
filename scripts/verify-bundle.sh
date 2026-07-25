@@ -35,11 +35,48 @@ else
     fail=1
 fi
 
+# THE CAPABILITY BOUNDARY. The app must contain no SMC writer, ever.
+#
+# This used to be guaranteed by file layout: the only writer, SMCWritePort,
+# lived in the helper target and nothing else did. Since DaemonCore moved into
+# IceCubeKit (which the app links) so its safety logic could be unit-tested,
+# layout alone no longer proves it — the orchestration is in the app binary and
+# only the concrete writer is not. That makes this check the actual guarantee,
+# and it is one careless `import` away from silently regressing.
+APP_BIN="$APP/Contents/MacOS/Ice Cube"
+HELPER_BIN="$APP/$HELPER_REL"
+
+if [ -f "$APP_BIN" ]; then
+    writers=$(nm -a "$APP_BIN" 2>/dev/null | grep -c "SMCWritePort" || true)
+    if [ "$writers" -eq 0 ]; then
+        echo "ok: app binary contains no SMC writer"
+    else
+        echo "FAIL: app binary references SMCWritePort ($writers symbols)" >&2
+        echo "      The unprivileged app must never link a writer. Something moved" >&2
+        echo "      SMCWritePort (or a copy of it) out of the IceCubeHelper target." >&2
+        fail=1
+    fi
+else
+    echo "FAIL: app binary missing at Contents/MacOS/Ice Cube" >&2
+    fail=1
+fi
+
+# And the converse: the helper must actually have one, or fan control is dead.
+if [ -f "$HELPER_BIN" ]; then
+    if [ "$(nm -a "$HELPER_BIN" 2>/dev/null | grep -c "SMCWritePort" || true)" -gt 0 ]; then
+        echo "ok: helper binary contains the SMC writer"
+    else
+        echo "FAIL: helper binary has no SMCWritePort — fan control cannot work" >&2
+        fail=1
+    fi
+fi
+
 if [ "$fail" -ne 0 ]; then
     echo "" >&2
-    echo "Bundle layout is wrong — SMAppService registration would fail at runtime." >&2
-    echo "Check the copyFiles build phases in project.yml, then 'xcodegen generate' and rebuild." >&2
+    echo "Bundle verification failed — see the messages above." >&2
+    echo "Layout problems: check the copyFiles build phases in project.yml, then" >&2
+    echo "'xcodegen generate' and rebuild. Boundary problems are a code change." >&2
     exit 1
 fi
 
-echo "Bundle layout verified: $APP"
+echo "Bundle verified: $APP"
