@@ -482,6 +482,9 @@ final class HelperManager {
         // and deserves its own repair. Resetting only here — never on a failed
         // attempt — is what stops a service that cannot start from being
         // reinstalled every 20 s forever.
+        if hasSelfHealed {
+            log.notice("self-heal: recovered")
+        }
         unreachableSince = nil
         hasSelfHealed = false
         client.heartbeat()
@@ -528,13 +531,13 @@ final class HelperManager {
         log.notice("self-heal: reinstalling background service — \(reason, privacy: .public)")
         await reregister()
         unreachableSince = nil
-        if case .connected = connection {
-            log.notice("self-heal: recovered")
-        } else {
-            // Left for the user with a button, since we have now tried and
-            // failed and something beyond our reach is wrong.
-            log.error("self-heal: did not recover; leaving it to the user")
-        }
+        // No verdict here. `reregister()` returns once launchd has accepted the
+        // job, but the version handshake only completes on a LATER maintain
+        // pass — so `connection` is still `.disconnected` at this instant and
+        // checking it reported a repair that had in fact worked as a failure.
+        // The connected branch in `maintain()` reports recovery instead; if it
+        // never runs, the setup window's `.connectionStuck` step offers the
+        // manual button.
     }
 
     private func refreshStatus() async {

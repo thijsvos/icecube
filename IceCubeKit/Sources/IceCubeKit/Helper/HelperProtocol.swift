@@ -28,7 +28,11 @@ public enum HelperConstants {
     ///     silently keeps talking to a daemon that never sends it, and the
     ///     preset highlight it fixes stays broken for everyone who upgrades.
     ///     "It still decodes" is not the bar; "the user gets the fix" is.
-    public static let protocolVersion = "5"
+    /// v6: the daemon keeps its sensor-key cache across a hand-back to macOS,
+    ///     and retries a failed temperature read in place instead of skipping
+    ///     a tick. Behaviour only — but it is the difference between taking
+    ///     control instantly and taking up to 6 s, so users need the new one.
+    public static let protocolVersion = "6"
     /// How often the app sends a heartbeat while connected.
     public static let heartbeatInterval: TimeInterval = 5
     /// SAFETY: no heartbeat for this long → the daemon's watchdog reverts to

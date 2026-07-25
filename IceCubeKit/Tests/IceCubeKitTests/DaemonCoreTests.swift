@@ -441,6 +441,56 @@ struct DaemonCoreTickTests {
         #expect(reprobes.isEmpty, "permanently-dead keys are not a health event: \(reprobes)")
     }
 
+    /// The latency the user felt as "macOS → a curve is slow, but curve →
+    /// curve is instant". Handing back to macOS resets the SMC connection; if
+    /// that also discarded the sensor keys, the very next curve engage had to
+    /// re-discover ~20 keys on a cold connection before it could compute one
+    /// target — and skipped to the next 2 s tick if any of it failed.
+    @Test("Handing back to macOS does not force a sensor re-probe")
+    func revertKeepsSensorKeys() async throws {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(curveConfig(persists: false))
+        let afterFirst = await core.currentStatus().recentEvents
+            .filter { $0.hasPrefix("resolved") }.count
+        #expect(afterFirst >= 1, "the first engage resolves sensors")
+
+        // Hand back to macOS (resets the port), then take control again.
+        await core.setAllAuto()
+        await core.heartbeat()
+        try await core.apply(curveConfig(persists: false))
+
+        let afterSecond = await core.currentStatus().recentEvents
+            .filter { $0.hasPrefix("resolved") }.count
+        #expect(
+            afterSecond == afterFirst,
+            "re-engaging after a hand-back must reuse the cached keys, not re-probe"
+        )
+    }
+
+    /// One unlucky read on a just-reopened connection must not cost a whole
+    /// tick — that is a 2 s stall at the exact moment the user is watching.
+    @Test("A single failed temperature read does not delay taking control")
+    func transientReadDoesNotSkipTheEngage() async throws {
+        let smc = FakeSMC(temperature: 70)
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(curveConfig(persists: false))
+        await smc.clearWrites()
+
+        // Both sensors miss once; the retry inside the tick should still engage.
+        await smc.breakRead("Tp01")
+        await smc.breakRead("Tg0f")
+        Task {
+            try? await Task.sleep(for: .milliseconds(10))
+            await smc.fixRead("Tp01")
+            await smc.fixRead("Tg0f")
+        }
+        await core.tick(sleptFor: .zero)
+        #expect(await core.config.mode == .curve, "must not have reverted")
+    }
+
     /// A probe that finds only non-die sensors is unusable, not an answer.
     /// `hottestDieCelsius` is what BOTH the curve and the guardian run on, so a
     /// set of battery/airflow sensors leaves the daemon unable to control or

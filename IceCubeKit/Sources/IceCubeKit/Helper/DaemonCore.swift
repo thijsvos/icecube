@@ -194,15 +194,26 @@ public actor DaemonCore {
         await body()
     }
 
-    /// Drops the SMC connection **and** the sensor-key cache together.
+    /// Drops the SMC connection so `thermalmonitord` will take the fans back.
     ///
-    /// These two must always move as a pair: `port.reset()` empties the port's
-    /// key-info cache and closes the connection, so keys resolved against the
-    /// old connection are no longer known-good. Resetting the port alone let a
-    /// stale (or empty) `sensorKeys` outlive the connection it was probed on.
+    /// The sensor-key cache is deliberately KEPT. Which `T***` keys this Mac
+    /// has is a property of the machine, not of the connection — an earlier
+    /// version cleared them here on the theory that keys resolved against a
+    /// closed connection were no longer trustworthy, which is simply not true,
+    /// and it made every hand-back to macOS re-probe ~20 keys on the next tick.
+    ///
+    /// That cost lands on the worst possible path: the user clicks macOS, then
+    /// picks a curve, and the curve tick has to re-discover every sensor on a
+    /// just-reopened connection before it can compute a single target — and
+    /// bails to the NEXT tick if any of that fails. Measured gaps from
+    /// "all fans auto" to "curve engaged" were 1s, 2s, 3s and 6s, which is
+    /// exactly the "instant sometimes, slow other times" the user reported.
+    ///
+    /// The case that motivated clearing — an unusable probe being cached
+    /// forever — is handled where it belongs: `readTemperatures()` refuses to
+    /// cache an empty or die-less result, so a bad probe never becomes state.
     private func resetPort() async {
         await port.reset()
-        sensorKeys = nil
     }
 
     public func apply(_ newConfig: FanConfig) async throws {
@@ -543,8 +554,13 @@ public actor DaemonCore {
         let generation = revertGeneration
         guard let fans = try? await readFans(), !fans.isEmpty else { return }
         // Sensor blindness is handled by the SafetyMonitor (revert after 3
-        // failed ticks) — a single missing reading just skips this tick.
-        guard let dieHot = await (try? readTemperatures())?.hottestDieCelsius else { return }
+        // failed ticks). A single missing reading used to skip this tick
+        // outright — a 2 second wait for a millisecond problem, and it landed
+        // precisely when the user was watching: `apply(.curve)` calls this
+        // immediately, on a connection that `resetPort()` just closed, so the
+        // first read after handing back to macOS is the one most likely to
+        // miss. Retrying in place turns that into an imperceptible pause.
+        guard let dieHot = await hottestDieRetrying() else { return }
 
         var targets: [Int: Double] = [:]
         for fan in fans {
@@ -813,6 +829,24 @@ public actor DaemonCore {
     /// flaky key is normal; a third of them vanishing is a connection problem.
     private var partialSensorFailureTolerance: Int {
         max(1, (sensorKeys?.count ?? 0) / 3)
+    }
+
+    /// The hottest die reading, retrying briefly rather than skipping a tick.
+    ///
+    /// Bounded deliberately: three quick attempts, not a loop. If the SMC is
+    /// genuinely unreachable the SafetyMonitor's sensor-failure rule must still
+    /// see failed ticks and revert — this exists to absorb a cold connection,
+    /// not to paper over a broken one.
+    private func hottestDieRetrying() async -> Double? {
+        for attempt in 0 ..< 3 {
+            if let die = await (try? readTemperatures())?.hottestDieCelsius {
+                return die
+            }
+            if attempt < 2 {
+                await sleep(.milliseconds(60))
+            }
+        }
+        return nil
     }
 
     /// Logs and appends to the bounded status event list.
