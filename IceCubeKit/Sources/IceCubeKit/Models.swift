@@ -266,6 +266,35 @@ public struct FanConfig: Sendable, Codable, Equatable {
 public struct Preset: Identifiable, Sendable, Codable, Equatable {
     public enum Kind: String, Sendable, Codable {
         case auto, quiet, balanced, cold, max, custom
+
+        /// What picking this actually does, in one sentence, for a tooltip.
+        ///
+        /// `auto` gets the longest explanation because it is the one people
+        /// misread. In a fan-control app "Auto" sounds like "the app manages
+        /// this for me"; it means the exact opposite — Ice Cube stops
+        /// controlling the fans and macOS takes over, which lets the machine
+        /// get considerably hotter before it spins them up. Someone who picks
+        /// it expecting smart automation concludes the app does nothing.
+        public var explanation: String {
+            switch self {
+            case .auto:
+                "Ice Cube stops controlling your fans and hands them back to macOS. "
+                    + "macOS lets the Mac get quite hot before speeding them up — pick a "
+                    + "curve below if you want Ice Cube to manage cooling for you."
+            case .quiet:
+                "Silent at idle. Fans only start climbing at 60 °C, full speed by 90 °C."
+            case .balanced:
+                "The all-rounder: airflow from 45 °C, full speed by 85 °C. "
+                    + "Cooler than macOS, quieter than Cold."
+            case .cold:
+                "As cool as the hardware allows, with a steady hum rather than "
+                    + "spikes — a strong constant speed at idle, full tilt above 80 °C."
+            case .max:
+                "Full speed, always. Loud, and only useful for sustained heavy work."
+            case .custom:
+                "Your own saved curve."
+            }
+        }
     }
 
     public let id: UUID

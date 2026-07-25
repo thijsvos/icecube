@@ -12,7 +12,11 @@ import os
 final class PresetStore {
     /// The four built-ins, in display order.
     static let builtins: [Preset] = [
-        Preset(name: "Auto", kind: .auto, config: .auto),
+        // Named for WHO is in control, not for what it sounds like it does.
+        // "Auto" in a fan-control app reads as "the app handles it"; this hands
+        // the fans back to macOS, which is the opposite, and users who picked
+        // it expecting automation concluded Ice Cube wasn't working.
+        Preset(name: "macOS", kind: .auto, config: .auto),
         Preset(name: "Quiet", kind: .quiet, config: .curve(.quiet)),
         Preset(name: "Balanced", kind: .balanced, config: .curve(.balanced)),
         Preset(name: "Cold", kind: .cold, config: .curve(.cold)),

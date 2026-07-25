@@ -26,7 +26,7 @@ dependencies**; small footprint is a design goal, not an accident.
 | Menu-bar popover with live stacked charts (CPU, GPU, per-fan RPM) | ✅ |
 | 1/5/15/60-min windows, pause, hover crosshair, min/avg/max | ✅ |
 | Fan-curve editor: drag points, double-click add, keyboard nudge, live marker | ✅ |
-| Presets: Auto · Quiet · Balanced · Cold · Max + your own | ✅ |
+| Presets: Quiet · Balanced · Cold · Max + your own (plus “macOS”, which hands the fans back) | ✅ |
 | Manual per-fan sliders (watchdogged, never persisted) | ✅ |
 | Curve keeps running at boot, app closed — daemon-side | ✅ |
 | Sensors browser (every SMC key, live) + JSON diagnostics export | ✅ |

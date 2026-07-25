@@ -135,8 +135,10 @@ struct FanControlSection: View {
             switch self {
             case .manual: "MANUAL fan control"
             case .curve: "Curve active"
-            case .guardianCooling: "Automatic · cooling"
-            case .automatic: "Automatic"
+            // Says who is driving. "Automatic" left people believing Ice Cube
+            // was managing cooling when it had handed the fans to macOS.
+            case .guardianCooling: "macOS · Ice Cube stepped in"
+            case .automatic: "macOS is controlling the fans"
             }
         }
 
@@ -197,6 +199,7 @@ struct FanControlSection: View {
                 }
                 .buttonStyle(.bordered)
                 .tint(isActivePreset(preset) ? Theme.accent : nil)
+                .help(preset.kind.explanation)
             }
             Spacer(minLength: 0)
         }
