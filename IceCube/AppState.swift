@@ -145,6 +145,17 @@ final class AppState {
     private var poller: SMCPoller
     /// The task consuming the polling stream; `nil` when stopped.
     @ObservationIgnored private var pollTask: Task<Void, Never>?
+
+    /// Whether this launch has already decided whether to show the setup window.
+    ///
+    /// Lives here, on state with the app's lifetime, because the check runs in a
+    /// `.task` on the MenuBarExtra **label** — a view AppKit tears down and
+    /// rebuilds whenever the scene graph changes. Opening or closing any other
+    /// window therefore restarted the task and re-ran the whole decision, so the
+    /// setup window would reappear unbidden minutes after launch (observed:
+    /// twice per launch, and again after closing the Sensors window). View-local
+    /// state cannot express "once per launch" when the view itself is transient.
+    @ObservationIgnored var hasEvaluatedSetupPrompt = false
     /// The in-flight chart re-render, cancelled when a newer one supersedes it.
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
 

@@ -28,6 +28,12 @@ final class SetupModel {
     /// When the approval step started, so a stall can be distinguished from
     /// someone simply reading.
     private var awaitingSince: Date?
+    /// True once a move to /Applications has been handed off to the relaunch.
+    ///
+    /// The window vanishing because we are relaunching is NOT the user
+    /// dismissing it — treating it as such would make the relocated copy
+    /// suppress the setup it is supposed to continue.
+    private(set) var isRelocating = false
 
     /// True once the user has been on the approval step long enough that they
     /// are evidently not finding the switch.
@@ -199,6 +205,7 @@ final class SetupModel {
                 try FileManager.default.moveItem(at: source, to: destination)
             }
             log.notice("relocated to \(destination.path, privacy: .public); relaunching")
+            isRelocating = true
             relaunch(from: destination)
         } catch {
             log.error("relocation failed: \(error.localizedDescription, privacy: .public)")

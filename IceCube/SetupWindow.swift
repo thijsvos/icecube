@@ -32,6 +32,16 @@ struct SetupWindowView: View {
         .frame(width: 460)
         .fixedSize(horizontal: false, vertical: true)
         .tint(Theme.accent)
+        // Closing with the title-bar button (or ⌘W) is a dismissal too. Only
+        // the Done/Not Now buttons used to record it, so someone who closed the
+        // window the ordinary way was offered it again on the next launch.
+        // Excludes the relocation relaunch: the window disappearing because we
+        // are restarting elsewhere is not the user saying no.
+        .onDisappear {
+            if model?.isRelocating != true {
+                hasDismissedSetup = true
+            }
+        }
         .task {
             if model == nil {
                 model = SetupModel(helper: state.helper)

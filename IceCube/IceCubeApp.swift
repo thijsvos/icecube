@@ -55,6 +55,13 @@ struct IceCubeApp: App {
             }
             .accessibilityLabel("Ice Cube, hottest sensor \(appState.hottestText)")
             .task {
+                // Exactly once per launch. This task restarts whenever AppKit
+                // rebuilds the menu-bar label, which happens on any scene
+                // change — so without this the window ambushed the user long
+                // after launch, e.g. on closing the Sensors window.
+                guard !appState.hasEvaluatedSetupPrompt else { return }
+                appState.hasEvaluatedSetupPrompt = true
+
                 // Two reasons to surface setup automatically, both cases the
                 // user cannot discover on their own in a menu-bar-only app:
                 //

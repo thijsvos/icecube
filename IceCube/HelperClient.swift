@@ -126,7 +126,19 @@ final class HelperClient {
         guard let connection else { throw NotConnected() }
         return try await withCheckedThrowingContinuation { continuation in
             let once = OnceResumer(continuation: continuation)
-            let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+            // `@Sendable`, like the invalidation and interruption handlers
+            // above — and for the same reason. XPC invokes this on an arbitrary
+            // dispatch queue, but this target uses MainActor DEFAULT isolation,
+            // so an unannotated closure is inferred MainActor-isolated. Swift's
+            // runtime then checks that assumption when the block actually runs
+            // and traps: `dispatch_assert_queue_fail` in
+            // `_swift_task_checkIsolatedSwift`, i.e. an instant crash on the XPC
+            // error path — every time the helper is unreachable, which is
+            // exactly when this handler exists to run.
+            //
+            // Release builds elide that check, so this looked fine there while
+            // being equally wrong; it took a Debug build to surface it.
+            let proxy = connection.remoteObjectProxyWithErrorHandler { @Sendable error in
                 once.resume(.failure(error))
             }
             guard let helper = proxy as? HelperProtocol else {
