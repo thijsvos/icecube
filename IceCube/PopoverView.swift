@@ -153,9 +153,22 @@ struct PopoverView: View {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(fan.name)
                     .font(.callout.weight(.medium))
+                // Beside the NAME, not the number. The number is right-aligned,
+                // so anything reserved next to it pushes the number left even
+                // when empty. Here the Spacer absorbs the hint appearing and
+                // disappearing, so the reading never moves — which is the rule
+                // this popover holds to: no reflow on data change.
+                if isRampingUp(fan) {
+                    Text("→ \(Int(fan.targetRPM))")
+                        .font(.caption2)
+                        .monospacedDigit()
+                        .foregroundStyle(Theme.accent)
+                        .transition(.opacity)
+                }
                 Spacer()
                 rpmReadout(fan)
             }
+            .animation(readingAnimation, value: isRampingUp(fan))
             FanSpeedBar(
                 fraction: normalizedSpeed(of: fan),
                 target: targetSpeed(of: fan),
@@ -171,9 +184,17 @@ struct PopoverView: View {
         return (fan.targetRPM / fan.maxRPM).clamped(to: 0 ... 1)
     }
 
-    /// How far a fan may trail its target before the readout says where it is
+    /// How far a fan may trail its target before the row says where it is
     /// heading. Below this, the gauge tick alone tells the story.
     private static let rampVisibleRPM: Double = 300
+
+    /// Whether this fan is still meaningfully short of its commanded speed.
+    ///
+    /// Only counts ramping UP: winding down is not something a user waits on,
+    /// and showing it would put a hint on screen most of the time for no gain.
+    private func isRampingUp(_ fan: Fan) -> Bool {
+        fan.targetRPM > 0 && fan.targetRPM - fan.actualRPM > Self.rampVisibleRPM
+    }
 
     /// The current RPM, prominent, with a quiet unit label, plus where the fan
     /// is heading while it is still getting there.
@@ -189,8 +210,7 @@ struct PopoverView: View {
     /// wind up. Without this the popover reads "0 RPM" while everything is in
     /// fact working, which is indistinguishable from broken.
     private func rpmReadout(_ fan: Fan) -> some View {
-        let heading = fan.targetRPM > 0 && abs(fan.targetRPM - fan.actualRPM) > Self.rampVisibleRPM
-        return HStack(spacing: 3) {
+        HStack(spacing: 3) {
             Text("\(Int(fan.actualRPM))")
                 .font(.callout.weight(.semibold))
                 .monospacedDigit()
@@ -198,12 +218,6 @@ struct PopoverView: View {
             Text("RPM")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
-            Text(heading ? "→ \(Int(fan.targetRPM))" : "")
-                .font(.caption2)
-                .monospacedDigit()
-                .foregroundStyle(Theme.accent)
-                .frame(width: 46, alignment: .leading)
-                .animation(readingAnimation, value: heading)
         }
         .animation(readingAnimation, value: Int(fan.actualRPM))
         .accessibilityElement(children: .combine)
