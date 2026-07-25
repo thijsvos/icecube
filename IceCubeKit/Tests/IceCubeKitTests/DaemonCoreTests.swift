@@ -18,7 +18,13 @@ private actor FakeSMC: SMCControlPort {
     /// Keys that throw on write, simulating firmware refusal.
     private var unwritable: Set<String> = []
 
-    init(fanCount: Int = 2, minRPM: Double = 2317, maxRPM: Double = 6800, temperature: Double = 55) {
+    /// - Parameter deadSensors: keys that EXIST but never return a plausible
+    ///   value — the shape a real Mac has, because a curated map is
+    ///   per-generation and any one machine populates only part of it.
+    init(
+        fanCount: Int = 2, minRPM: Double = 2317, maxRPM: Double = 6800,
+        temperature: Double = 55, deadSensors: [String] = []
+    ) {
         values["FNum"] = Double(fanCount)
         for i in 0 ..< fanCount {
             values["F\(i)Md"] = 3 // system-controlled
@@ -32,6 +38,9 @@ private actor FakeSMC: SMCControlPort {
         // so these tests do not depend on the host's hw.model.
         values["Tp01"] = temperature
         values["Tg0f"] = temperature - 5
+        for key in deadSensors {
+            values[key] = 0
+        } // present, but implausible
     }
 
     func hasKey(_ key: String) async -> Bool {
@@ -368,6 +377,37 @@ struct DaemonCoreTickTests {
 
         #expect(await smc.modeWrites(fan: 0).contains(1), "manual mode re-asserted after wake")
         #expect(await core.config.mode == .manual)
+    }
+
+    /// Caught on real hardware (Mac14,9): the curated M2 map lists 20 keys, but
+    /// this machine populates only 12 — the other 8 exist and read 0. Admitting
+    /// on `hasKey` alone let those in, and the partial-failure check then saw 8
+    /// unreadable members every tick and re-probed forever, re-admitting the
+    /// same dead keys each time. ~40 extra SMC calls per tick, permanently.
+    @Test("Sensors that exist but never read plausibly are excluded once, not re-probed forever")
+    func deadSensorsDoNotCauseReprobeLoop() async throws {
+        let dead = ["Tp0X", "Tp0b", "Tp0f", "Tp0j", "Tp1h", "Tp1t", "Tp1p", "Tp1l"]
+        let smc = FakeSMC(deadSensors: dead)
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(manualConfig())
+
+        // Let discovery settle, then count how often it re-runs.
+        await core.tick(sleptFor: .zero)
+        let discoveriesAfterFirst = await core.currentStatus().recentEvents
+            .filter { $0.hasPrefix("resolved") }.count
+        for _ in 0 ..< 5 {
+            await core.heartbeat()
+            await core.tick(sleptFor: .zero)
+        }
+        let discoveriesLater = await core.currentStatus().recentEvents
+            .filter { $0.hasPrefix("resolved") }.count
+        #expect(
+            discoveriesLater == discoveriesAfterFirst,
+            "discovery must not re-run once the set is settled (ran \(discoveriesLater - discoveriesAfterFirst) extra times)"
+        )
+        let reprobes = await core.currentStatus().recentEvents.filter { $0.contains("unreadable") }
+        #expect(reprobes.isEmpty, "permanently-dead keys are not a health event: \(reprobes)")
     }
 
     /// C7: an empty sensor probe is "unresolved", not "this Mac has no sensors".

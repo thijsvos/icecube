@@ -696,8 +696,22 @@ public actor DaemonCore {
             let model = HostInfo.modelIdentifier()
             let candidates = SMCKeyMaps.curatedSensors(forModel: model)
                 ?? SMCKeyMaps.fallbackCandidateSensors
+            // Admission requires a plausible first READ, not mere existence —
+            // the same rule SystemSMCProvider.sensorDescriptors() uses, and for
+            // the same reason. A curated map is per *generation*, but a given
+            // machine populates only part of it (an M2 Pro has fewer P-cores
+            // than an M2 Max, most laptops have one battery). Those keys exist,
+            // so `hasKey` admits them, but they never return a real temperature.
+            //
+            // Admitting them was harmless while nothing counted them. Once the
+            // partial-failure check below started treating an unreadable member
+            // as a health signal, 8 of 20 permanently-dead keys tripped it on
+            // every tick: re-probe, re-admit the same dead keys, trip again —
+            // a loop that re-ran discovery ~40 SMC calls a tick, forever.
             var present: [String] = []
-            for sensor in candidates where await port.hasKey(sensor.key) {
+            for sensor in candidates {
+                guard let value = try? await port.readDouble(sensor.key),
+                      SMCKeyMaps.isPlausibleTemperature(value) else { continue }
                 present.append(sensor.key)
             }
             // SAFETY: an EMPTY probe is "unresolved", not "this Mac has no
@@ -716,6 +730,11 @@ public actor DaemonCore {
         var readings: [SensorReading] = []
         var missing: [String] = []
         for key in sensorKeys ?? [] {
+            // Only a genuine READ FAILURE counts as missing. A member that
+            // reads an implausible value has glitched for this tick, not gone
+            // away: it stays in the set and is picked up again when it
+            // recovers. Re-probing would not fix a glitch and, before the
+            // admission rule above, guaranteed an infinite re-probe loop.
             guard let value = try? await port.readDouble(key) else {
                 missing.append(key)
                 continue
@@ -732,9 +751,10 @@ public actor DaemonCore {
             }
             if SMCKeyMaps.isPlausibleTemperature(value) {
                 readings.append(SensorReading(key: key, label: key, celsius: value))
-            } else {
-                missing.append(key)
             }
+            // else: a one-tick glitch on an admitted sensor. Skipped for this
+            // evaluation, kept in the set — NOT counted as missing, or a single
+            // flapping sensor would re-probe the whole map every couple of ticks.
         }
         guard !readings.isEmpty else {
             throw IceCubeError.smcKeyNotFound(key: "T***")
