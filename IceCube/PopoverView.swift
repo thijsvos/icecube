@@ -212,6 +212,22 @@ struct PopoverView: View {
             && fan.targetRPM - fan.actualRPM > Self.rampVisibleRPM
     }
 
+    /// Whether this fan is commanded but not yet reporting motion.
+    ///
+    /// Measured on a Mac14,9 at 5 samples/s: a stopped fan given a target reads
+    /// EXACTLY 0 RPM for ~1.5 s before the tachometer shows anything, then
+    /// climbs to speed over another ~3 s. The whole ramp is firmware-paced —
+    /// driving the fan at 6800 instead of 4250 produced an identical curve
+    /// (295/573/839/1731…) and an identical dead time, so it cannot be made
+    /// faster from here.
+    ///
+    /// What it CAN do is stop lying about it. "0 RPM" during that window says
+    /// nothing is happening when the fan is in fact starting, which is exactly
+    /// when someone concludes the app is broken and switches back.
+    private func isStarting(_ fan: Fan) -> Bool {
+        fan.mode == .forced && fan.targetRPM > fan.minRPM && fan.actualRPM < 100
+    }
+
     /// The current RPM, prominent, with a quiet unit label, plus where the fan
     /// is heading while it is still getting there.
     ///
@@ -227,13 +243,19 @@ struct PopoverView: View {
     /// fact working, which is indistinguishable from broken.
     private func rpmReadout(_ fan: Fan) -> some View {
         HStack(spacing: 3) {
-            Text("\(Int(fan.actualRPM))")
-                .font(.callout.weight(.semibold))
-                .monospacedDigit()
-                .contentTransition(.numericText())
-            Text("RPM")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+            if isStarting(fan) {
+                Text("starting…")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(Theme.accent)
+            } else {
+                Text("\(Int(fan.actualRPM))")
+                    .font(.callout.weight(.semibold))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                Text("RPM")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
         }
         .animation(readingAnimation, value: Int(fan.actualRPM))
         .accessibilityElement(children: .combine)

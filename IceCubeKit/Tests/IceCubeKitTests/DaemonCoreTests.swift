@@ -491,6 +491,46 @@ struct DaemonCoreTickTests {
         #expect(await core.config.mode == .curve, "must not have reverted")
     }
 
+    /// What does the first engage after a hand-back actually command? A fresh CurveFollower is documented to start at
+    /// full demand
+    /// ("first tick: start at demand, no artificial ramp-up"), so taking a
+    /// curve straight from macOS should command the curve's answer for the
+    /// CURRENT die temperature — not a ramped-up fraction of it.
+    @Test("First engage after a hand-back commands the curve's full demand")
+    func firstEngageAfterRevertIsFullDemand() async throws {
+        let smc = FakeSMC(temperature: 70) // warm: Balanced wants a lot of air
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(curveConfig(persists: false))
+        let firstRun = await smc.writes.filter { $0.key == "F0Tg" }.map(\.value)
+        await core.setAllAuto()
+        await smc.clearWrites()
+
+        // Straight back into the curve, exactly as clicking macOS then Balanced.
+        await core.heartbeat()
+        try await core.apply(curveConfig(persists: false))
+        let afterRevert = await smc.writes.filter { $0.key == "F0Tg" }.map(\.value)
+
+        // Balanced at 70 C: fraction 0.5 + half way to 0.75 => ~0.625
+        // target ~= 2317 + 0.625 * 4483 = 5119, quantized to 50 => ~5100
+        let expected = FanWriteSequencer.quantizedTarget(
+            fraction: FanCurve.balanced.fraction(at: 70),
+            fan: Fan(
+                id: 0,
+                name: "L",
+                mode: .forced,
+                actualRPM: 0,
+                targetRPM: 0,
+                minRPM: 2317,
+                maxRPM: 6800
+            )
+        )
+        #expect(firstRun.first == expected)
+        // Taking a curve straight from macOS must command the same full demand
+        // as any other engage — no ramp, no reduced first step.
+        #expect(afterRevert.first == expected)
+    }
+
     /// A probe that finds only non-die sensors is unusable, not an answer.
     /// `hottestDieCelsius` is what BOTH the curve and the guardian run on, so a
     /// set of battery/airflow sensors leaves the daemon unable to control or

@@ -32,7 +32,13 @@ public enum HelperConstants {
     ///     and retries a failed temperature read in place instead of skipping
     ///     a tick. Behaviour only — but it is the difference between taking
     ///     control instantly and taking up to 6 s, so users need the new one.
-    public static let protocolVersion = "6"
+    /// v7: tried a full-drive "breakaway" push for stopped fans, then reverted
+    ///     it in v8 — measured on hardware, it changed nothing (see v8).
+    /// v8: breakaway removed. Fan spin-up from rest is firmware-paced: driving
+    ///     a stopped fan at 6800 instead of 4250 produced an identical ramp
+    ///     (295/573/839/1731… either way) and an identical 1.5 s dead time, so
+    ///     the push was cost without benefit.
+    public static let protocolVersion = "8"
     /// How often the app sends a heartbeat while connected.
     public static let heartbeatInterval: TimeInterval = 5
     /// SAFETY: no heartbeat for this long → the daemon's watchdog reverts to

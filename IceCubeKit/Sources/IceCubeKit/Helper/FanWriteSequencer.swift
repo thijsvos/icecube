@@ -82,10 +82,15 @@ public actor FanWriteSequencer {
             let modeKey = "F\(fan.id)\(suffix)"
 
             branch = try await forceManualMode(modeKey: modeKey, preferring: branch)
-            try await port.writeDouble("F\(fan.id)Tg", value: target, as: .float)
 
+            try await port.writeDouble("F\(fan.id)Tg", value: target, as: .float)
+        }
+
+        for fan in fans {
+            guard let target = clamped[fan.id] else { continue }
             // Read-back: the firmware can silently ignore writes; §3.2 makes
             // verification mandatory, not optional.
+            let modeKey = "F\(fan.id)\(suffix)"
             let modeBack = try await port.readDouble(modeKey)
             let tgBack = try await port.readDouble("F\(fan.id)Tg")
             if modeBack != Double(FanMode.forced.rawValue) || abs(tgBack - target) > 1 {
