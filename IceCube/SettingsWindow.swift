@@ -231,8 +231,18 @@ struct SettingsWindowView: View {
             Section("Fan Control Setup") {
                 LabeledContent("Status", value: setupStatusText)
                 HStack(spacing: 8) {
-                    Button(state.helper.registration == .enabled ? "Repair…" : "Set Up…") {
-                        WindowOpener.open(WindowOpener.ID.setup, using: openWindow)
+                    // Two different jobs, so two different actions. Routing
+                    // both into the setup window left no way to force a
+                    // reinstall once things *looked* fine — which is exactly
+                    // when you need one: a subtly wedged service, or a rebuilt
+                    // app whose old service is still running.
+                    if state.helper.registration == .enabled {
+                        Button("Reinstall") { Task { await state.helper.reregister() } }
+                            .help("Restart the background service — fixes it if fan control is stuck")
+                    } else {
+                        Button("Set Up…") {
+                            WindowOpener.open(WindowOpener.ID.setup, using: openWindow)
+                        }
                     }
                     Button("Turn Off Fan Control") {
                         Task { await state.helper.unregister() }

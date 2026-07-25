@@ -224,6 +224,16 @@ final class HelperManager {
         isReregistering = true
         defer { isReregistering = false }
         await unregister()
+        // An unregister hiccup is not final — the retries below may still
+        // succeed, so it must not be shown as a failure yet.
+        lastError = nil
+
+        // Only the LAST attempt's failure is real. Publishing each one flashed
+        // "Fan control can't start" in the setup window for a fraction of a
+        // second on the way to succeeding — the retry loop exists precisely
+        // because the first attempt usually fails (launchd needs a moment to
+        // drop the old job), so its failure is expected, not newsworthy.
+        var lastAttemptError: String?
         for attempt in 0 ..< 6 {
             try? await Task.sleep(for: .milliseconds(attempt == 0 ? 300 : 500))
             register()
@@ -233,7 +243,11 @@ final class HelperManager {
                 lastError = nil
                 return
             }
+            lastAttemptError = lastError
+            lastError = nil
         }
+        lastError = lastAttemptError
+            ?? "Ice Cube couldn’t finish updating. Try again in a moment."
     }
 
     func openApprovalSettings() {

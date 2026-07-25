@@ -49,6 +49,14 @@ final class SetupModel {
         if case .offerMove = relocation {
             return .moveToApplications
         }
+        // Work in progress is never a failure. Registration passes through
+        // intermediate states on its way to succeeding, and rendering any of
+        // them as an error makes the flow flicker "can't start" at a user who
+        // did nothing wrong. The retry loop reports a real failure only once
+        // it has genuinely given up.
+        if helper.isReregistering {
+            return .connecting
+        }
         if let error = helper.lastError, !error.isEmpty {
             return .blocked(reason: SetupGuidance.humanize(error))
         }
