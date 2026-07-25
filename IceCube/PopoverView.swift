@@ -171,13 +171,26 @@ struct PopoverView: View {
         return (fan.targetRPM / fan.maxRPM).clamped(to: 0 ... 1)
     }
 
-    /// The current RPM, prominent, with a quiet unit label — and a fixed
-    /// layout. The digits glide (numericText) to each new reading, but the row
-    /// never reflows: the old "→ target" arrow toggled on and off every tick and
-    /// shoved the number sideways, which was hard on the eyes. The fan's motion
-    /// toward a target is shown by the sliding gauge bar below instead.
+    /// How far a fan may trail its target before the readout says where it is
+    /// heading. Below this, the gauge tick alone tells the story.
+    private static let rampVisibleRPM: Double = 300
+
+    /// The current RPM, prominent, with a quiet unit label, plus where the fan
+    /// is heading while it is still getting there.
+    ///
+    /// The destination slot is **permanently reserved** rather than inserted
+    /// when needed. An earlier version appended "→ target" only while ramping,
+    /// which toggled on and off every tick and shoved the number sideways; a
+    /// fixed-width slot shows the same information without ever reflowing.
+    ///
+    /// Worth showing because the gap can be large and slow: switching from
+    /// Automatic (where macOS may park the fans at 0) to a curve commands the
+    /// new speed within a second, but the fan takes many seconds to physically
+    /// wind up. Without this the popover reads "0 RPM" while everything is in
+    /// fact working, which is indistinguishable from broken.
     private func rpmReadout(_ fan: Fan) -> some View {
-        HStack(spacing: 3) {
+        let heading = fan.targetRPM > 0 && abs(fan.targetRPM - fan.actualRPM) > Self.rampVisibleRPM
+        return HStack(spacing: 3) {
             Text("\(Int(fan.actualRPM))")
                 .font(.callout.weight(.semibold))
                 .monospacedDigit()
@@ -185,6 +198,12 @@ struct PopoverView: View {
             Text("RPM")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
+            Text(heading ? "→ \(Int(fan.targetRPM))" : "")
+                .font(.caption2)
+                .monospacedDigit()
+                .foregroundStyle(Theme.accent)
+                .frame(width: 46, alignment: .leading)
+                .animation(readingAnimation, value: heading)
         }
         .animation(readingAnimation, value: Int(fan.actualRPM))
         .accessibilityElement(children: .combine)
