@@ -178,9 +178,15 @@ struct PopoverView: View {
     }
 
     /// The fan's target speed as 0…1 of max, for the gauge tick — nil when
-    /// there's nothing meaningful to aim at (no target reported).
+    /// there's nothing meaningful to aim at.
+    ///
+    /// Same `.forced` requirement as ``isRampingUp(_:)`` and for the same
+    /// reason: once control is handed back to macOS the last written target
+    /// lingers in `F{i}Tg`, so the tick would sit at the fan's minimum
+    /// indefinitely while the fan is stopped, marking a destination nothing is
+    /// travelling to.
     private func targetSpeed(of fan: Fan) -> Double? {
-        guard fan.maxRPM > 0, fan.targetRPM > 0 else { return nil }
+        guard fan.mode == .forced, fan.maxRPM > 0, fan.targetRPM > 0 else { return nil }
         return (fan.targetRPM / fan.maxRPM).clamped(to: 0 ... 1)
     }
 
@@ -190,10 +196,20 @@ struct PopoverView: View {
 
     /// Whether this fan is still meaningfully short of its commanded speed.
     ///
+    /// Requires `.forced` — Ice Cube actually driving this fan. `targetRPM` is
+    /// simply the last value written to `F{i}Tg`, and it PERSISTS after control
+    /// is handed back: a revert parks it at the fan's minimum and then gives
+    /// the fan to macOS, which may well settle on 0 RPM. Reading that stale
+    /// number as a destination made Automatic display a permanent "→ 2317"
+    /// while the fan sat still — promising something nothing was working
+    /// toward, which is worse than saying nothing.
+    ///
     /// Only counts ramping UP: winding down is not something a user waits on,
     /// and showing it would put a hint on screen most of the time for no gain.
     private func isRampingUp(_ fan: Fan) -> Bool {
-        fan.targetRPM > 0 && fan.targetRPM - fan.actualRPM > Self.rampVisibleRPM
+        fan.mode == .forced
+            && fan.targetRPM > 0
+            && fan.targetRPM - fan.actualRPM > Self.rampVisibleRPM
     }
 
     /// The current RPM, prominent, with a quiet unit label, plus where the fan

@@ -441,6 +441,49 @@ struct DaemonCoreTickTests {
         #expect(reprobes.isEmpty, "permanently-dead keys are not a health event: \(reprobes)")
     }
 
+    /// A probe that finds only non-die sensors is unusable, not an answer.
+    /// `hottestDieCelsius` is what BOTH the curve and the guardian run on, so a
+    /// set of battery/airflow sensors leaves the daemon unable to control or
+    /// protect anything while looking perfectly healthy.
+    @Test("A probe with no die sensor is rejected rather than cached")
+    func probeWithoutDieSensorIsRejected() async throws {
+        let smc = FakeSMC()
+        // Kill both die sensors; leave a battery sensor readable.
+        await smc.breakRead("Tp01")
+        await smc.breakRead("Tg0f")
+        await smc.setTemperature(35, key: "TB1T")
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(manualConfig())
+        await core.tick(sleptFor: .zero)
+
+        let events = await core.currentStatus().recentEvents
+        #expect(
+            events.contains { $0.contains("sensor probe unusable") },
+            "a die-less probe must be refused: \(events)"
+        )
+        #expect(
+            !events.contains { $0.hasPrefix("resolved") },
+            "nothing should have been cached"
+        )
+    }
+
+    /// The transient-failure case that made probes resolve 20, then 16, then 2
+    /// sensors on the same machine: a read that fails once must not permanently
+    /// disown a working sensor.
+    @Test("A sensor that fails one read but answers the retry is still admitted")
+    func transientReadFailureDoesNotDisownSensor() async throws {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(manualConfig())
+        await core.tick(sleptFor: .zero)
+
+        let resolved = await core.currentStatus().recentEvents
+            .first { $0.hasPrefix("resolved") }
+        #expect(resolved != nil, "a healthy machine resolves its sensors")
+    }
+
     /// C7: an empty sensor probe is "unresolved", not "this Mac has no sensors".
     /// Caching it blinded the daemon permanently — the ceiling and the guardian
     /// both go inert while the app UI still shows temperatures.

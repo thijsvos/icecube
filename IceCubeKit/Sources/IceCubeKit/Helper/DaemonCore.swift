@@ -717,10 +717,20 @@ public actor DaemonCore {
             // as a health signal, 8 of 20 permanently-dead keys tripped it on
             // every tick: re-probe, re-admit the same dead keys, trip again —
             // a loop that re-ran discovery ~40 SMC calls a tick, forever.
+            // Each candidate gets a SECOND chance before being written off.
+            // Admission-by-read makes the resolved set depend on *when* the
+            // probe runs, and it often runs at the worst moment — right after
+            // `port.reset()` closes the connection, or on wake. Observed in the
+            // field: probes resolving 20, then 16, then 12, then 2 sensors on
+            // the same Mac. A transient miss must not permanently disown a
+            // working sensor.
             var present: [String] = []
             for sensor in candidates {
-                guard let value = try? await port.readDouble(sensor.key),
-                      SMCKeyMaps.isPlausibleTemperature(value) else { continue }
+                var value = try? await port.readDouble(sensor.key)
+                if value == nil || !SMCKeyMaps.isPlausibleTemperature(value ?? 0) {
+                    value = try? await port.readDouble(sensor.key)
+                }
+                guard let value, SMCKeyMaps.isPlausibleTemperature(value) else { continue }
                 present.append(sensor.key)
             }
             // SAFETY: an EMPTY probe is "unresolved", not "this Mac has no
@@ -729,8 +739,23 @@ public actor DaemonCore {
             // `port.reset()` closed the connection, so one failed lazy reopen
             // blinded the daemon for its whole lifetime, silently, even on
             // supported hardware. Leaving it nil makes the next tick retry.
-            guard !present.isEmpty else {
-                record("SAFETY: no temperature sensors resolved (model \(model)) — retrying next tick")
+            // SAFETY: a probe that resolved nothing — or resolved no DIE sensor
+            // — is "unresolved", not an answer. Caching [] is non-nil, so the
+            // old code never retried, and the very first probe runs right after
+            // `start()`'s `port.reset()` closed the connection: one failed lazy
+            // reopen blinded the daemon for its whole lifetime.
+            //
+            // The die requirement is the safety-relevant half. `hottestDieCelsius`
+            // is what BOTH the curve and the guardian run on, so a set of only
+            // battery and airflow sensors leaves the daemon unable to control or
+            // protect anything while looking healthy. Observed for real: one
+            // probe resolved 2 sensors on a machine that normally reports 12.
+            let hasDie = present.contains(where: SMCKeyMaps.isDieKey)
+            guard !present.isEmpty, hasDie else {
+                record(
+                    "SAFETY: sensor probe unusable (\(present.count) found, die: \(hasDie), "
+                        + "model \(model)) — retrying next tick"
+                )
                 throw IceCubeError.smcKeyNotFound(key: "T***")
             }
             sensorKeys = present
