@@ -24,6 +24,14 @@ public enum SetupGuidance {
         case awaitingApproval
         /// Permission granted, connecting to the background service.
         case connecting
+        /// Connecting has gone on long enough that it is not going to finish.
+        ///
+        /// Reachable for real: replacing the app while its background service
+        /// is running invalidates that running copy's code signature, so the
+        /// app refuses its messages (errSecCSReqFailed) and the handshake never
+        /// completes. Without this the flow sat on a spinner forever with
+        /// nothing to press — the same dead end the approval step used to have.
+        case connectionStuck
         /// The app was updated and the part that controls fans is still the old
         /// version. One click fixes it — but it must be *offered*, because the
         /// user has no way to know it happened.
@@ -40,6 +48,7 @@ public enum SetupGuidance {
         case .needsPermission: "Turn on fan control"
         case .awaitingApproval: "Waiting for your approval"
         case .connecting: "Starting up…"
+        case .connectionStuck: "Fan control isn’t responding"
         case .needsUpdate: "Finish updating Ice Cube"
         case .blocked: "Fan control can’t start"
         }
@@ -64,6 +73,9 @@ public enum SetupGuidance {
         case .connecting:
             "Ice Cube is connecting to the background service. This usually takes "
                 + "a moment."
+        case .connectionStuck:
+            "The background part of Ice Cube isn’t answering. Reinstalling it "
+                + "usually fixes this and takes a few seconds."
         case .needsUpdate:
             "Ice Cube was updated, but the part that adjusts your fans is still "
                 + "the old version. One click brings it up to date."
@@ -81,6 +93,7 @@ public enum SetupGuidance {
         case .needsPermission: "Turn On Fan Control"
         case .awaitingApproval: "Open System Settings Again"
         case .connecting: nil
+        case .connectionStuck: "Reinstall"
         case .needsUpdate: "Update Now"
         case .blocked: "Try Again"
         }
@@ -103,6 +116,12 @@ public enum SetupGuidance {
     /// How long to wait on the approval step before offering the directions
     /// above.
     public static let approvalHelpDelay: TimeInterval = 15
+
+    /// How long "connecting" may last before it is treated as broken. Generous:
+    /// a real handshake is sub-second, but launchd can be slow to start a
+    /// service on a busy machine, and offering a repair too eagerly would train
+    /// people to press it during normal startup.
+    public static let connectionStuckDelay: TimeInterval = 20
 
     /// Rewrites a developer-facing failure into something a user can act on.
     ///

@@ -141,7 +141,7 @@ struct SetupWindowView: View {
                 .font(.title2).foregroundStyle(Theme.warning)
         case .awaitingApproval, .connecting:
             ProgressView().controlSize(.small)
-        case .needsUpdate:
+        case .connectionStuck, .needsUpdate:
             Image(systemName: "arrow.triangle.2.circlepath")
                 .font(.title2).foregroundStyle(Theme.accent)
         case .moveToApplications:

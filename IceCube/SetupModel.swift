@@ -34,6 +34,9 @@ final class SetupModel {
     /// dismissing it — treating it as such would make the relocated copy
     /// suppress the setup it is supposed to continue.
     private(set) var isRelocating = false
+    /// When connecting began, so a handshake that will never finish can be
+    /// told apart from one that is merely in progress.
+    private var connectingSince: Date?
 
     /// True once the user has been on the approval step long enough that they
     /// are evidently not finding the switch.
@@ -87,6 +90,15 @@ final class SetupModel {
                 // know this happened, and the raw state reads as a failure.
                 return .needsUpdate
             case .disconnected:
+                // Registered but unreachable. Given long enough that is not
+                // "starting up", it is broken — most often because the app was
+                // replaced while its background service kept running, which
+                // invalidates that running copy's signature.
+                if let connectingSince,
+                   Date().timeIntervalSince(connectingSince) > SetupGuidance.connectionStuckDelay
+                {
+                    return .connectionStuck
+                }
                 return .connecting
             }
         case .requiresApproval:
@@ -129,7 +141,7 @@ final class SetupModel {
             }
         case .awaitingApproval:
             helper.openApprovalSettings()
-        case .needsUpdate:
+        case .needsUpdate, .connectionStuck:
             Task { await helper.reregister() }
         case .blocked:
             relocationFailure = nil
@@ -154,6 +166,13 @@ final class SetupModel {
             }
         } else {
             awaitingSince = nil
+        }
+        if step == .connecting {
+            if connectingSince == nil {
+                connectingSince = Date()
+            }
+        } else if step != .connectionStuck {
+            connectingSince = nil
         }
     }
 

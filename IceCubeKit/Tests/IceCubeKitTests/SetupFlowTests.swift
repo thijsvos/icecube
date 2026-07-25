@@ -62,7 +62,8 @@ struct SetupGuidanceTests {
     func noJargon() {
         let steps: [SetupGuidance.Step] = [
             .ready, .moveToApplications, .needsPermission, .awaitingApproval,
-            .connecting, .needsUpdate, .blocked(reason: "Something specific went wrong."),
+            .connecting, .connectionStuck, .needsUpdate,
+            .blocked(reason: "Something specific went wrong."),
         ]
         let banned = [
             "daemon",
@@ -91,6 +92,9 @@ struct SetupGuidanceTests {
         #expect(SetupGuidance.actionTitle(for: .needsPermission) != nil)
         #expect(SetupGuidance.actionTitle(for: .awaitingApproval) != nil)
         #expect(SetupGuidance.actionTitle(for: .needsUpdate) != nil)
+        // The dead end this step exists to prevent: registered but unreachable
+        // used to render as an endless spinner with nothing to press.
+        #expect(SetupGuidance.actionTitle(for: .connectionStuck) != nil)
         #expect(SetupGuidance.actionTitle(for: .blocked(reason: "x")) != nil)
         // These two are the app working; there is nothing to press.
         #expect(SetupGuidance.actionTitle(for: .ready) == nil)
@@ -111,6 +115,15 @@ struct SetupGuidanceTests {
         // Long enough to be reading time, short enough not to be abandonment.
         #expect(SetupGuidance.approvalHelpDelay >= 10)
         #expect(SetupGuidance.approvalHelpDelay <= 30)
+    }
+
+    /// Long enough that ordinary startup never trips it, short enough that a
+    /// person does not give up first.
+    @Test("The stuck-connection timeout is neither trigger-happy nor endless")
+    func stuckDelayIsSane() {
+        #expect(SetupGuidance.connectionStuckDelay >= 10)
+        #expect(SetupGuidance.connectionStuckDelay <= 60)
+        #expect(SetupGuidance.connectionStuckDelay > SetupGuidance.approvalHelpDelay - 10)
     }
 
     @Test("The unsigned-build failure becomes advice, not an error code")
