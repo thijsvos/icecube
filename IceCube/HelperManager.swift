@@ -466,14 +466,75 @@ final class HelperManager {
             } catch {
                 connection = .disconnected
                 client.disconnect() // clean slate; next loop retries (5 s backoff)
+                await selfHealIfWedged()
                 return
             }
         }
+        if case .versionMismatch = connection {
+            // The running service is older than this app. There is exactly one
+            // correct response and the app can perform it, so asking the user
+            // to press a button would be asking them to do our job.
+            await selfHeal(reason: "running service is an older version")
+            return
+        }
         guard case .connected = connection else { return }
+        // A healthy connection ends the episode: a later wedge is a NEW fault
+        // and deserves its own repair. Resetting only here — never on a failed
+        // attempt — is what stops a service that cannot start from being
+        // reinstalled every 20 s forever.
+        unreachableSince = nil
+        hasSelfHealed = false
         client.heartbeat()
         await refreshStatus()
         await autoResumeIfNeeded()
         reconcileHighlight()
+    }
+
+    /// How long the service may be registered-but-unreachable before the app
+    /// repairs it without being asked. Generous: launchd can be slow to start a
+    /// service on a busy machine, and re-registering during normal startup
+    /// would be churn, not healing.
+    private static let wedgedThreshold: TimeInterval = 20
+    /// When the current unreachable stretch began.
+    @ObservationIgnored private var unreachableSince: Date?
+    /// One automatic repair per app session. A repair that does not take is a
+    /// real fault the user must see — retrying forever would hide it, and would
+    /// restart a root service every 20 s indefinitely.
+    @ObservationIgnored private var hasSelfHealed = false
+
+    /// Repairs a service that is registered but has stopped answering.
+    ///
+    /// The case that makes this necessary rather than nice: replacing the app
+    /// while its service is still running invalidates that running copy's code
+    /// signature, so every message is refused (errSecCSReqFailed) and the
+    /// handshake can never complete. That is not exotic — it is what a normal
+    /// update does when someone drags a new version into Applications over a
+    /// running one. The user did nothing wrong, the app knows precisely what is
+    /// wrong and precisely how to fix it, so it should just fix it.
+    private func selfHealIfWedged() async {
+        guard registration == .enabled else {
+            unreachableSince = nil
+            return
+        }
+        let start = unreachableSince ?? Date()
+        unreachableSince = start
+        guard Date().timeIntervalSince(start) >= Self.wedgedThreshold else { return }
+        await selfHeal(reason: "service registered but unreachable for \(Int(Self.wedgedThreshold))s")
+    }
+
+    private func selfHeal(reason: String) async {
+        guard !hasSelfHealed, !isReregistering else { return }
+        hasSelfHealed = true
+        log.notice("self-heal: reinstalling background service — \(reason, privacy: .public)")
+        await reregister()
+        unreachableSince = nil
+        if case .connected = connection {
+            log.notice("self-heal: recovered")
+        } else {
+            // Left for the user with a button, since we have now tried and
+            // failed and something beyond our reach is wrong.
+            log.error("self-heal: did not recover; leaving it to the user")
+        }
     }
 
     private func refreshStatus() async {
