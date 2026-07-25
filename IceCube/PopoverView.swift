@@ -37,8 +37,9 @@ struct PopoverView: View {
             if state.isPopoverVisible {
                 liveContent
             } else {
-                // Same width so the window doesn't resize on reopen.
-                Color.clear.frame(width: 380, height: 1)
+                // Same width token as the live content, so the window doesn't
+                // resize on reopen.
+                Color.clear.frame(width: Theme.Metrics.popoverWidth, height: 1)
             }
         }
         .task { await state.helper.maintainOnce() }
@@ -71,13 +72,13 @@ struct PopoverView: View {
             Divider()
             footer
         }
-        .padding(14)
-        .frame(width: 380)
+        .padding(Theme.Metrics.popoverPadding)
+        .frame(width: Theme.Metrics.popoverWidth)
     }
 
     /// The fan readouts, grouped as a titled card.
     private var fanCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Theme.Metrics.cardContentSpacing) {
             Text("Fans").premiumSectionLabel()
             fanSection
         }
@@ -87,7 +88,7 @@ struct PopoverView: View {
     /// The compact CPU/GPU line, grouped as a titled card (shown when the full
     /// charts are hidden).
     private var compactTemperatureCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Theme.Metrics.cardContentSpacing) {
             Text("Temperature").premiumSectionLabel()
             compactTemperatureLine
         }
@@ -96,7 +97,7 @@ struct PopoverView: View {
 
     /// The full per-sensor list, grouped as a titled card.
     private var temperatureListCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Theme.Metrics.cardContentSpacing) {
             Text("Sensors").premiumSectionLabel()
             temperatureListSection
         }
@@ -118,7 +119,7 @@ struct PopoverView: View {
                 .font(.headline)
             if state.isSimulated {
                 badge("SIMULATED")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Theme.warning)
                     .accessibilityLabel("Simulated data")
             }
             Spacer()
@@ -276,7 +277,7 @@ struct PopoverView: View {
     private func errorRow(_ message: String) -> some View {
         Label(message, systemImage: "exclamationmark.triangle")
             .font(.caption)
-            .foregroundStyle(.orange)
+            .foregroundStyle(Theme.warning)
             .accessibilityLabel("Error: \(message)")
     }
 

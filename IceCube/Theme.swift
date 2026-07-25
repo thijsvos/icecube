@@ -26,6 +26,15 @@ enum Theme {
             : NSColor(srgbRed: 0.13, green: 0.45, blue: 0.86, alpha: 1)
     })
 
+    /// The warning/manual accent. Orange carries exactly two meanings in Ice
+    /// Cube — "you are driving the fans by hand" and "something needs your
+    /// attention" — and nothing else, so its appearance is always meaningful.
+    ///
+    /// A token rather than a bare `.orange` at fourteen call sites: the color
+    /// is identical today, but tuning it (or making it appearance-adaptive the
+    /// way ``accent`` is) is now a one-line change instead of a grep.
+    static let warning = Color.orange
+
     /// A calm→warm thermal color for a temperature reading: cool blue at idle,
     /// through teal/green, to amber and red as the die heats. Muted saturation
     /// so it reads as refined data-coloring, not a garish alarm.
@@ -54,6 +63,17 @@ enum Theme {
         static let cardPadding: CGFloat = 10
         /// Vertical gap between top-level popover sections.
         static let sectionSpacing: CGFloat = 10
+        /// Gap between a card's uppercase title and its content. Every
+        /// `.popoverCard()` uses this, so titles sit on one baseline rhythm
+        /// instead of the per-card 6-or-8 guesses this replaced.
+        static let cardContentSpacing: CGFloat = 8
+        /// Inset around a popover-style window's whole content stack — the
+        /// popover itself and the curve editor, which read as the same surface.
+        static let popoverPadding: CGFloat = 14
+        /// The popover's fixed width. Both the live content *and* the collapsed
+        /// off-screen placeholder must use this: if they ever disagree the
+        /// window visibly resizes when you reopen it.
+        static let popoverWidth: CGFloat = 380
     }
 }
 
