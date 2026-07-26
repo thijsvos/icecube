@@ -11,12 +11,14 @@ import os
 @Observable
 final class PresetStore {
     /// The four built-ins, in display order.
+    /// Every built-in means "Ice Cube is driving". There used to be a "macOS"
+    /// entry here that meant the opposite — hand the fans back — and it was a
+    /// persistent source of confusion no amount of naming fixed: first renamed
+    /// from "Auto", then fenced off behind a divider, then removed (2026-07-26).
+    /// Nobody installs a fan-control app to hand the fans to macOS, and the
+    /// honest version of that action is removing the daemon, which lives in
+    /// Settings -> "Turn Off Fan Control".
     static let builtins: [Preset] = [
-        // Named for WHO is in control, not for what it sounds like it does.
-        // "Auto" in a fan-control app reads as "the app handles it"; this hands
-        // the fans back to macOS, which is the opposite, and users who picked
-        // it expecting automation concluded Ice Cube wasn't working.
-        Preset(name: "macOS", kind: .auto, config: .auto),
         Preset(name: "Quiet", kind: .quiet, config: .curve(.quiet)),
         Preset(name: "Balanced", kind: .balanced, config: .curve(.balanced)),
         Preset(name: "Cold", kind: .cold, config: .curve(.cold)),

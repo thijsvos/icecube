@@ -320,7 +320,11 @@ struct SettingsWindowView: View {
     private var presetBinding: Binding<Preset.Kind> {
         Binding(
             get: {
-                guard state.helper.lastAppliedConfig != nil else { return .auto }
+                // Nothing applied yet lands on "Custom", the picker's catch-all
+                // row. It used to fall back to `.auto`, which stopped being a
+                // preset when macOS mode was removed — and "Custom" is the
+                // honest label for "not one of the built-ins" anyway.
+                guard state.helper.lastAppliedConfig != nil else { return .custom }
                 return PresetHighlight.matching(
                     PresetStore.builtins, applied: state.helper.lastAppliedConfig
                 )?.kind ?? .custom

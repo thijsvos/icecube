@@ -138,7 +138,12 @@ struct FanControlSection: View {
             // Says who is driving. "Automatic" left people believing Ice Cube
             // was managing cooling when it had handed the fans to macOS.
             case .guardianCooling: "macOS · Ice Cube stepped in"
-            case .automatic: "macOS is controlling the fans"
+            // No longer something anyone can pick — since the macOS preset was
+            // removed this only appears in passing (before the first config
+            // lands at launch) or after a safety revert. "Not controlling"
+            // rather than "macOS is controlling" because, per the field
+            // finding, macOS frequently does not pick the fans back up.
+            case .automatic: "Fan control is off"
             }
         }
 
@@ -191,22 +196,16 @@ struct FanControlSection: View {
     /// needs the editor's persist setting, stored app-wide.
     @AppStorage("persistCurve") private var persistCurve = false
 
-    /// The preset row, split into "hand the fans back" and "Ice Cube drives".
+    /// The preset row — now a single spectrum, quietest to loudest.
     ///
-    /// Those are different KINDS of choice, not five points on one scale, and
-    /// the row previously read as a single spectrum — which is how people came
-    /// to pick the hand-back option believing it was the app's smart mode. The
-    /// rule is one short line and a little air, sized so it reads as a grouping
-    /// cue rather than a rule across the card.
+    /// It used to be split by a divider, because "hand the fans to macOS" sat
+    /// alongside the curves and read as one more point on that spectrum when it
+    /// was really a different kind of choice entirely. With that entry gone the
+    /// row means one thing throughout — how hard Ice Cube drives your fans —
+    /// so the grouping cue has nothing left to group and the divider went too.
     private var presetRow: some View {
         HStack(spacing: 6) {
-            ForEach(PresetStore.builtins.filter { $0.kind == .auto }) { preset in
-                presetButton(preset)
-            }
-            Divider()
-                .frame(height: 14)
-                .padding(.horizontal, 1)
-            ForEach(PresetStore.builtins.filter { $0.kind != .auto }) { preset in
+            ForEach(PresetStore.builtins) { preset in
                 presetButton(preset)
             }
             Spacer(minLength: 0)
@@ -263,18 +262,18 @@ struct FanControlSection: View {
                 .controlSize(.small)
                 .help("Edit the temperature→fan curve")
                 Spacer()
-                if isManual || isCurve {
-                    // Was "Revert to Auto", left stale by renaming the preset:
-                    // there is no "Auto" in this UI any more, and the point of
-                    // the rename was that "auto" is what people misread.
-                    Button("Hand Back to macOS") {
-                        Task { await helper.revertToAuto() }
-                    }
-                    .controlSize(.small)
-                    .tint(Theme.warning)
-                    .keyboardShortcut(.escape, modifiers: [])
-                    .help("Stop controlling the fans and let macOS manage them again")
-                } else {
+                // "Hand Back to macOS" used to live here, and it is gone for the
+                // same reason its preset twin is: nobody installs a fan-control
+                // app in order to stop controlling the fans, and on this
+                // hardware the hand-back does not even work — macOS was
+                // observed leaving them parked while the die climbed to 92 °C.
+                // The honest version of that action removes the daemon, and it
+                // lives in Settings -> "Turn Off Fan Control".
+                //
+                // Which frees this slot to offer manual control from a curve as
+                // well as from a standing start, rather than only from the one
+                // state the user could no longer reach on purpose.
+                if !isManual {
                     Button("Take Manual Control") {
                         engageManual()
                     }

@@ -184,7 +184,15 @@ public struct SMCSnapshot: Sendable, Codable, Equatable {
 /// only curve mode may keep running after the app quits.
 public struct FanConfig: Sendable, Codable, Equatable {
     public enum Mode: String, Sendable, Codable {
-        /// Give control back to macOS. A fresh install is always `.auto`.
+        /// Nobody is driving the fans from a user choice: the daemon's state
+        /// before the first config arrives, and what every revert lands in.
+        ///
+        /// NOT user-selectable since 2026-07-26 — there is no longer a preset
+        /// for it. It remains the daemon's resting state and the target of
+        /// every safety revert, and while it is in force the guardian still
+        /// keeps the fans off a standstill on a warm machine. To genuinely
+        /// return the fans to macOS the daemon has to go: Settings ->
+        /// "Turn Off Fan Control".
         case auto
         /// Fixed per-fan targets. Watchdogged: no app heartbeat for 15 s → auto.
         case manual
@@ -265,22 +273,20 @@ public struct FanConfig: Sendable, Codable, Equatable {
 /// A named, user-selectable fan configuration.
 public struct Preset: Identifiable, Sendable, Codable, Equatable {
     public enum Kind: String, Sendable, Codable {
-        case auto, quiet, balanced, cold, max, custom
+        case quiet, balanced, cold, max, custom
 
         /// What picking this actually does, in one sentence, for a tooltip.
         ///
-        /// `auto` gets the longest explanation because it is the one people
-        /// misread. In a fan-control app "Auto" sounds like "the app manages
-        /// this for me"; it means the exact opposite — Ice Cube stops
-        /// controlling the fans and macOS takes over, which lets the machine
-        /// get considerably hotter before it spins them up. Someone who picks
-        /// it expecting smart automation concludes the app does nothing.
+        /// There used to be an `auto` kind here — "hand the fans back to macOS"
+        /// — carrying by far the longest explanation, because it was the one
+        /// people misread: in a fan-control app "Auto" reads as "the app manages
+        /// this for me" and it meant the exact opposite. It was renamed, then
+        /// fenced off behind a divider, and finally removed altogether: every
+        /// preset now means Ice Cube is driving, so there is nothing left to
+        /// misread. Turning fan control off lives in Settings, where an exit
+        /// belongs.
         public var explanation: String {
             switch self {
-            case .auto:
-                "Ice Cube stops controlling your fans and hands them back to macOS. "
-                    + "macOS lets the Mac get quite hot before speeding them up — pick a "
-                    + "curve below if you want Ice Cube to manage cooling for you."
             case .quiet:
                 "Silent at idle. Fans only start climbing at 60 °C, full speed by 90 °C."
             case .balanced:

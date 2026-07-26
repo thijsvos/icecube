@@ -26,7 +26,7 @@ dependencies**; small footprint is a design goal, not an accident.
 | Menu-bar popover with live stacked charts (CPU, GPU, per-fan RPM) | ✅ |
 | 1/5/15/60-min windows, pause, hover crosshair, min/avg/max | ✅ |
 | Fan-curve editor: drag points, double-click add, keyboard nudge, live marker | ✅ |
-| Presets: Quiet · Balanced · Cold · Max + your own (plus “macOS”, which hands the fans back) | ✅ |
+| Presets: Quiet · Balanced · Cold · Max + your own | ✅ |
 | Manual per-fan sliders (watchdogged, never persisted) | ✅ |
 | Curve keeps running at boot, app closed — daemon-side | ✅ |
 | Sensors browser (every SMC key, live) + JSON diagnostics export | ✅ |
@@ -55,6 +55,13 @@ enforced **in the root daemon**, where the UI (or a bug in it) cannot reach:
   assumes macOS took the wheel back: if the machine is warm and nothing is
   cooling it, the daemon drives the fans itself along a built-in curve and
   hands back only when it's genuinely cool.
+
+  This is also why there is no "hand the fans to macOS" preset. There was one,
+  and it did not do what it said: on the hardware we can test, macOS mostly did
+  not pick the fans back up. While Ice Cube is installed it manages your fans —
+  every preset means Ice Cube is driving. To genuinely return them, remove the
+  background service (see [Uninstall](#uninstall)); quitting the app is **not**
+  enough, because the daemon is a LaunchDaemon and keeps running without it.
 
 ## Why a root helper?
 

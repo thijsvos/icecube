@@ -154,23 +154,22 @@ struct SetupGuidanceTests {
 
 @Suite("Preset wording")
 struct PresetWordingTests {
-    /// The misreading that motivated renaming the preset: in a fan-control app
-    /// "Auto" sounds like "the app manages this for me", when it means Ice Cube
-    /// stops controlling the fans entirely. The tooltip must say who is in
-    /// charge and must not imply Ice Cube is doing the work.
-    @Test("The hand-back-to-macOS option explains that macOS takes over")
-    func autoExplainsWhoIsInControl() {
-        let text = Preset.Kind.auto.explanation.lowercased()
-        #expect(text.contains("macos"), "must name who is actually in control")
-        #expect(text.contains("hot"), "must warn it lets the Mac run hotter")
-        // It must not describe itself as Ice Cube handling things.
-        #expect(!text.contains("ice cube manages"))
-        #expect(!text.contains("automatically"))
+    /// The option this used to guard is gone (2026-07-26). Renaming "Auto" to
+    /// "macOS" and warning about it in the tooltip treated the symptom; the
+    /// cause was that "stop controlling the fans" was offered as a preset
+    /// alongside the curves at all. This now pins its absence, so it cannot
+    /// quietly come back as one.
+    @Test("No built-in preset hands the fans back — every one means Ice Cube drives")
+    func noPresetHandsTheFansBack() {
+        for kind in [Preset.Kind.quiet, .balanced, .cold, .max, .custom] {
+            #expect(Preset.Kind(rawValue: "auto") == nil)
+            #expect(kind.explanation.lowercased().contains("hands them back") == false)
+        }
     }
 
     @Test("Every preset explains itself without jargon")
     func everyPresetIsExplained() {
-        for kind in [Preset.Kind.auto, .quiet, .balanced, .cold, .max, .custom] {
+        for kind in [Preset.Kind.quiet, .balanced, .cold, .max, .custom] {
             let text = kind.explanation
             #expect(text.count > 20, "\(kind) needs a real explanation")
             for word in ["daemon", "XPC", "SMC", "RPM clamp", "launchd"] {

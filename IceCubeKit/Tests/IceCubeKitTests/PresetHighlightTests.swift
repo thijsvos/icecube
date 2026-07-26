@@ -59,7 +59,6 @@ struct PresetHighlightTests {
 
     private var builtins: [Preset] {
         [
-            Preset(name: "Auto", kind: .auto, config: .auto),
             Preset(name: "Quiet", kind: .quiet, config: .curve(.quiet)),
             Preset(name: "Cold", kind: .cold, config: .curve(.cold)),
         ]
@@ -90,7 +89,9 @@ struct PresetHighlightTests {
     @Test("matching finds the built-in by kind, and reports nil for a user curve")
     func matchingByKind() {
         #expect(PresetHighlight.matching(builtins, applied: .curve(.cold))?.kind == .cold)
-        #expect(PresetHighlight.matching(builtins, applied: .auto)?.kind == .auto)
+        // Auto is no longer any preset's config, so it must light up none of
+        // them — it is a daemon resting state, not something the user picked.
+        #expect(PresetHighlight.matching(builtins, applied: .auto) == nil)
         // An edited/user curve is no built-in — the picker shows "Custom".
         let edited = FanCurve(points: [
             CurvePoint(celsius: 40, fraction: 0.1),

@@ -9,15 +9,18 @@ import Foundation
 /// installed a fan-control app did not install it to get that. So a user who
 /// has expressed no preference gets a sensible curve rather than nothing.
 ///
-/// The trap it avoids: "no preference yet" and "the user deliberately chose
-/// Automatic" are different states that used to look identical, because
-/// choosing Automatic simply deleted the stored curve. Defaulting on absence
-/// alone would therefore override an explicit choice on every single launch —
-/// the user would set Automatic, quit, reopen, and find a curve running.
+/// HISTORY (2026-07-26): there used to be a third state here, `.automatic` —
+/// "the user deliberately chose to hand the fans to macOS" — kept distinct from
+/// "never chose" so that defaulting on absence could not override a real choice
+/// on every launch. It is gone because the choice itself is gone: macOS mode was
+/// removed from the UI, so nothing can express it any more. An old stored
+/// `"automatic"` now fails to decode, reads as `nil`, and lands the user on the
+/// fallback curve — which is the right destination and needs no migration code.
+/// Handing the fans back is no longer a mode at all; it is Settings ->
+/// "Turn Off Fan Control", which removes the daemon entirely.
 public enum StartupPolicy {
     /// What the user last deliberately selected. Absent = never chose.
     public enum Preference: String, Sendable, Codable {
-        case automatic
         case curve
     }
 
@@ -44,9 +47,6 @@ public enum StartupPolicy {
         guard daemonMode == .auto else { return .leaveAlone }
 
         switch preference {
-        case .automatic:
-            // An explicit choice. Honour it forever, including across restarts.
-            return .leaveAlone
         case .curve:
             // Their curve, if it still decodes; otherwise the fallback rather
             // than silently dropping them into Automatic.

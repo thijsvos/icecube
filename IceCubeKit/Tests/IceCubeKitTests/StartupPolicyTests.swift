@@ -22,16 +22,21 @@ struct StartupPolicyTests {
         #expect(decision == .apply(StartupPolicy.defaultConfig(.balanced)))
     }
 
-    /// The trap this design exists to avoid. Choosing Automatic used to just
-    /// delete the stored curve, making "chose Automatic" indistinguishable from
-    /// "never chose" — so a default-on-absence would re-apply a curve every
-    /// launch, silently overriding them.
-    @Test("An explicit Automatic choice is honoured, not treated as 'no preference'")
-    func explicitAutomaticIsRespected() {
+    /// There used to be an `.automatic` preference here, honoured forever so
+    /// that "chose to hand the fans to macOS" could not be mistaken for "never
+    /// chose". Removing macOS mode from the UI removed the choice, so a stored
+    /// `"automatic"` no longer decodes — and this pins the consequence, which
+    /// is the migration: those users land on the fallback curve rather than on
+    /// a mode nothing can express.
+    @Test("A preference from the removed macOS mode no longer decodes, so it falls back")
+    func retiredAutomaticPreferenceMigrates() {
+        #expect(StartupPolicy.Preference(rawValue: "automatic") == nil)
         let decision = StartupPolicy.decide(
-            daemonMode: .auto, preference: .automatic, storedCurve: nil, fallback: .balanced
+            daemonMode: .auto,
+            preference: StartupPolicy.Preference(rawValue: "automatic"),
+            storedCurve: nil, fallback: .balanced
         )
-        #expect(decision == .leaveAlone)
+        #expect(decision == .apply(StartupPolicy.defaultConfig(.balanced)))
     }
 
     @Test("A saved curve is restored in preference to the default")
@@ -57,7 +62,7 @@ struct StartupPolicyTests {
     @Test("Anything the daemon is already enforcing is left alone")
     func neverStompsAnActiveMode() {
         for mode in [FanConfig.Mode.curve, .manual] {
-            for preference in [StartupPolicy.Preference.curve, .automatic, nil] {
+            for preference in [StartupPolicy.Preference.curve, nil] {
                 #expect(
                     StartupPolicy.decide(
                         daemonMode: mode, preference: preference,
@@ -74,7 +79,7 @@ struct StartupPolicyTests {
     /// puts the fans under fixed-RPM control on its own.
     @Test("No decision can ever start the app in manual mode")
     func neverStartsManual() {
-        for preference in [StartupPolicy.Preference.curve, .automatic, nil] {
+        for preference in [StartupPolicy.Preference.curve, nil] {
             for curve in [stored, FanConfig(mode: .manual, manualTargets: [0: 6000]), nil] {
                 let decision = StartupPolicy.decide(
                     daemonMode: .auto, preference: preference,

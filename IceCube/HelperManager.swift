@@ -329,17 +329,6 @@ final class HelperManager {
         await apply(config)
     }
 
-    func revertToAuto() async {
-        await run {
-            try await self.client.setAllAuto()
-            self.lastAppliedConfig = .auto
-        }
-        // A deliberate choice, and recorded as one: the next launch must leave
-        // the fans to macOS rather than "helpfully" restoring a curve.
-        rememberPreference(for: .auto)
-        UserDefaults.standard.removeObject(forKey: Self.lastCurveKey)
-    }
-
     /// The last curve profile the app saved, with the current "Keep running"
     /// preference applied (not whatever flag was stored with it).
     private func storedCurveConfig() -> FanConfig? {
@@ -402,9 +391,12 @@ final class HelperManager {
                 StartupPolicy.Preference.curve.rawValue, forKey: Self.preferenceKey
             )
         case .auto:
-            UserDefaults.standard.set(
-                StartupPolicy.Preference.automatic.rawValue, forKey: Self.preferenceKey
-            )
+            // Unreachable from the UI since the macOS preset was removed — auto
+            // is now only ever a daemon resting state, never a user choice. If
+            // one does arrive, forget the stored preference rather than record
+            // an intent nothing can express: "never chose" is the truth, and it
+            // lands the next launch on the fallback curve.
+            UserDefaults.standard.removeObject(forKey: Self.preferenceKey)
         case .manual:
             break
         }
