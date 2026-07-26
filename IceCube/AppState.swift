@@ -182,6 +182,10 @@ final class AppState {
         temperatureUnit = TemperatureUnit(
             rawValue: UserDefaults.standard.string(forKey: Self.unitKey) ?? ""
         ) ?? .celsius
+        // Explicit, because constructing a HelperManager no longer starts its
+        // own timers — see `HelperManager.start()`. The app is the only caller;
+        // tests drive `maintainOnce()` directly instead.
+        helper.start()
     }
 
     /// Rebuilds the polling stream with the effective cadence. Icon-only

@@ -124,6 +124,10 @@ targets:
     sources:
       - IceCubeTests
       - IceCube/CurveEditorModel.swift
+      - IceCube/HelperManager.swift
+      - IceCube/HelperDependencies.swift
+      - IceCube/HelperClient.swift
+      - IceCube/PresetStore.swift
     dependencies:
       - package: IceCubeKit
     settings:

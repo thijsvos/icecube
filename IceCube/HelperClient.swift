@@ -11,7 +11,12 @@ import os
 /// can't pin — that's logged loudly and only tolerated in DEBUG.
 final class HelperClient {
     private var connection: NSXPCConnection?
-    private let log = Logger(subsystem: "io.github.thijsvos.icecube", category: "xpc")
+    /// `HelperConstants.logSubsystem`, not the literal: under test this resolves
+    /// to a separate subsystem. These files are compiled into the test bundle, so
+    /// without it a `swift`/`xcodebuild test` run writes lines like "startup:
+    /// applying curve config" into the SAME log a real investigation reads —
+    /// which already cost two misdiagnoses this project.
+    private let log = Logger(subsystem: HelperConstants.logSubsystem, category: "xpc")
     /// Called when the connection drops (helper crashed, unregistered, …).
     var onDisconnect: (() -> Void)?
     /// Bumped on every connect and disconnect, so a callback can tell whether

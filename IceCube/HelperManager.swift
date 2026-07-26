@@ -41,23 +41,58 @@ final class HelperManager {
         lastError = nil
     }
 
-    private let service = SMAppService.daemon(
-        plistName: "io.github.thijsvos.icecube.helper.plist"
-    )
-    private let client = HelperClient()
-    private let log = Logger(subsystem: "io.github.thijsvos.icecube", category: "xpc")
+    private let service: any DaemonRegistering
+    private let client: any HelperChanneling
+    /// Where preferences live. Injected so tests get an isolated suite instead
+    /// of scribbling on the developer's own `standard` defaults.
+    private let defaults: UserDefaults
+    /// Why registration cannot proceed, or nil. A closure because the real
+    /// answer reads this process's code signature and bundle path — neither of
+    /// which says anything useful inside a test bundle. The logic it wraps is
+    /// covered by `RegistrationPreflightTests`.
+    private let blocker: () -> String?
+    // `HelperConstants.logSubsystem`, not the literal: under test this resolves
+    // to a separate subsystem. These files are compiled into the test bundle, so
+    // without it a `swift`/`xcodebuild test` run writes lines like "startup:
+    // applying curve config" into the SAME log a real investigation reads —
+    // which already cost two misdiagnoses this project.
+    private let log = Logger(subsystem: HelperConstants.logSubsystem, category: "xpc")
     @ObservationIgnored private var maintenanceTask: Task<Void, Never>?
     @ObservationIgnored private var wakeTask: Task<Void, Never>?
     /// The maintenance pass currently in flight, if any. Concurrent callers
     /// join it rather than being dropped — see ``maintainOnce()``.
     @ObservationIgnored private var maintenancePass: Task<Void, Never>?
 
-    init() {
-        client.onDisconnect = { [weak self] in
+    /// Defaults are the production wiring, so `HelperManager()` still means
+    /// "the real daemon, the real XPC channel, the real preferences".
+    init(
+        service: any DaemonRegistering = SMAppServiceRegistrar(),
+        client: any HelperChanneling = HelperClient(),
+        defaults: UserDefaults = .standard,
+        blocker: @escaping () -> String? = {
+            RegistrationPreflight.blocker(
+                teamID: CodesignPinning.currentTeamID(),
+                bundlePath: Bundle.main.bundleURL.resolvingSymlinksInPath().path
+            )
+        }
+    ) {
+        self.service = service
+        self.client = client
+        self.defaults = defaults
+        self.blocker = blocker
+        self.client.onDisconnect = { [weak self] in
             self?.connection = .disconnected
             self?.status = nil
         }
         refreshRegistration()
+    }
+
+    /// Starts the background work. Separate from `init` on purpose: constructing
+    /// a manager used to spawn a 5 s timer and a workspace observer, which meant
+    /// merely *making* one had side effects — fine for the app, impossible for a
+    /// test, and the reason this type had no tests at all until now.
+    func start() {
+        guard maintenanceTask == nil else { return }
         // One maintenance loop: keeps registration fresh (approval happens in
         // System Settings, outside our process), reconnects when enabled, and
         // drives heartbeat + status while connected.
@@ -138,10 +173,7 @@ final class HelperManager {
     /// Why registration cannot succeed right now, or `nil` to go ahead.
     /// See ``RegistrationPreflight`` for why this is checked up front.
     private var registrationBlocker: String? {
-        RegistrationPreflight.blocker(
-            teamID: CodesignPinning.currentTeamID(),
-            bundlePath: Bundle.main.bundleURL.resolvingSymlinksInPath().path
-        )
+        blocker()
     }
 
     /// Registers the daemon. On a fresh machine this triggers the one-time
@@ -185,11 +217,11 @@ final class HelperManager {
             await run { try await self.client.setAllAuto() }
         }
         lastAppliedConfig = nil
-        UserDefaults.standard.removeObject(forKey: Self.lastCurveKey)
+        defaults.removeObject(forKey: Self.lastCurveKey)
         // Turning the feature off is a clean slate, not a pause. Leaving a
         // preference behind would mean re-enabling later silently resurrects a
         // curve from a session the user has long forgotten.
-        UserDefaults.standard.removeObject(forKey: Self.preferenceKey)
+        defaults.removeObject(forKey: Self.preferenceKey)
         // …and the clean slate has to include the once-per-session latch, or
         // the slate is only half wiped.
         //
@@ -268,7 +300,7 @@ final class HelperManager {
     }
 
     func openApprovalSettings() {
-        SMAppService.openSystemSettingsLoginItems()
+        service.openSettings()
     }
 
     // MARK: - Fan control commands
@@ -299,7 +331,6 @@ final class HelperManager {
         // without any interaction, after being shown an error saying it failed.
         guard applied else { return }
         rememberPreference(for: config)
-        let defaults = UserDefaults.standard
         if config.mode == .curve, let data = try? JSONEncoder().encode(config) {
             defaults.set(data, forKey: Self.lastCurveKey)
         } else if config.mode == .auto {
@@ -345,10 +376,10 @@ final class HelperManager {
     /// The last curve profile the app saved, with the current "Keep running"
     /// preference applied (not whatever flag was stored with it).
     private func storedCurveConfig() -> FanConfig? {
-        guard let data = UserDefaults.standard.data(forKey: Self.lastCurveKey),
+        guard let data = defaults.data(forKey: Self.lastCurveKey),
               var config = try? JSONDecoder().decode(FanConfig.self, from: data),
               config.mode == .curve else { return nil }
-        config.persistsWithoutApp = UserDefaults.standard.bool(forKey: "persistCurve")
+        config.persistsWithoutApp = defaults.bool(forKey: "persistCurve")
         return config
     }
 
@@ -390,7 +421,7 @@ final class HelperManager {
     /// how "Automatic" used to be recorded, which made a deliberate Automatic
     /// indistinguishable from a fresh install.
     private func storedPreference() -> StartupPolicy.Preference? {
-        UserDefaults.standard.string(forKey: Self.preferenceKey)
+        defaults.string(forKey: Self.preferenceKey)
             .flatMap(StartupPolicy.Preference.init(rawValue:))
     }
 
@@ -400,7 +431,7 @@ final class HelperManager {
     private func rememberPreference(for config: FanConfig) {
         switch config.mode {
         case .curve:
-            UserDefaults.standard.set(
+            defaults.set(
                 StartupPolicy.Preference.curve.rawValue, forKey: Self.preferenceKey
             )
         case .auto:
@@ -409,7 +440,7 @@ final class HelperManager {
             // one does arrive, forget the stored preference rather than record
             // an intent nothing can express: "never chose" is the truth, and it
             // lands the next launch on the fallback curve.
-            UserDefaults.standard.removeObject(forKey: Self.preferenceKey)
+            defaults.removeObject(forKey: Self.preferenceKey)
         case .manual:
             break
         }

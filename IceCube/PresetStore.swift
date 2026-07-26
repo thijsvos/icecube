@@ -46,7 +46,12 @@ final class PresetStore {
     private static let file = FileManager.default
         .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("IceCube/presets.json")
-    private let log = Logger(subsystem: "io.github.thijsvos.icecube", category: "ui")
+    /// `HelperConstants.logSubsystem`, not the literal: under test this resolves
+    /// to a separate subsystem. These files are compiled into the test bundle, so
+    /// without it a `swift`/`xcodebuild test` run writes lines like "startup:
+    /// applying curve config" into the SAME log a real investigation reads —
+    /// which already cost two misdiagnoses this project.
+    private let log = Logger(subsystem: HelperConstants.logSubsystem, category: "ui")
 
     init() {
         load()
