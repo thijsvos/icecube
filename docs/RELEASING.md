@@ -13,10 +13,15 @@ you read the generated notes and press publish.
 
 ## Before the FIRST public push
 
-- [ ] `docs/img/` contains `popover.png`, `curve-editor.png`, `setup.png` and
-      `sensors.png`. `README.md` links to all four, so until they exist the
-      front page shows broken images to everyone who opens the repo. See
+- [ ] `docs/img/` contains `popover.png`, `curve-editor.png` and
+      `sensors.png`. `README.md` links to all three, so a missing one shows a
+      broken image to everyone who opens the repo. See
       [docs/img/README.md](img/README.md) for how to capture them.
+- [ ] *Optional:* a shot of the setup window for the "First run" section. It
+      can only be taken while fan control is **off** (with it on, Settings
+      offers "Reinstall" and there is no setup entry point at all), so the
+      free moment to take it is during a clean-machine install test — not by
+      unregistering a working daemon for a photo.
 
 ## Version bump checklist
 

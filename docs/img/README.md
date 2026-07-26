@@ -6,8 +6,16 @@ Fixed filenames — `README.md` links to these paths, so keep the names.
 | --- | --- | --- |
 | `popover.png` | Hero, under the intro | Click the menu-bar icon. Capture with ⌘⇧4 then **Space**, then click the popover. |
 | `curve-editor.png` | End of Features | Popover → **Curves…** |
-| `setup.png` | Install → First run | Popover → Settings… → Fan Control → **Set Up…** |
 | `sensors.png` | Supporting a new Mac model | Popover → **Sensors…** |
+
+Not currently linked from `README.md`:
+
+- `setup.png` — the setup window, for the "First run" section. There is **no
+  way to open it while fan control is enabled**: Settings shows "Reinstall"
+  in that slot, and the popover only offers a setup prompt when the helper is
+  missing or version-mismatched. Take it during a clean-machine install test
+  rather than unregistering a working daemon to stage it, and add the `<img>`
+  back to README.md when you do.
 
 Guidance:
 

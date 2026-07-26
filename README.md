@@ -108,10 +108,6 @@ permission it needs. It watches for your approval and moves on as soon as you
 give it — no restarting, no hunting through menus. If the app isn't in your
 Applications folder yet, it offers to move itself there first.
 
-<p align="center">
-  <img src="docs/img/setup.png" alt="The Ice Cube setup window, showing the single approval step and a live indicator that watches for it." width="520">
-</p>
-
 **Monitoring works immediately without any of this.** The permission is only
 for *changing* fan speeds, and you can skip it and turn it on later from the
 Ice Cube menu.
