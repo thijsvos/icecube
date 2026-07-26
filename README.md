@@ -12,6 +12,10 @@ one-click presets — built on a hardened privilege split: the app only ever
 enforces safety limits the UI cannot override. **Zero third-party
 dependencies**; small footprint is a design goal, not an accident.
 
+<p align="center">
+  <img src="docs/img/popover.png" alt="The Ice Cube menu-bar popover: live temperature and fan-RPM charts, per-fan readouts, and one-click presets." width="420">
+</p>
+
 > **Status: beta.** Fully functional — monitoring, manual control, curves,
 > presets, boot persistence — developed and tested on a MacBook Pro 14" M2 Pro
 > (Mac14,9) under macOS 26. Other Apple Silicon Macs should work for
@@ -32,6 +36,11 @@ dependencies**; small footprint is a design goal, not an accident.
 | Sensors browser (every SMC key, live) + JSON diagnostics export | ✅ |
 | CSV history export, temperature alerts, launch at login, °C/°F | ✅ |
 | Update check via GitHub Releases (link only, never auto-install) | ✅ |
+
+<p align="center">
+  <img src="docs/img/curve-editor.png" alt="The fan-curve editor: draggable temperature-to-RPM points with a live marker showing the current die temperature." width="620">
+  <br><em>The curve editor — drag points, double-click to add, arrow keys to nudge.</em>
+</p>
 
 ## Safety design
 
@@ -99,6 +108,10 @@ permission it needs. It watches for your approval and moves on as soon as you
 give it — no restarting, no hunting through menus. If the app isn't in your
 Applications folder yet, it offers to move itself there first.
 
+<p align="center">
+  <img src="docs/img/setup.png" alt="The Ice Cube setup window, showing the single approval step and a live indicator that watches for it." width="520">
+</p>
+
 **Monitoring works immediately without any of this.** The permission is only
 for *changing* fan speeds, and you can skip it and turn it on later from the
 Ice Cube menu.
@@ -124,6 +137,10 @@ Temperature-sensor keys change with every Apple SoC generation. If your model
 shows few or oddly-labeled sensors: popover → **Sensors…** → **Export
 Diagnostics…**, then open a "New Mac model report" issue with the JSON
 attached. That file is exactly what's needed to add a curated mapping.
+
+<p align="center">
+  <img src="docs/img/sensors.png" alt="The SMC sensors browser listing every temperature key this Mac exposes, with live values." width="620">
+</p>
 
 ## Contributing
 

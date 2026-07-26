@@ -11,6 +11,13 @@ a `v*` tag. The workflow picks its own mode:
 Either way the release is created as a **draft** — nothing goes public until
 you read the generated notes and press publish.
 
+## Before the FIRST public push
+
+- [ ] `docs/img/` contains `popover.png`, `curve-editor.png`, `setup.png` and
+      `sensors.png`. `README.md` links to all four, so until they exist the
+      front page shows broken images to everyone who opens the repo. See
+      [docs/img/README.md](img/README.md) for how to capture them.
+
 ## Version bump checklist
 
 1. `project.yml` → `CFBundleShortVersionString` (and `CFBundleVersion`).
