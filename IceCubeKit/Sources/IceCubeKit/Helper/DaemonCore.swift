@@ -22,7 +22,10 @@ public actor DaemonCore {
     private let store: any FanConfigStoring
     private let sequencer: FanWriteSequencer
     private var monitor = SafetyMonitor()
-    private let log = Logger(subsystem: "io.github.thijsvos.icecube", category: "curve")
+    /// `HelperConstants.logSubsystem`, not the literal: under test this becomes
+    /// a separate subsystem so scripted 110 °C and firmware-rejection scenarios
+    /// cannot masquerade as things that happened to the user's Mac.
+    private let log = Logger(subsystem: HelperConstants.logSubsystem, category: "curve")
 
     /// What the daemon is currently enforcing. A fresh start is `.auto` unless
     /// a valid persisted curve loads (PLAN.md §4.3.3, the boot promise).
@@ -165,8 +168,9 @@ public actor DaemonCore {
     /// Immediately after a deliberate hand-back, decides whether the fans may
     /// stop — and if not, takes them straight back at their floor.
     ///
-    /// Called *only* from the two hand-backs that are a choice (the user picking
-    /// macOS mode, and the app quitting), never from a safety revert. When the
+    /// Called *only* from a hand-back that is a choice — in practice the app
+    /// quitting — and never from a safety revert, and never from `setAllAuto`
+    /// (the "Turn Off Fan Control" path, which must actually let go). When the
     /// daemon reverts because it lost read-back control or tripped the ceiling,
     /// letting go is the point; grabbing the fans again a millisecond later
     /// would defeat it.
@@ -328,8 +332,14 @@ public actor DaemonCore {
 
         switch newConfig.mode {
         case .auto:
+            // Defensive since 2026-07-26: no UI can send `.auto` any more (the
+            // macOS preset is gone), but an older app build on a newer daemon
+            // still can, and the protocol still carries the case. Note this is
+            // NOT the path behind "Turn Off Fan Control" — that is `setAllAuto`,
+            // which reverts WITHOUT taking the fans back, because turning the
+            // feature off has to mean off.
             await revertEverything(reason: "app requested auto")
-            await keepFansSpinning(reason: "macOS mode")
+            await keepFansSpinning(reason: "fans handed back")
         case .manual:
             let generation = revertGeneration
             let fans = try await readFans()

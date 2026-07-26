@@ -117,7 +117,23 @@ struct FanControlSection: View {
                 button: "Finish Update…"
             )
         case .connected:
-            controls
+            // A Mac with no controllable fans is a supported configuration, not
+            // an error: the M2 Air is in the curated model set and is passively
+            // cooled. Without this it got the full control card — four preset
+            // buttons and a "Take Manual Control" button, every one of them a
+            // no-op — which reads as an app that is broken rather than a Mac
+            // that has nothing to control.
+            if fans.isEmpty {
+                Label(
+                    "This Mac has no controllable fans. Temperature monitoring works normally.",
+                    systemImage: "wind.slash"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            } else {
+                controls
+            }
         }
     }
 
@@ -322,11 +338,19 @@ struct FanControlSection: View {
                 }
             )
             .controlSize(.small)
+            // On the SLIDER, not on the readout beside it. The label used to
+            // live on the Text, which VoiceOver reads as a separate element —
+            // so the only control in the app that sets fan speed by hand
+            // announced itself as an anonymous "slider, 50%", and the number
+            // arrived detached from the thing that changes it.
+            .accessibilityLabel("\(fan.name) fan speed")
+            .accessibilityValue("\(Int(sliderTargets[fan.id] ?? fan.targetRPM)) RPM")
             Text("\(Int(sliderTargets[fan.id] ?? fan.targetRPM))")
                 .font(.caption)
                 .monospacedDigit()
                 .frame(width: 40, alignment: .trailing)
-                .accessibilityLabel("\(fan.name) fan target \(Int(sliderTargets[fan.id] ?? fan.targetRPM)) RPM")
+                // The slider now announces this value; reading it twice is noise.
+                .accessibilityHidden(true)
         }
     }
 

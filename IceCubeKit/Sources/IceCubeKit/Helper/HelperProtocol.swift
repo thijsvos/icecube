@@ -96,7 +96,17 @@ public enum HelperConstants {
     ///     curve 250 ms later, and read-back found `target 2317 != 3400`.
     ///     `applyGeneration` covered apply-vs-apply and `revertGeneration`
     ///     covered revert-vs-engage; the guardian's own engage sat outside both.
-    public static let protocolVersion = "14"
+    /// v15: `setAllAuto` (the "Turn Off Fan Control" path) is pinned by test as
+    ///     the one hand-back that does NOT keep the fans — with the macOS
+    ///     preset gone it is a user's only way to release them, so the warm-
+    ///     machine floor hold must not fire there. No behaviour change; the
+    ///     bump is so a daemon predating the guarantee cannot be talked to.
+    /// v16: the daemon's unified-log subsystem is redirected under test, so
+    ///     scripted 110 °C and firmware-rejection scenarios stop appearing in
+    ///     `log show` as things that happened to this Mac. No runtime change —
+    ///     bumped only so the installed daemon matches source, which is the
+    ///     mistake this whole list exists to prevent.
+    public static let protocolVersion = "16"
     /// How often the app sends a heartbeat while connected.
     public static let heartbeatInterval: TimeInterval = 5
     /// SAFETY: no heartbeat for this long → the daemon's watchdog reverts to
@@ -104,6 +114,27 @@ public enum HelperConstants {
     public static let watchdogTimeout: TimeInterval = 15
     /// The daemon's control/safety tick.
     public static let tickInterval: TimeInterval = 2
+
+    /// The unified-log subsystem — redirected under test.
+    ///
+    /// `DaemonCoreTests` drives the real actor against a scripted fake
+    /// firmware, deliberately including a 110 °C sensor, a firmware rejection
+    /// and an unwritable mode key. Those landed in the SAME subsystem as the
+    /// shipping daemon, so `log show` during a real investigation came back
+    /// salted with `SAFETY: forcing maximum cooling — Tp01 at 110 °C` for a
+    /// Mac that had done nothing of the kind. It derailed two diagnoses in one
+    /// session before the process column gave it away.
+    ///
+    /// Only the daemon's own logging routes through this: the app's loggers
+    /// name the subsystem directly, and the app is never the one under test.
+    public static let logSubsystem: String = {
+        let environment = ProcessInfo.processInfo.environment
+        let underTest = environment["XCTestConfigurationFilePath"] != nil
+            || environment["SWIFT_TESTING_ENABLED"] != nil
+            || ProcessInfo.processInfo.processName.contains("testing-helper")
+            || ProcessInfo.processInfo.processName.hasSuffix("PackageTests")
+        return underTest ? "io.github.thijsvos.icecube.tests" : "io.github.thijsvos.icecube"
+    }()
 }
 
 /// The XPC interface the helper daemon exposes.

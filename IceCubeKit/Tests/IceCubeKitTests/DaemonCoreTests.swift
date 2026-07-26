@@ -333,6 +333,25 @@ struct DaemonCoreRevertTests {
         #expect(zero >= 2317)
     }
 
+    /// Since the macOS preset was removed, Settings -> "Turn Off Fan Control"
+    /// is the ONLY way a user can hand the fans back. It must therefore really
+    /// hand them back: the floor hold that keeps a warm machine's fans turning
+    /// on an app quit must not fire here, or turning the feature off would
+    /// leave the daemon still driving and the setting would be a lie.
+    @Test("Turning fan control off releases the fans even on a warm machine")
+    func turningOffReleasesEvenWhenWarm() async throws {
+        let smc = FakeSMC(temperature: 70) // hot enough for every hold rule
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(manualConfig(5000))
+
+        await core.setAllAuto()
+
+        #expect(await core.config.mode == .auto)
+        #expect(try await smc.readDouble("F0Md") != 1, "the fans must actually be released")
+        #expect(await core.currentStatus().guardianActive == false)
+    }
+
     /// A persisting curve is explicitly allowed to outlive the app.
     @Test("Losing the connection does NOT revert a curve that persists without the app")
     func persistingCurveSurvivesInvalidation() async throws {
