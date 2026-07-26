@@ -173,7 +173,10 @@ struct DaemonCoreRevertTests {
     /// they are still turning, and they ramp down to the floor instead.
     @Test("Asking for macOS mode on a warm machine keeps the fans at their floor")
     func warmHandBackKeepsTheFansSpinning() async throws {
-        let smc = FakeSMC(temperature: 60) // warm, but under the guardian's curve
+        // 50 C: what a Mac being actively cooled actually reads. The owner's
+        // trace was 52.9 C with the fans at 3226 RPM, and the first version of
+        // this gated at 55 C — so it never fired once on real hardware.
+        let smc = FakeSMC(temperature: 50)
         let core = makeCore(smc: smc)
         await core.heartbeat()
         try await core.apply(manualConfig(5000))
@@ -191,7 +194,7 @@ struct DaemonCoreRevertTests {
     /// or the app has quietly removed the option the user picked.
     @Test("Asking for macOS mode on a cold machine really does hand the fans back")
     func coldHandBackReleasesTheFans() async throws {
-        let smc = FakeSMC(temperature: 35)
+        let smc = FakeSMC(temperature: 30)
         let core = makeCore(smc: smc)
         await core.heartbeat()
         try await core.apply(manualConfig(5000))
@@ -207,7 +210,7 @@ struct DaemonCoreRevertTests {
     /// again a millisecond later would defeat the point of the revert.
     @Test("A safety revert lets go even on a warm machine")
     func safetyRevertDoesNotReTakeTheFans() async throws {
-        let smc = FakeSMC(temperature: 60)
+        let smc = FakeSMC(temperature: 50)
         let core = makeCore(smc: smc)
         // Deliberately no `heartbeat()` — the watchdog's strongest case, and the
         // opposite of a user choosing macOS mode.

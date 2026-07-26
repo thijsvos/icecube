@@ -177,9 +177,21 @@ public actor DaemonCore {
     private func keepFansSpinning(reason: String) async {
         let generation = revertGeneration
         guard config.mode == .auto, !revertPending else { return }
-        guard let fans = try? await readFans(), !fans.isEmpty else { return }
-        guard let die = await (try? readTemperatures())?.hottestDieCelsius else { return }
+        // Every exit below says why. The first version of this logged only on
+        // the path it took, so when it silently did nothing on real hardware
+        // there was no way to tell whether it had decided not to, failed to
+        // read, or never run at all — it cost a whole round-trip with the owner
+        // to establish that the answer was "the die was 52.9 °C".
+        guard let fans = try? await readFans(), !fans.isEmpty else {
+            record("\(reason): could not read the fans — leaving them to macOS")
+            return
+        }
+        guard let die = await (try? readTemperatures())?.hottestDieCelsius else {
+            record("\(reason): could not read a die sensor — leaving the fans to macOS")
+            return
+        }
         guard case let .holdAtFloor(targets) = guardian.handBack(fans: fans, dieCelsius: die) else {
+            record("\(reason) at \(Int(die)) °C — cold enough to let the fans stop")
             return
         }
         record("\(reason) at \(Int(die)) °C — holding the fans at minimum rather than letting them stop")

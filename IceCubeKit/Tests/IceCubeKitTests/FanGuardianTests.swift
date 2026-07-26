@@ -248,13 +248,38 @@ struct FanGuardianTests {
         #expect(guardian.evaluate(fans: held, dieCelsius: limits.keepSpinningCelsius + 5) == .idle)
     }
 
+    /// The regression the owner caught on hardware: clicking macOS from a
+    /// working Balanced curve, the die read 52.9 °C with the fans at 3226 RPM
+    /// holding it there — under the tick's 55 °C bar, so nothing fired and the
+    /// fans stopped anyway. The machine was cool *because* it was being cooled.
+    @Test("Leaving a working curve holds the fans, even though the die reads cool")
+    func handBackHoldsWhenCurveWasDoingItsJob() {
+        var guardian = FanGuardian()
+        // Exactly the state traced on the Mac14,9 at 15:33.
+        let cooled = [fan(id: 0, mode: .forced, actual: 3226), fan(id: 1, mode: .forced, actual: 3250)]
+        guard case let .holdAtFloor(targets) = guardian.handBack(fans: cooled, dieCelsius: 52.9) else {
+            Issue.record("52.9 °C with the fans at 3226 is a machine being cooled, not a cold one")
+            return
+        }
+        #expect(targets == [0: 2317, 1: 2317])
+    }
+
+    /// The hand-back bar has to sit BELOW the tick's, or it re-creates the bug:
+    /// the tick catches fans that already stopped (expensive to restart), this
+    /// catches fans still turning (free to keep).
+    @Test("The hand-back holds at a lower temperature than the tick does")
+    func handBackBarSitsBelowTheTickBar() {
+        let limits = FanGuardian.Limits()
+        #expect(limits.keepSpinningReleaseCelsius < limits.keepSpinningCelsius)
+    }
+
     @Test("Handing back on a cold machine really does hand back")
     func handBackReleasesWhenCold() {
         let limits = FanGuardian.Limits()
         var guardian = FanGuardian()
         let spinning = [fan(mode: .forced, actual: 4650)]
         guard case .release = guardian.handBack(
-            fans: spinning, dieCelsius: limits.keepSpinningCelsius - 1
+            fans: spinning, dieCelsius: limits.keepSpinningReleaseCelsius - 1
         ) else {
             Issue.record("macOS mode on a cold machine must mean silence")
             return
@@ -270,7 +295,7 @@ struct FanGuardianTests {
         var guardian = FanGuardian()
         let broken = [fan(mode: .forced, actual: 4650, minRPM: 0, maxRPM: 0)]
         guard case .release = guardian.handBack(
-            fans: broken, dieCelsius: limits.keepSpinningCelsius + 5
+            fans: broken, dieCelsius: limits.keepSpinningReleaseCelsius + 5
         ) else {
             Issue.record("a fan with no usable range must never be held")
             return

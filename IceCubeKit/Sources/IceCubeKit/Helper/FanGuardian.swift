@@ -187,9 +187,25 @@ public struct FanGuardian: Sendable {
     /// So there is no observing this and reacting in time. Either the fans are
     /// never allowed to stop, or the user waits. On a warm machine they are
     /// never allowed to stop — which is also what the guardian is for.
+    ///
+    /// The threshold here is ``Limits/keepSpinningReleaseCelsius``, NOT the
+    /// higher ``Limits/keepSpinningCelsius`` the tick uses, and the difference
+    /// is the whole reason the first version of this never fired once in
+    /// practice. Leaving a working curve, the die read 52.9 °C — under the
+    /// 55 °C bar — with the fans at 3226 RPM holding it there. **The machine is
+    /// cool because it is being cooled**, so gating on the temperature at the
+    /// moment of hand-back gates on the number you are about to destroy: stop
+    /// those fans and the die is in the high sixties within a minute, which is
+    /// the exact condition the guardian then engages on anyway.
+    ///
+    /// The tick keeps the higher bar on purpose. It catches fans that have
+    /// *already* stopped, where starting them costs a whole stop-start cycle;
+    /// this path catches fans that are still turning, where keeping them costs
+    /// nothing. Hold at or above the release line, let go below it — one number
+    /// for both directions, so it cannot flap.
     public mutating func handBack(fans: [Fan], dieCelsius: Double) -> Action {
         reset()
-        guard dieCelsius >= limits.keepSpinningCelsius else {
+        guard dieCelsius >= limits.keepSpinningReleaseCelsius else {
             return .release(dieCelsius: dieCelsius)
         }
         let targets = Self.keepSpinningTargets(for: fans, limits: limits)

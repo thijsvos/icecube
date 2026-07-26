@@ -72,7 +72,13 @@ public enum HelperConstants {
     ///     is not even consistent: an engage from a settled stop took 1.1 s.
     ///     Nothing here is controllable, so the fans must simply never stop. On
     ///     a warm machine they now ramp DOWN to their floor with no gap.
-    public static let protocolVersion = "11"
+    /// v12: the hand-back holds at 45 °C, not 55, and logs its decision either
+    ///     way. v11 never fired once on hardware: leaving a working Balanced
+    ///     curve the die read 52.9 °C with the fans at 3226 RPM holding it
+    ///     there, so it gated on the very temperature it was about to destroy.
+    ///     The tick keeps the 55 °C bar — it restarts stopped fans, which is
+    ///     expensive; this path keeps turning fans turning, which is free.
+    public static let protocolVersion = "12"
     /// How often the app sends a heartbeat while connected.
     public static let heartbeatInterval: TimeInterval = 5
     /// SAFETY: no heartbeat for this long → the daemon's watchdog reverts to
