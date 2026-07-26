@@ -344,8 +344,8 @@ struct FanControlSection: View {
             // announced itself as an anonymous "slider, 50%", and the number
             // arrived detached from the thing that changes it.
             .accessibilityLabel("\(fan.name) fan speed")
-            .accessibilityValue("\(Int(sliderTargets[fan.id] ?? fan.targetRPM)) RPM")
-            Text("\(Int(sliderTargets[fan.id] ?? fan.targetRPM))")
+            .accessibilityValue(RPM.labeled(sliderTargets[fan.id] ?? fan.targetRPM))
+            Text(RPM.text(sliderTargets[fan.id] ?? fan.targetRPM))
                 .font(.caption)
                 .monospacedDigit()
                 .frame(width: 40, alignment: .trailing)

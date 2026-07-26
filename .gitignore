@@ -20,3 +20,6 @@ IceCubeKit/.build/
 
 # Release builds staged for install testing (scripts/install-debug.sh uses build/).
 build-release/
+
+# macOS Finder metadata — created just by opening a folder.
+.DS_Store

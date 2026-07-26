@@ -160,10 +160,20 @@ struct ChartRowView: View {
         .chartYScale(domain: displayValue(row.yDomainMin) ... displayValue(row.yDomainMax))
         .chartXAxis(.hidden)
         .chartYAxis {
-            AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) {
+            AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) { mark in
                 AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [2, 3]))
                     .foregroundStyle(.quaternary)
-                AxisValueLabel().font(.caption2).foregroundStyle(.tertiary)
+                // Explicit label, not the bare `AxisValueLabel()`: Swift Charts
+                // localizes that the same way `Text` does, which printed an RPM
+                // axis as "5.000 / 2.500 / 0" on a Dutch-locale Mac — the same
+                // bug as `RPM.text`, in the one place a shared formatter can't
+                // reach on its own.
+                AxisValueLabel {
+                    if let raw = mark.as(Double.self) {
+                        Text(RPM.text(raw))
+                    }
+                }
+                .font(.caption2).foregroundStyle(.tertiary)
             }
         }
         .chartOverlay { proxy in

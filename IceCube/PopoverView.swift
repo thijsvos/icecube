@@ -159,7 +159,7 @@ struct PopoverView: View {
                 // disappearing, so the reading never moves — which is the rule
                 // this popover holds to: no reflow on data change.
                 if isRampingUp(fan) {
-                    Text("→ \(Int(fan.targetRPM))")
+                    Text(verbatim: "→ \(RPM.text(fan.targetRPM))")
                         .font(.caption2)
                         .monospacedDigit()
                         .foregroundStyle(Theme.accent)
@@ -248,7 +248,7 @@ struct PopoverView: View {
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(Theme.accent)
             } else {
-                Text("\(Int(fan.actualRPM))")
+                Text(RPM.text(fan.actualRPM))
                     .font(.callout.weight(.semibold))
                     .monospacedDigit()
                     .contentTransition(.numericText())
@@ -260,7 +260,7 @@ struct PopoverView: View {
         .animation(readingAnimation, value: Int(fan.actualRPM))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "\(fan.name) fan: \(Int(fan.actualRPM)) RPM, target \(Int(fan.targetRPM)) RPM"
+            "\(fan.name) fan: \(RPM.labeled(fan.actualRPM)), target \(RPM.labeled(fan.targetRPM))"
         )
     }
 

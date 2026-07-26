@@ -142,9 +142,9 @@ struct SensorsBrowserView: View {
                     HStack {
                         Text(fan.name)
                         Spacer()
-                        Text("\(Int(fan.actualRPM)) RPM")
+                        Text(RPM.labeled(fan.actualRPM))
                             .monospacedDigit()
-                        Text("(\(Int(fan.minRPM))–\(Int(fan.maxRPM)))")
+                        Text(verbatim: "(\(RPM.text(fan.minRPM))–\(RPM.text(fan.maxRPM)))")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                             .monospacedDigit()
