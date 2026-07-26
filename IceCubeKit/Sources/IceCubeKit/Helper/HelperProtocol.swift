@@ -78,7 +78,16 @@ public enum HelperConstants {
     ///     there, so it gated on the very temperature it was about to destroy.
     ///     The tick keeps the 55 °C bar — it restarts stopped fans, which is
     ///     expensive; this path keeps turning fans turning, which is free.
-    public static let protocolVersion = "12"
+    /// v13: a failed fan read is no longer fabricated into a value. `readFans`
+    ///     swallowed every failure with `(try? …) ?? 0`, so a fan whose mode
+    ///     read missed came back as `.system` with target 0 — bit-for-bit what
+    ///     "macOS took the fans off us" looks like. One of those logged a
+    ///     read-back mismatch on ordinary app restarts (`resetPort()` closes
+    ///     the connection and the next read is the one most likely to miss);
+    ///     two in a row reverted a healthy curve to auto, verified by mutation
+    ///     test. Absent keys are still tolerated — only transport failures
+    ///     retry and then throw, so the tick is skipped rather than acted on.
+    public static let protocolVersion = "13"
     /// How often the app sends a heartbeat while connected.
     public static let heartbeatInterval: TimeInterval = 5
     /// SAFETY: no heartbeat for this long → the daemon's watchdog reverts to

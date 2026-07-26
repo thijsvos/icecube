@@ -82,6 +82,12 @@ private actor FakeSMC: SMCControlPort {
         unwritable.insert(key)
     }
 
+    /// Deletes a key outright, so reads report `keyNotFound` rather than a
+    /// transport failure — the shape of a Mac that simply lacks it.
+    func removeKey(_ key: String) {
+        values.removeValue(forKey: key)
+    }
+
     func setTemperature(_ celsius: Double, key: String = "Tp01") {
         values[key] = celsius
     }
@@ -219,6 +225,52 @@ struct DaemonCoreRevertTests {
         await core.tick(sleptFor: .zero)
         #expect(await core.config.mode == .auto)
         #expect(try await smc.readDouble("F0Md") != 1, "a safety revert must let go")
+    }
+
+    /// Seen on an ordinary app restart, and it was not cosmetic. `resetPort()`
+    /// closes the SMC connection, the first read after it is the one most
+    /// likely to miss, and `readFans` used to swallow that with `(try? …) ?? 0`
+    /// — producing a fan with mode `.system` and target 0, which is exactly
+    /// what "macOS took the fans off us" looks like. One of those logged a
+    /// read-back mismatch; two in a row would have reverted a healthy curve to
+    /// auto and told the user control had been lost.
+    @Test("A failed fan read is never mistaken for having lost the fans")
+    func failedFanReadDoesNotLookLikeLosingControl() async throws {
+        let smc = FakeSMC(temperature: 60)
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(curveConfig(persists: false))
+        #expect(await core.config.mode == .curve)
+
+        // The mode key still exists — it just cannot be read right now.
+        await smc.breakRead("F0Md")
+        await core.tick(sleptFor: .zero)
+        await core.tick(sleptFor: .zero)
+
+        // Two ticks blind. The old code would have concluded the fans were
+        // gone and handed them back; the curve must simply still be running.
+        #expect(await core.config.mode == .curve, "a transient read must not revert a working curve")
+        #expect(await smc.modeWrites(fan: 0).contains(0) == false, "never handed back")
+
+        // And it recovers silently once the SMC answers again.
+        await smc.fixRead("F0Md")
+        await core.tick(sleptFor: .zero)
+        #expect(await core.config.mode == .curve)
+        #expect(try await smc.readDouble("F0Md") == 1, "the fans are still ours")
+    }
+
+    /// The other half: a key this Mac genuinely does not have is NOT a failure.
+    /// Collapsing the two is what made the bug above possible, so pin both.
+    @Test("An absent mode key still reads as system control rather than throwing")
+    func absentModeKeyIsTolerated() async {
+        let smc = FakeSMC(temperature: 60)
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        // No F0Md/F0md at all — the shape of a Mac with different fan keys.
+        await smc.removeKey("F0Md")
+        await smc.removeKey("F0md")
+        await core.tick(sleptFor: .zero)
+        #expect(await core.currentStatus().mode == .auto, "reads fine, just nothing to drive")
     }
 
     /// A persisting curve is explicitly allowed to outlive the app.

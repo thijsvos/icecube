@@ -650,7 +650,15 @@ public actor DaemonCore {
         verifyFailures += 1
         status.lastWriteVerified = false
         if verifyFailures == 1 {
-            record("curve read-back mismatch — re-asserting")
+            // Names the offender. "Mismatch" on its own was unactionable: it
+            // could not distinguish a fan the firmware had genuinely taken back
+            // from a read that simply failed, which is what it actually was.
+            let offenders = fans.compactMap { fan -> String? in
+                guard let target = expected[fan.id] else { return nil }
+                guard fan.mode != .forced || abs(fan.targetRPM - target) > 1 else { return nil }
+                return "fan \(fan.id) mode \(fan.mode) target \(Int(fan.targetRPM)) != \(Int(target))"
+            }
+            record("curve read-back mismatch (\(offenders.joined(separator: "; "))) — re-asserting")
             await engage(targets: expected, fans: fans, since: generation)
         } else {
             record("SAFETY: curve control lost (read-back failed twice) — reverting to auto")
@@ -719,6 +727,42 @@ public actor DaemonCore {
 
     // MARK: - Hardware reads (the daemon trusts only its own readings)
 
+    /// Reads a key that this Mac may or may not have, retrying transient
+    /// failures — the distinction the fan reads used to collapse.
+    ///
+    /// Returns nil ONLY when the firmware itself says the key does not exist
+    /// (`SMCResult.keyNotFound`), which is a real per-machine difference worth
+    /// tolerating. Every other failure is transport-level and gets retried, and
+    /// if it still fails it is THROWN rather than turned into a number.
+    ///
+    /// That last part is the whole point. `readFans` used to swallow every
+    /// failure with `(try? …) ?? 0`, so a fan whose mode read missed came back
+    /// as `.system` with `targetRPM` 0 — which is bit-for-bit what "macOS took
+    /// the fans off us" looks like. `verifyCurveHeld` believed it, logged a
+    /// read-back mismatch and re-asserted; twice in a row and it would have
+    /// reverted a perfectly healthy curve to auto and told the user it had lost
+    /// control. Observed on a normal app restart, because `resetPort()` closes
+    /// the connection and the first read after it is the one most likely to
+    /// miss — the same hazard `hottestDieRetrying()` already exists to absorb
+    /// for temperatures, which the fan path never got.
+    private func readOptional(_ key: String) async throws -> Double? {
+        for attempt in 0 ..< Self.readRetries {
+            do {
+                return try await port.readDouble(key)
+            } catch IceCubeError.smcKeyNotFound {
+                return nil // genuinely absent on this Mac — not a failure
+            } catch {
+                guard attempt < Self.readRetries - 1 else { throw error }
+                await sleep(.milliseconds(60))
+            }
+        }
+        return nil
+    }
+
+    /// Matches `hottestDieRetrying()`: enough to ride out a connection reopen,
+    /// short enough that a genuinely dead SMC still fails within one tick.
+    private static let readRetries = 3
+
     private func readFans() async throws -> [Fan] {
         // `Int(someDouble)` traps on NaN/±inf and on anything past Int.max;
         // a garbage fan count must yield no fans, not a dead daemon.
@@ -731,21 +775,24 @@ public actor DaemonCore {
         }
         var fans: [Fan] = []
         for i in 0 ..< count {
-            let mode: FanMode = if let raw = try? await port.readDouble("F\(i)Md") {
+            // Only an ABSENT mode key means `.system`. A mode key that exists
+            // but would not read now throws, so the caller skips this tick
+            // rather than concluding we have lost the fans.
+            let mode: FanMode = if let raw = try await readOptional("F\(i)Md") {
                 FanMode(smcValue: raw)
-            } else if let raw = try? await port.readDouble("F\(i)md") {
+            } else if let raw = try await readOptional("F\(i)md") {
                 FanMode(smcValue: raw)
             } else {
                 .system
             }
-            await fans.append(Fan(
+            try await fans.append(Fan(
                 id: i,
                 name: "Fan \(i)",
                 mode: mode,
-                actualRPM: (try? port.readDouble("F\(i)Ac")) ?? 0,
-                targetRPM: (try? port.readDouble("F\(i)Tg")) ?? 0,
-                minRPM: (try? port.readDouble("F\(i)Mn")) ?? 0,
-                maxRPM: (try? port.readDouble("F\(i)Mx")) ?? 0
+                actualRPM: readOptional("F\(i)Ac") ?? 0,
+                targetRPM: readOptional("F\(i)Tg") ?? 0,
+                minRPM: readOptional("F\(i)Mn") ?? 0,
+                maxRPM: readOptional("F\(i)Mx") ?? 0
             ))
         }
         return fans
