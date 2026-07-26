@@ -26,7 +26,7 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Pick the newest installed Xcode 26.x rather than pinning an exact
       # path: runner images retire point releases without notice, and a hard
@@ -89,7 +89,7 @@ jobs:
 
       - name: Upload simulated-mode log on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: simulated-mode-log
           path: /tmp/icecube-sim.log

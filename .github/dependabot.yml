@@ -1,0 +1,33 @@
+# dependabot.yml — keeps the only external versions this project has from rotting.
+#
+# `github-actions` is the ONLY ecosystem listed, and that is not an oversight:
+#
+#   - Ice Cube has no third-party code dependencies at all. `IceCubeKit/Package.swift`
+#     declares no `dependencies:`, which is a hard project rule, so there is nothing
+#     for a package updater to watch. (Dependabot has no Swift Package Manager
+#     support either way.)
+#   - The Brewfile pins `xcodegen` and `swiftformat`, but Homebrew cannot pin formula
+#     versions and Dependabot does not cover it. That file documents the verified
+#     versions by hand instead.
+#
+# Weekly, because `dependabot-auto-merge.yml` merges patch and minor bumps by itself
+# once CI is green — so a frequent check costs no attention, and a quiet week opens no
+# PR at all. Only majors reach a human, which is the point: this config exists because
+# checkout and upload-artifact sat three major versions behind before anyone looked.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
+    labels:
+      - dependencies
+    groups:
+      # One PR for the routine bumps rather than three. Majors stay separate so a
+      # runtime change (the Node 20 -> 24 moves) gets read rather than rubber-stamped.
+      actions-minor-patch:
+        update-types:
+          - minor
+          - patch

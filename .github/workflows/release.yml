@@ -41,7 +41,7 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
           fetch-depth: 0
@@ -241,7 +241,12 @@ jobs:
           cat RELEASE_NOTES.md
 
       - name: Create draft release
-        uses: softprops/action-gh-release@v2
+        # SHA-pinned, not @v3: this is the only action here that is not
+        # GitHub-authored, and this workflow grants `contents: write`. A movable
+        # tag means whatever it points at tomorrow runs with write access to the
+        # repo. Dependabot updates the SHA and rewrites the comment, so the pin
+        # does not rot. (v2 -> v3 is purely Node 20 -> Node 24; no input changes.)
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: Ice Cube ${{ steps.version.outputs.version }}

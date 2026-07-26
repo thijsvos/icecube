@@ -13,6 +13,17 @@ you read the generated notes and press publish.
 
 ## Before the FIRST public push
 
+- [ ] Enable two GitHub repo settings that this repo's config assumes but cannot
+      turn on for you (both under **Settings → General** / **Settings → Code
+      security**):
+      1. **Allow auto-merge** — without it `dependabot-auto-merge.yml` cannot
+         queue a merge and every routine bump waits on you forever.
+      2. **Dependabot alerts** + **security updates** — alerts on vulnerable
+         GitHub Actions. Free on public repos.
+- [ ] Add a branch protection rule on `main` requiring the CI check. Auto-merge
+      merges as soon as *required* checks pass; with no required checks it merges
+      immediately, which defeats the point of gating on CI.
+
 - [ ] `docs/img/` contains `popover.png`, `curve-editor.png`, `sensors.png`
       and `first-run.png`. `README.md` links to all four, so a missing one shows a
       broken image to everyone who opens the repo. See
