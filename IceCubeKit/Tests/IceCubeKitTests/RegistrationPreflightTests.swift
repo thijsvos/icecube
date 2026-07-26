@@ -58,7 +58,7 @@ struct RegistrationPreflightTests {
         #expect(RegistrationPreflight.isInApplications("/Applications/Ice Cube.app"))
         #expect(RegistrationPreflight.isInApplications("/Applications/Ice Cube.app/"))
         // ~/Applications is a real install location too.
-        #expect(RegistrationPreflight.isInApplications("/Users/thijsvos/Applications/Ice Cube.app"))
+        #expect(RegistrationPreflight.isInApplications("/Users/someone/Applications/Ice Cube.app"))
     }
 
     @Test("Paths that merely mention Applications are not install locations")
