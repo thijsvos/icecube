@@ -13,8 +13,8 @@ you read the generated notes and press publish.
 
 ## Before the FIRST public push
 
-- [ ] `docs/img/` contains `popover.png`, `curve-editor.png` and
-      `sensors.png`. `README.md` links to all three, so a missing one shows a
+- [ ] `docs/img/` contains `popover.png`, `curve-editor.png`, `sensors.png`
+      and `first-run.png`. `README.md` links to all four, so a missing one shows a
       broken image to everyone who opens the repo. See
       [docs/img/README.md](img/README.md) for how to capture them.
 - [ ] *Optional:* a shot of the setup window for the "First run" section. It

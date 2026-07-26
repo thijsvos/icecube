@@ -190,6 +190,19 @@ final class HelperManager {
         // preference behind would mean re-enabling later silently resurrects a
         // curve from a session the user has long forgotten.
         UserDefaults.standard.removeObject(forKey: Self.preferenceKey)
+        // …and the clean slate has to include the once-per-session latch, or
+        // the slate is only half wiped.
+        //
+        // Found by rehearsing a first run (2026-07-26): turn fan control off,
+        // turn it straight back on, and the daemon sat in auto with no preset
+        // lit. `autoResumeIfNeeded()` runs on every healthy connection, so it
+        // DID fire — and returned immediately, because `didAutoResume` had
+        // latched at launch. The user is now in the "never chose" state this
+        // project promises to answer with the Balanced curve, and instead got
+        // nothing until they quit and relaunched. That is the exact sequence
+        // someone follows when troubleshooting, which is the worst possible
+        // moment to look broken.
+        didAutoResume = false
 
         client.disconnect()
         do {

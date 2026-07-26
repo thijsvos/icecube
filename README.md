@@ -103,6 +103,11 @@ sh scripts/install-debug.sh          # builds, installs to /Applications, launch
 
 ### First run
 
+<p align="center">
+  <img src="docs/img/first-run.png" alt="The Ice Cube popover before setup: temperatures and fan readings already working, with fan control off and a single Set Up Fan Control button." width="420">
+  <br><em>Before setup. Monitoring already works — fan control is one button away.</em>
+</p>
+
 Ice Cube opens a short setup window by itself and walks you through the one
 permission it needs. It watches for your approval and moves on as soon as you
 give it — no restarting, no hunting through menus. If the app isn't in your
