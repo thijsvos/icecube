@@ -21,6 +21,7 @@ protocol HelperChanneling: AnyObject {
     func setAllAuto() async throws
     func heartbeat()
     func status() async throws -> HelperStatus
+    func selfTestWritePath() async throws -> WritePathReport
 }
 
 extension HelperClient: HelperChanneling {}

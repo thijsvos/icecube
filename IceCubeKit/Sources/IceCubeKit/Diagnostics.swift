@@ -68,16 +68,28 @@ public struct DiagnosticsReport: Sendable, Codable, Equatable {
     public let fans: [Fan]
     public let temperatures: [SensorReading]
     public let keys: [SMCKeyDump]
+    /// What happened when the daemon last checked that this Mac's fans can
+    /// actually be driven, if it ever has.
+    ///
+    /// Optional, and nil in a report generated without the daemon (the
+    /// `icecube-diag` CLI, or before setup). Everything above this line
+    /// describes READS; a new-model bug is almost always about WRITES, so a
+    /// report without this could not answer the question it was collected for.
+    public let writePath: WritePathReport?
 
     /// Captures a report from `provider` right now.
+    /// - Parameter writePath: the daemon's last write-path self-test, when one
+    ///   is available. Passed in rather than performed here: this type reads,
+    ///   and only the root daemon may write.
     public static func generate(
         provider: any SMCProviding,
         isSimulated: Bool,
-        appVersion: String
+        appVersion: String,
+        writePath: WritePathReport? = nil
     ) async throws(IceCubeError) -> DiagnosticsReport {
         let snapshot = try await provider.snapshot()
         return try await DiagnosticsReport(
-            schemaVersion: 1,
+            schemaVersion: 2,
             generatedAt: snapshot.date,
             modelIdentifier: HostInfo.modelIdentifier(),
             osVersion: HostInfo.osVersion(),
@@ -85,7 +97,8 @@ public struct DiagnosticsReport: Sendable, Codable, Equatable {
             simulated: isSimulated,
             fans: snapshot.fans,
             temperatures: snapshot.temperatures,
-            keys: provider.keyDump()
+            keys: provider.keyDump(),
+            writePath: writePath
         )
     }
 

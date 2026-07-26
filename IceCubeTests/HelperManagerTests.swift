@@ -67,6 +67,21 @@ private final class FakeChannel: HelperChanneling {
         }
         return statusToReport
     }
+
+    /// What the daemon would answer. Defaults to a clean pass on the machine
+    /// this project is developed on.
+    var writePathToReport = WritePathReport(
+        verdict: .verified, modeKeySuffix: "Md", unlockBranch: "direct", fanCount: 2
+    )
+    private(set) var selfTestCount = 0
+
+    func selfTestWritePath() async throws -> WritePathReport {
+        selfTestCount += 1
+        if let failure {
+            throw failure
+        }
+        return writePathToReport
+    }
 }
 
 /// A scripted `SMAppService`. `register()` advances the status the way launchd
@@ -545,6 +560,91 @@ struct HelperManagerTests {
 
         #expect(channel.setAllAutoCount == 0, "nothing to tell")
         #expect(registrar.unregisterCount == 1, "but the service still goes away")
+    }
+
+    // MARK: - Write-path self-test
+
+    @Test("The check reports what the daemon found and remembers it for the UI")
+    func selfTestSurfacesTheVerdict() async {
+        let registrar = FakeRegistrar()
+        registrar.status = .enabled
+        let channel = FakeChannel()
+        let manager = makeManager(registrar: registrar, channel: channel, defaults: makeDefaults())
+        await manager.maintainOnce()
+
+        let report = await manager.runWritePathSelfTest()
+
+        #expect(report?.verdict == .verified)
+        #expect(manager.writePathReport?.unlockBranch == "direct")
+        #expect(manager.isSelfTesting == false, "the progress flag is always cleared")
+    }
+
+    @Test("The check does nothing while the daemon is unreachable")
+    func selfTestRequiresAConnection() async {
+        let registrar = FakeRegistrar()
+        registrar.status = .notRegistered
+        let channel = FakeChannel()
+        let manager = makeManager(registrar: registrar, channel: channel, defaults: makeDefaults())
+
+        let report = await manager.runWritePathSelfTest()
+
+        #expect(report == nil)
+        #expect(channel.selfTestCount == 0)
+    }
+
+    /// PLAN.md §7 lists this as the mitigation for "Apple changes SMC/BTM
+    /// behaviour in a new macOS" — point updates have broken fan-control write
+    /// paths before (15.3/15.4). The alternative is the user finding out because
+    /// their Mac quietly runs hot.
+    @Test("A macOS update triggers one automatic re-check")
+    func selfTestRunsAfterAnOSChange() async {
+        let registrar = FakeRegistrar()
+        registrar.status = .enabled
+        let channel = FakeChannel()
+        let defaults = makeDefaults()
+        defaults.set("25.0.0", forKey: "writePathVerifiedOS") // verified on an older macOS
+        let manager = makeManager(registrar: registrar, channel: channel, defaults: defaults)
+
+        await manager.maintainOnce()
+
+        #expect(channel.selfTestCount == 1, "the OS moved, so the verdict is re-earned")
+        #expect(defaults.string(forKey: "writePathVerifiedOS") == HostInfo.osVersion())
+    }
+
+    /// The counterweight: exercising the fan write path on every launch is wear
+    /// and noise for an answer that almost never changes.
+    @Test("An unchanged macOS is not re-checked")
+    func selfTestSkippedWhenOSUnchanged() async {
+        let registrar = FakeRegistrar()
+        registrar.status = .enabled
+        let channel = FakeChannel()
+        let defaults = makeDefaults()
+        defaults.set(HostInfo.osVersion(), forKey: "writePathVerifiedOS")
+        let manager = makeManager(registrar: registrar, channel: channel, defaults: defaults)
+
+        await manager.maintainOnce()
+        await manager.maintainOnce()
+
+        #expect(channel.selfTestCount == 0)
+    }
+
+    /// A failed check must not be recorded as a pass, or the automatic re-check
+    /// would never fire again on a machine that actually needs looking at.
+    @Test("A machine that fails the check is not remembered as verified")
+    func failedSelfTestIsNotRecorded() async {
+        let registrar = FakeRegistrar()
+        registrar.status = .enabled
+        let channel = FakeChannel()
+        channel.writePathToReport = WritePathReport(verdict: .rejected, detail: "refused")
+        let defaults = makeDefaults()
+        let manager = makeManager(registrar: registrar, channel: channel, defaults: defaults)
+        await manager.maintainOnce()
+
+        _ = await manager.runWritePathSelfTest()
+
+        #expect(manager.writePathReport?.verdict == .rejected)
+        #expect(defaults.string(forKey: "writePathVerifiedOS") == nil, "not a pass")
+        #expect(manager.writePathReport?.isWorthReporting == true)
     }
 
     // MARK: - Errors

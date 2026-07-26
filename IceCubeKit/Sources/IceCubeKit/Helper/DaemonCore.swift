@@ -400,6 +400,121 @@ public actor DaemonCore {
         }
     }
 
+    // MARK: - Write-path self-test (PLAN.md §4.3.6)
+
+    /// True while a self-test is running, so two cannot overlap.
+    private var selfTestInFlight = false
+    /// The firmware's own words the last time a write sequence threw. Kept so a
+    /// report can quote it rather than paraphrase — "rejected the operation on
+    /// key 'F1Md' (result 0x84)" tells a maintainer what to fix; "write failed"
+    /// does not.
+    private var lastWriteFailure: String?
+
+    /// Checks whether this Mac's fans can actually be driven, and reports what
+    /// it learned (see ``WritePathReport``).
+    ///
+    /// **Writes each fan's CURRENT target back to itself.** That is the whole
+    /// trick: it is a real write down the real path — it forces the mode key,
+    /// exercises the `Ftst` unlock if the firmware demands it, and verifies by
+    /// read-back — while commanding no change at all. Nothing spins up, nothing
+    /// gets loud, and a user can press the button without wondering what it is
+    /// about to do to their machine.
+    ///
+    /// SAFETY: goes through ``engage(targets:fans:since:)`` and
+    /// ``revertEverything(reason:)`` rather than touching the sequencer
+    /// directly, so it inherits every guard already built — the write lock, the
+    /// intent counter, the revert-race generation check, and the clamp. A probe
+    /// that reached around those would be the one piece of write code in the
+    /// daemon that could strand the fans.
+    ///
+    /// **Restores whatever it interrupted.** The first version of this ended in
+    /// `.auto` and assumed the app's next maintenance pass would re-apply the
+    /// user's curve. It does not: `autoResumeIfNeeded()` is latched once per
+    /// session, so on real hardware the check silently swapped a running
+    /// Balanced curve for the guardian's floor hold and left it there until the
+    /// user clicked a preset. A diagnostic that changes your fan settings is
+    /// not a diagnostic. Caught on the Mac14,9 the moment it first ran.
+    public func selfTestWritePath() async -> WritePathReport {
+        guard !selfTestInFlight else {
+            return WritePathReport(verdict: .unavailable, detail: "A check is already running.")
+        }
+        selfTestInFlight = true
+        lastWriteFailure = nil // never attribute an old failure to this run
+        // Captured before anything is touched and re-applied at every exit,
+        // including the early returns below.
+        let interrupted = config
+        defer {
+            selfTestInFlight = false
+            if interrupted.mode != .auto {
+                Task { try? await self.apply(interrupted) }
+            }
+        }
+
+        guard let fans = try? await readFans() else {
+            record("self-test: could not read the fans")
+            return WritePathReport(
+                verdict: .unavailable, detail: "The SMC could not be read just now."
+            )
+        }
+        let ranges = Dictionary(
+            fans.lazy.map { ($0.id, [$0.minRPM, $0.maxRPM]) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let hasFtst = await port.hasKey("Ftst")
+
+        // Fans with no usable [Mn, Mx] are skipped everywhere else in the
+        // daemon, and skipping them here too is what keeps a fanless Mac from
+        // being reported as a failure.
+        let drivable = fans.filter(\.hasUsableRange)
+        guard !drivable.isEmpty else {
+            record("self-test: no fan reports a usable range — nothing to drive")
+            return WritePathReport(
+                verdict: .noUsableFans, fanCount: fans.count, fanRanges: ranges,
+                hasFtstKey: hasFtst,
+                detail: fans.isEmpty ? "This Mac reports no fans." : nil
+            )
+        }
+
+        // Each fan's own current target, so the command is a no-op on the
+        // hardware. Falling back to the floor when the firmware reports 0
+        // (auto mode parks it there) keeps us from ever writing 0 RPM, which is
+        // forbidden everywhere in Ice Cube.
+        let targets = Dictionary(
+            drivable.lazy.map { ($0.id, $0.targetRPM > 0 ? $0.targetRPM : $0.minRPM) },
+            uniquingKeysWith: { first, _ in first }
+        )
+
+        record("self-test: checking the fan write path")
+        let generation = revertGeneration
+        let outcome = await engage(targets: targets, fans: drivable, since: generation)
+        let suffix = await sequencer.resolvedModeKeySuffix
+        let branch = await sequencer.knownBranch?.rawValue
+
+        // Always hand back, whatever happened. `engage` already reverts on its
+        // own failure paths; this covers the success path, where the fans would
+        // otherwise be left forced by a diagnostic.
+        await revertEverything(reason: "write-path self-test finished")
+
+        guard let outcome else {
+            record("self-test: the firmware refused the fan write")
+            return WritePathReport(
+                verdict: .rejected, modeKeySuffix: suffix, unlockBranch: branch,
+                fanCount: fans.count, fanRanges: ranges, hasFtstKey: hasFtst,
+                detail: lastWriteFailure ?? "The firmware rejected the mode write."
+            )
+        }
+        let verdict: WritePathReport.Verdict = outcome.verified ? .verified : .notVerified
+        record("self-test: \(verdict.rawValue) (\(outcome.branch.rawValue) path)")
+        return WritePathReport(
+            verdict: verdict, modeKeySuffix: suffix,
+            unlockBranch: outcome.branch.rawValue, fanCount: fans.count,
+            fanRanges: ranges, hasFtstKey: hasFtst,
+            detail: outcome.verified
+                ? nil
+                : "Writes were accepted but read-back disagreed."
+        )
+    }
+
     public func setAllAuto() async {
         await revertEverything(reason: "app requested revert")
     }
@@ -562,6 +677,7 @@ public actor DaemonCore {
             // walked away — and with `config` still `.auto` neither the
             // watchdog, the ceiling, nor the guardian would ever look at them
             // again. Unwind before returning.
+            lastWriteFailure = error.localizedDescription
             record("SAFETY: fan write failed mid-sequence — reverting (\(error.localizedDescription))")
             await revertEverything(reason: "fan write failed mid-sequence")
             return nil

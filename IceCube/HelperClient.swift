@@ -116,6 +116,14 @@ final class HelperClient {
         }
     }
 
+    func selfTestWritePath() async throws -> WritePathReport {
+        try await call { proxy, done in
+            proxy.selfTestWritePath { data in
+                done(Result { try JSONDecoder().decode(WritePathReport.self, from: data) })
+            }
+        }
+    }
+
     // MARK: - Plumbing
 
     private struct NotConnected: Error {}

@@ -341,8 +341,18 @@ final class AppState {
     /// a "new Mac model" GitHub issue asks for).
     func diagnosticsJSON() async throws -> Data {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+        // Runs the write-path check first when the daemon is there and has not
+        // already been asked this session. Everything else in the report
+        // describes READS, and a "new Mac model" issue is almost always about
+        // WRITES — so exporting without this produced a file that could not
+        // answer the question it was attached to. The check commands no change
+        // in fan speed (see `DaemonCore.selfTestWritePath`).
+        if helper.writePathReport == nil {
+            await helper.runWritePathSelfTest()
+        }
         let report = try await DiagnosticsReport.generate(
-            provider: provider, isSimulated: isSimulated, appVersion: version
+            provider: provider, isSimulated: isSimulated, appVersion: version,
+            writePath: helper.writePathReport
         )
         return try report.jsonData()
     }

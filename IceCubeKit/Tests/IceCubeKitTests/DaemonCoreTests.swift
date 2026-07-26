@@ -109,6 +109,10 @@ private actor FakeSMC: SMCControlPort {
         writes.filter { $0.key == "F\(fan)Md" }.map(\.value)
     }
 
+    func targetWrites(fan: Int) -> [Double] {
+        writes.filter { $0.key == "F\(fan)Tg" }.map(\.value)
+    }
+
     func clearWrites() {
         writes.removeAll()
     }
@@ -350,6 +354,155 @@ struct DaemonCoreRevertTests {
         #expect(await core.config.mode == .auto)
         #expect(try await smc.readDouble("F0Md") != 1, "the fans must actually be released")
         #expect(await core.currentStatus().guardianActive == false)
+    }
+
+    // MARK: - Write-path self-test (PLAN.md §4.3.6)
+
+    /// The point of the whole feature: on a machine where fan control works,
+    /// say so — and say WHICH path it needed, because that is the fact a new
+    /// SoC generation is added from.
+    @Test("A healthy machine reports a verified write path, and which unlock it used")
+    func selfTestVerifies() async {
+        let smc = FakeSMC(temperature: 55)
+        let core = makeCore(smc: smc)
+
+        let report = await core.selfTestWritePath()
+
+        #expect(report.verdict == .verified)
+        #expect(report.unlockBranch == "direct")
+        #expect(report.modeKeySuffix == "Md")
+        #expect(report.fanCount == 2)
+        #expect(report.fanRanges[0] == [2317, 6800])
+        #expect(report.isWorthReporting == false, "a clean pass tells the project nothing new")
+    }
+
+    /// SAFETY: a diagnostic must not leave the fans forced. This is the one
+    /// property of the self-test that could actually hurt someone — everything
+    /// else is a wrong answer, this is a machine left under a probe's control.
+    @Test("The self-test always hands the fans back, even after succeeding")
+    func selfTestNeverLeavesFansForced() async throws {
+        let smc = FakeSMC(temperature: 55)
+        let core = makeCore(smc: smc)
+
+        let report = await core.selfTestWritePath()
+
+        #expect(report.verdict == .verified)
+        #expect(await core.config.mode == .auto, "ends in auto, whatever it found")
+        #expect(try await smc.readDouble("F0Md") != 1, "fan 0 released")
+        #expect(try await smc.readDouble("F1Md") != 1, "fan 1 released")
+    }
+
+    /// It writes each fan's CURRENT target back to itself, so the check is
+    /// audible to nobody. A probe that spun the fans up would be a probe people
+    /// learn not to press.
+    @Test("The check commands no actual change in fan speed")
+    func selfTestIsSilent() async throws {
+        let smc = FakeSMC(temperature: 55)
+        let core = makeCore(smc: smc)
+        let before = try await smc.readDouble("F0Tg")
+
+        _ = await core.selfTestWritePath()
+
+        // The revert parks Tg at the floor, which is the daemon's normal
+        // hand-back — the point is that the PROBE never asked for anything else.
+        let written = await smc.targetWrites(fan: 0)
+        #expect(written.contains(before), "wrote the current target back to itself")
+        #expect(written.allSatisfy { $0 >= 2317 }, "and never below the floor")
+    }
+
+    /// Firmware that refuses the mode write needs a new unlock path. Firmware
+    /// that accepts and ignores it needs a different write sequence. Collapsing
+    /// those into "failed" would hide the second, which this project has hit.
+    @Test("A firmware that refuses the mode write is reported as rejected, with its own words")
+    func selfTestReportsRejection() async {
+        let smc = FakeSMC(temperature: 55)
+        await smc.breakWrite("F0Md")
+        await smc.breakWrite("F0md")
+        let core = makeCore(smc: smc)
+
+        let report = await core.selfTestWritePath()
+
+        #expect(report.verdict == .rejected)
+        #expect(report.detail?.contains("F0Md") == true, "quotes the firmware, not a paraphrase")
+        #expect(report.isWorthReporting, "this is exactly what the project needs to hear")
+        #expect(await core.config.mode == .auto)
+    }
+
+    /// Caught on real hardware the first time the check ever ran: it reverted
+    /// to auto, and nothing put the user's curve back — `autoResumeIfNeeded()`
+    /// is latched once per session, so the machine sat on the guardian's floor
+    /// hold instead of the Balanced curve it had been running. A diagnostic
+    /// that changes your fan settings is not a diagnostic.
+    @Test("The check restores the curve it interrupted")
+    func selfTestRestoresTheActiveConfig() async throws {
+        let smc = FakeSMC(temperature: 55)
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(curveConfig(persists: false))
+        #expect(await core.config.mode == .curve)
+
+        _ = await core.selfTestWritePath()
+        // The restore is dispatched as the probe unwinds; give it a turn.
+        for _ in 0 ..< 20 where await core.config.mode != .curve {
+            await Task.yield()
+        }
+
+        #expect(await core.config.mode == .curve, "the user's curve must come back")
+    }
+
+    @Test("A check run while already in auto leaves it in auto")
+    func selfTestFromAutoStaysAuto() async {
+        let smc = FakeSMC(temperature: 55)
+        let core = makeCore(smc: smc)
+
+        _ = await core.selfTestWritePath()
+
+        #expect(await core.config.mode == .auto)
+    }
+
+    @Test("A fanless Mac is a supported configuration, not a failure")
+    func selfTestOnFanlessMac() async {
+        let smc = FakeSMC(fanCount: 0, temperature: 55)
+        let core = makeCore(smc: smc)
+
+        let report = await core.selfTestWritePath()
+
+        #expect(report.verdict == .noUsableFans)
+        #expect(report.isWorthReporting == false)
+    }
+
+    @Test("Fans whose range never read are not driven by the probe either")
+    func selfTestSkipsDegenerateFans() async {
+        let smc = FakeSMC(minRPM: 0, maxRPM: 0, temperature: 55)
+        let core = makeCore(smc: smc)
+
+        let report = await core.selfTestWritePath()
+
+        #expect(report.verdict == .noUsableFans, "nothing here can be driven safely")
+    }
+
+    @Test("An unreadable SMC reports that it could not check, not that it failed")
+    func selfTestUnavailableWhenBlind() async {
+        let smc = FakeSMC(temperature: 55)
+        await smc.breakRead("FNum")
+        let core = makeCore(smc: smc)
+
+        let report = await core.selfTestWritePath()
+
+        #expect(report.verdict == .unavailable)
+        #expect(report.isWorthReporting == false, "our own blindness is not a hardware report")
+    }
+
+    @Test("The report survives a JSON round-trip, since it travels over XPC and into issues")
+    func reportRoundTrips() throws {
+        let original = WritePathReport(
+            verdict: .notVerified, modeKeySuffix: "md", unlockBranch: "ftst",
+            fanCount: 2, fanRanges: [0: [1200, 5000]], hasFtstKey: true,
+            detail: "accepted but ignored"
+        )
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(WritePathReport.self, from: data)
+        #expect(decoded == original)
     }
 
     /// A persisting curve is explicitly allowed to outlive the app.

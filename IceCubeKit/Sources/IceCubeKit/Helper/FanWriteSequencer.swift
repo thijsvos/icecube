@@ -39,6 +39,13 @@ public actor FanWriteSequencer {
 
     /// Probed once per machine: `"Md"` or `"md"` (M5 renamed the key).
     private var modeKeySuffix: String?
+    /// The probed suffix, once known. Exposed for ``WritePathReport``: which of
+    /// the two spellings a generation uses is half of supporting it, and it was
+    /// already being discovered here and then thrown away.
+    public var resolvedModeKeySuffix: String? {
+        modeKeySuffix
+    }
+
     /// Remembered after the first successful engage.
     public private(set) var knownBranch: UnlockBranch?
 

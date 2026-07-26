@@ -151,6 +151,52 @@ struct SMCPollerTests {
 
 @Suite("Diagnostics")
 struct DiagnosticsTests {
+    /// Reports get attached to GitHub issues and sit there. A v1 report filed
+    /// before the write-path self-test existed must still decode once the
+    /// schema moves on, or every historical bug report becomes unreadable the
+    /// day the field is added.
+    @Test("A v1 report from before the self-test existed still decodes")
+    func v1ReportStillDecodes() throws {
+        let v1 = """
+        {
+          "schemaVersion": 1,
+          "generatedAt": "2026-07-01T12:00:00Z",
+          "modelIdentifier": "Mac15,3",
+          "osVersion": "26.0.0",
+          "appVersion": "0.1.0",
+          "simulated": false,
+          "fans": [],
+          "temperatures": [],
+          "keys": []
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let report = try decoder.decode(DiagnosticsReport.self, from: Data(v1.utf8))
+        #expect(report.schemaVersion == 1)
+        #expect(report.writePath == nil)
+        #expect(report.modelIdentifier == "Mac15,3")
+    }
+
+    /// And a report that DOES carry a verdict survives the same round-trip —
+    /// this is the field a new-model issue is really about.
+    @Test("A report carrying a write-path verdict round-trips intact")
+    func writePathSurvivesRoundTrip() async throws {
+        let provider = MockSMCProvider(now: { Date(timeIntervalSince1970: 1_753_000_000) })
+        let verdict = WritePathReport(
+            verdict: .notVerified, modeKeySuffix: "md", unlockBranch: "ftst",
+            fanCount: 2, hasFtstKey: true, detail: "accepted but ignored"
+        )
+        let report = try await DiagnosticsReport.generate(
+            provider: provider, isSimulated: true, appVersion: "test", writePath: verdict
+        )
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(DiagnosticsReport.self, from: report.jsonData())
+        #expect(decoded.writePath?.verdict == .notVerified)
+        #expect(decoded.writePath?.unlockBranch == "ftst")
+    }
+
     @Test("A report generated from the mock round-trips through its own JSON")
     func reportRoundTrip() async throws {
         let provider = MockSMCProvider(now: { Date(timeIntervalSince1970: 1_753_000_000) })
@@ -158,7 +204,8 @@ struct DiagnosticsTests {
             provider: provider, isSimulated: true, appVersion: "test"
         )
         #expect(report.simulated)
-        #expect(report.schemaVersion == 1)
+        #expect(report.schemaVersion == 2)
+        #expect(report.writePath == nil, "the CLI has no daemon, so it cannot claim a verdict")
         #expect(report.fans.count == 2)
         #expect(report.temperatures.count == 6)
         #expect(!report.keys.isEmpty)

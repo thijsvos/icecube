@@ -446,6 +446,60 @@ final class HelperManager {
         }
     }
 
+    // MARK: - Write-path self-test (PLAN.md §4.3.6)
+
+    /// The macOS build the write path was last confirmed working on.
+    private static let verifiedOSKey = "writePathVerifiedOS"
+    /// The most recent verdict, for the Settings UI. Not persisted: a verdict is
+    /// only as good as the OS and hardware it was taken on.
+    private(set) var writePathReport: WritePathReport?
+    private(set) var isSelfTesting = false
+
+    /// Runs the write-path self-test and keeps the verdict for display.
+    ///
+    /// Safe to offer as a button: the daemon writes each fan's current target
+    /// back to itself and reverts, so nothing changes speed. See
+    /// `DaemonCore.selfTestWritePath()`.
+    @discardableResult
+    func runWritePathSelfTest() async -> WritePathReport? {
+        guard !isSelfTesting, case .connected = connection else { return nil }
+        isSelfTesting = true
+        defer { isSelfTesting = false }
+        do {
+            let report = try await client.selfTestWritePath()
+            writePathReport = report
+            lastError = nil
+            if report.verdict == .verified {
+                defaults.set(report.osVersion, forKey: Self.verifiedOSKey)
+            }
+            log.notice(
+                "write-path self-test: \(report.verdict.rawValue, privacy: .public) (\(report.unlockBranch ?? "n/a", privacy: .public))"
+            )
+            return report
+        } catch {
+            lastError = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Re-checks the write path once after macOS changes underneath us.
+    ///
+    /// PLAN.md §7 lists this as the mitigation for "Apple changes SMC/BTM
+    /// behaviour in a new macOS" — point updates have broken fan-control write
+    /// paths before (15.3/15.4). The alternative is the user discovering it
+    /// themselves, by their Mac quietly running hot.
+    ///
+    /// Deliberately NOT on every launch: the verdict only changes when the OS
+    /// or the hardware does, and exercising the write path on every boot is
+    /// wear and noise for information that is almost always the same.
+    private func selfTestAfterOSChangeIfNeeded() async {
+        let current = HostInfo.osVersion()
+        guard defaults.string(forKey: Self.verifiedOSKey) != current else { return }
+        guard writePathReport == nil else { return } // already checked this session
+        log.notice("write-path self-test: macOS changed since the last check — re-verifying")
+        await runWritePathSelfTest()
+    }
+
     /// Keep the active-preset highlight in step with the mode the daemon is
     /// ACTUALLY enforcing — on every status refresh, not just at launch.
     /// Idempotent when already consistent (no view churn).
@@ -534,6 +588,7 @@ final class HelperManager {
         client.heartbeat()
         await refreshStatus()
         await autoResumeIfNeeded()
+        await selfTestAfterOSChangeIfNeeded()
         reconcileHighlight()
     }
 

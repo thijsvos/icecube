@@ -256,6 +256,8 @@ struct SettingsWindowView: View {
                 .controlSize(.small)
                 .disabled(state.helper.isReregistering)
 
+                writePathCheck
+
                 // The technical state stays, demoted: it is what a good bug
                 // report needs, and the "new Mac model" issue template asks
                 // for it. It just isn't the headline any more.
@@ -311,6 +313,55 @@ struct SettingsWindowView: View {
         case let .versionMismatch(helper): "version mismatch (v\(helper))"
         }
         return "\(registration) · \(connection)"
+    }
+
+    /// "Does fan control actually work on this Mac?" — answerable, at last.
+    ///
+    /// Worth a button rather than only running in the background: Ice Cube's
+    /// write path is verified on exactly one machine, and on any other the
+    /// honest answer until now was a shrug. The check writes each fan's current
+    /// target back to itself and reverts, so pressing it changes nothing you
+    /// can hear.
+    @ViewBuilder
+    private var writePathCheck: some View {
+        if case .connected = state.helper.connection {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Button("Check Fan Control") {
+                        Task { await state.helper.runWritePathSelfTest() }
+                    }
+                    .controlSize(.small)
+                    .help("Confirms this Mac's fans can actually be driven. Nothing changes speed.")
+                    if state.helper.isSelfTesting {
+                        ProgressView().controlSize(.small)
+                        Text("Checking…").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .disabled(state.helper.isSelfTesting)
+
+                if let report = state.helper.writePathReport {
+                    Label(
+                        report.summary,
+                        systemImage: report.verdict == .verified
+                            ? "checkmark.seal.fill"
+                            : "exclamationmark.triangle.fill"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(report.verdict == .verified ? Theme.accent : Theme.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+                    if report.isWorthReporting {
+                        // Only for the two verdicts that tell the project
+                        // something it does not already know. Asking every user
+                        // to file a clean pass would bury the real reports.
+                        Text("Export Diagnostics from the Sensors window and open a "
+                            + "\"New Mac model report\" issue — this result is exactly what's needed.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
     }
 
     /// Reflects/sets the active built-in preset (mirrors the menu's preset row).

@@ -10,7 +10,16 @@ labels: new-model
 
 **Diagnostics JSON** — this is the important part:
 Ice Cube popover → **Sensors…** → **Export Diagnostics…**, attach the file here.
-(Or from a checkout: `cd IceCubeKit && swift run icecube-diag --json > diagnostics.json`.)
+
+Exporting from the app runs a **write-path check** first and includes the result
+(`writePath` in the JSON): whether the fans could actually be driven, which
+mode key your generation uses (`Md` vs `md`), and whether your firmware needed
+the `Ftst` unlock. That is the part that says how to support your Mac — the
+sensor dump alone only describes reads. The check writes each fan's current
+target back to itself, so nothing changes speed.
+
+(From a checkout: `cd IceCubeKit && swift run icecube-diag --json > diagnostics.json`
+— that path has no daemon, so it cannot include the write-path result.)
 
 The report contains your Mac's SMC key catalog and sensor values — no
 personal data beyond the hardware model.

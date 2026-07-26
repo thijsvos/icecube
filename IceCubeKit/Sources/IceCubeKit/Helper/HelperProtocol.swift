@@ -106,7 +106,17 @@ public enum HelperConstants {
     ///     `log show` as things that happened to this Mac. No runtime change —
     ///     bumped only so the installed daemon matches source, which is the
     ///     mistake this whole list exists to prevent.
-    public static let protocolVersion = "16"
+    /// v17: adds `selfTestWritePath` — the write-path self-test PLAN.md §4.3.6
+    ///     called for and §7 lists as the mitigation for "Apple changes SMC
+    ///     behaviour in a point update". Until now nothing could tell "fan
+    ///     control works on your Mac" from "fan control silently does nothing",
+    ///     and the diagnostics a new-model report asks for described only reads.
+    /// v18: the self-test restores the config it interrupted. v17 ended in
+    ///     `.auto` on the assumption the app would re-apply — it does not
+    ///     (`autoResumeIfNeeded` latches once per session), so on hardware the
+    ///     very first run swapped a live Balanced curve for the guardian's
+    ///     floor hold and left it there. A diagnostic must not change settings.
+    public static let protocolVersion = "18"
     /// How often the app sends a heartbeat while connected.
     public static let heartbeatInterval: TimeInterval = 5
     /// SAFETY: no heartbeat for this long → the daemon's watchdog reverts to
@@ -154,6 +164,10 @@ public enum HelperConstants {
     func heartbeat()
     /// A JSON-encoded ``HelperStatus`` snapshot for the UI and diagnostics.
     func getStatus(reply: @escaping @Sendable (Data) -> Void)
+    /// Checks whether this Mac's fans can actually be driven, and returns a
+    /// JSON-encoded ``WritePathReport``. Writes each fan's current target back
+    /// to itself and reverts, so it commands no change (PLAN.md §4.3.6).
+    func selfTestWritePath(reply: @escaping @Sendable (Data) -> Void)
 }
 
 /// What the daemon reports about itself (JSON over XPC).

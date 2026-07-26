@@ -103,4 +103,12 @@ final class HelperService: NSObject, NSXPCListenerDelegate, HelperProtocol, Send
             reply((try? status.jsonData()) ?? Data())
         }
     }
+
+    func selfTestWritePath(reply: @escaping @Sendable (Data) -> Void) {
+        let core = core
+        Task {
+            let report = await core.selfTestWritePath()
+            reply((try? JSONEncoder().encode(report)) ?? Data())
+        }
+    }
 }
