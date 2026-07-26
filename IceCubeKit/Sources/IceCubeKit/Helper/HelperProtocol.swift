@@ -87,7 +87,16 @@ public enum HelperConstants {
     ///     two in a row reverted a healthy curve to auto, verified by mutation
     ///     test. Absent keys are still tolerated — only transport failures
     ///     retry and then throw, so the tick is skipped rather than acted on.
-    public static let protocolVersion = "13"
+    /// v14: write sequences are serialized, and a stale one stands down.
+    ///     `DaemonCore` is an actor, but `engageManual` writes a mode and a
+    ///     target per fan and suspends on every one, so two engages interleaved
+    ///     and the fans ended up wherever the last WRITE landed rather than
+    ///     wherever the newest INTENT said. Caught on an app restart: quitting
+    ///     starts the guardian writing the fan floor, the relaunch applies a
+    ///     curve 250 ms later, and read-back found `target 2317 != 3400`.
+    ///     `applyGeneration` covered apply-vs-apply and `revertGeneration`
+    ///     covered revert-vs-engage; the guardian's own engage sat outside both.
+    public static let protocolVersion = "14"
     /// How often the app sends a heartbeat while connected.
     public static let heartbeatInterval: TimeInterval = 5
     /// SAFETY: no heartbeat for this long → the daemon's watchdog reverts to

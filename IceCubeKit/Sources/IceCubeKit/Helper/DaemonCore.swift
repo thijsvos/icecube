@@ -226,10 +226,66 @@ public actor DaemonCore {
     /// fan control permanently impossible until the daemon restarts. `defer`
     /// here means no future early return inside a revert body can break it.
     private func asRevert(_ body: () async -> Void) async {
+        writeIntent &+= 1
         revertGeneration &+= 1
         revertsInFlight += 1
         defer { revertsInFlight -= 1 }
         await body()
+    }
+
+    // MARK: - Serializing the write sequences themselves
+
+    /// Bumped by every new "the fans should be X" decision, whoever makes it.
+    ///
+    /// The lock below stops two sequences INTERLEAVING; this stops a stale one
+    /// WINNING. They are different failures: without the counter the floor-hold
+    /// engage and the curve engage each write cleanly, and the fans end up
+    /// wherever the older sequence finished. Checked inside the lock, so a
+    /// decision that queued behind a newer one simply stands down.
+    private var writeIntent = 0
+    /// True while a write sequence owns the hardware; waiters queue below.
+    private var writeInFlight = false
+    private var writeWaiters: [CheckedContinuation<Void, Never>] = []
+
+    /// Runs `body` with exclusive use of the SMC write path.
+    ///
+    /// `DaemonCore` is an actor, which serializes *statements* but not
+    /// *sequences*: `engageManual` suspends on every SMC call, so two engages
+    /// interleave freely and the fans end up wherever the LAST write landed
+    /// rather than wherever the NEWEST intent said. `revertGeneration` and
+    /// `revertsInFlight` close revert-vs-engage; nothing closed engage-vs-engage.
+    ///
+    /// Seen on an ordinary app restart, in the log, with both writers behaving
+    /// perfectly on their own: quitting hands back and the guardian starts
+    /// writing the fan floor (2317), the app relaunches 250 ms later and the
+    /// curve engage writes 3400 straight through the middle of it, and the
+    /// floor-hold write lands last. Read-back then legitimately reported
+    /// `target 2317 != 3400`. The tick re-asserted a second later, so it
+    /// self-corrected — but "the newest intent wins" should not depend on a
+    /// retry, and the same interleave with a *manual* engage would leave the
+    /// user's slider fighting the guardian for a whole tick.
+    ///
+    /// SAFETY: nothing that can call `revertEverything` may hold this. Every
+    /// caller therefore releases before its error path, and the lock covers
+    /// only the sequencer call itself — a revert blocked behind an engage that
+    /// is waiting on that revert would be a deadlock in the one code path that
+    /// must never stall.
+    private func withWriteLock<T>(_ body: () async throws -> T) async rethrows -> T {
+        while writeInFlight {
+            await withCheckedContinuation { writeWaiters.append($0) }
+        }
+        writeInFlight = true
+        // `defer`, not a paired release: a throwing sequence must hand the lock
+        // on before its error propagates, because the caller's catch reverts —
+        // and a revert waiting on a lock held by the engage that is waiting on
+        // the revert is the one deadlock this daemon cannot survive.
+        defer {
+            writeInFlight = false
+            if !writeWaiters.isEmpty {
+                writeWaiters.removeFirst().resume()
+            }
+        }
+        return try await body()
     }
 
     /// Drops the SMC connection so `thermalmonitord` will take the fans back.
@@ -470,9 +526,25 @@ public actor DaemonCore {
     private func engage(
         targets: [Int: Double], fans: [Fan], since generation: Int
     ) async -> FanWriteOutcome? {
+        // Exclusive for the whole sequence: `engageManual` writes a mode and a
+        // target PER FAN, so a second engage slipping between those writes
+        // leaves the fans split between two intents. Released before the error
+        // path below, which reverts.
+        writeIntent &+= 1
+        let myIntent = writeIntent
         let outcome: FanWriteOutcome?
         do {
-            outcome = try await sequencer.engageManual(targets: targets, fans: fans)
+            outcome = try await withWriteLock {
+                // Re-checked INSIDE the lock, which is the only place it means
+                // anything: a newer intent may have arrived while this one
+                // queued, and writing now would hand the fans to the older of
+                // two live decisions.
+                guard myIntent == self.writeIntent else {
+                    self.record("stale fan write superseded by a newer one — standing down")
+                    return nil
+                }
+                return try await self.sequencer.engageManual(targets: targets, fans: fans)
+            }
         } catch {
             // SAFETY: `engageManual` forces fans one at a time, so a throw can
             // land AFTER earlier fans are already `.forced`. Swallowing it with
@@ -500,6 +572,7 @@ public actor DaemonCore {
     ///   for auto, or we lost control); false only for daemon shutdown, where
     ///   the intent should survive the restart.
     private func revertEverything(reason: String, clearsPersistence: Bool = true) async {
+        writeIntent &+= 1
         revertGeneration &+= 1
         revertsInFlight += 1
         defer { revertsInFlight -= 1 }
@@ -528,7 +601,7 @@ public actor DaemonCore {
                 break
             }
             do {
-                try await sequencer.revertAllAuto(fans: fans)
+                try await withWriteLock { try await self.sequencer.revertAllAuto(fans: fans) }
                 reverted = true
             } catch {
                 record("revert attempt \(attempt) failed: \(error.localizedDescription)")
@@ -704,7 +777,7 @@ public actor DaemonCore {
         case let .release(die):
             record("guardian: cooled to \(Int(die)) °C — releasing the fans")
             await asRevert {
-                try? await self.sequencer.revertAllAuto(fans: fans)
+                try? await self.withWriteLock { try await self.sequencer.revertAllAuto(fans: fans) }
             }
             await resetPort()
         case let .reparkOrphans(orphaned):

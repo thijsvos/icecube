@@ -17,6 +17,10 @@ private actor FakeSMC: SMCControlPort {
     private var unreadable: Set<String> = []
     /// Keys that throw on write, simulating firmware refusal.
     private var unwritable: Set<String> = []
+    /// When true every write yields first, so two write SEQUENCES actually
+    /// interleave. Without this the fake is so fast that an engage runs to
+    /// completion between suspensions and a race test proves nothing.
+    private var yieldOnWrite = false
 
     /// - Parameter deadSensors: keys that EXIST but never return a plausible
     ///   value — the shape a real Mac has, because a curated map is
@@ -56,6 +60,11 @@ private actor FakeSMC: SMCControlPort {
     }
 
     func writeDouble(_ key: String, value: Double, as _: SMCDataType) async throws {
+        if yieldOnWrite {
+            for _ in 0 ..< 4 {
+                await Task.yield()
+            }
+        }
         if unwritable.contains(key) {
             throw IceCubeError.smcFirmwareRejected(key: key, result: SMCResult(rawValue: 0x84))
         }
@@ -80,6 +89,10 @@ private actor FakeSMC: SMCControlPort {
 
     func breakWrite(_ key: String) {
         unwritable.insert(key)
+    }
+
+    func interleaveWrites() {
+        yieldOnWrite = true
     }
 
     /// Deletes a key outright, so reads report `keyNotFound` rather than a
@@ -271,6 +284,53 @@ struct DaemonCoreRevertTests {
         await smc.removeKey("F0md")
         await core.tick(sleptFor: .zero)
         #expect(await core.currentStatus().mode == .auto, "reads fine, just nothing to drive")
+    }
+
+    /// Caught in the log on an ordinary app restart, with both writers behaving
+    /// perfectly on their own. Quitting hands back and the guardian begins
+    /// writing the fan floor (2317); the app relaunches 250 ms later and the
+    /// curve engage writes 3400 straight through the middle of it; the
+    /// floor-hold write lands last and the fans sit at 2317 while the daemon
+    /// believes 3400. Read-back reported `target 2317 != 3400` and re-asserted.
+    ///
+    /// `DaemonCore` is an actor, but `engageManual` writes a mode and a target
+    /// PER FAN and suspends on every one, so two engages interleave and the
+    /// fans end up wherever the last WRITE landed rather than wherever the
+    /// newest INTENT said. `applyGeneration` covers apply-vs-apply, and the
+    /// revert guards cover revert-vs-engage; the guardian's own engage sits
+    /// outside both, which is how this got through.
+    @Test("A curve applied mid-hand-back wins over the floor hold still writing")
+    func curveApplyBeatsAnInFlightFloorHold() async throws {
+        let smc = FakeSMC(temperature: 60)
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(manualConfig(5000))
+        await smc.interleaveWrites()
+
+        // The restart, in order: the app drops (guardian starts writing the
+        // floor), then reconnects and applies its curve while that is still in
+        // flight — 250 ms apart on the hardware trace.
+        async let handBack: Void = core.connectionInvalidated()
+        for _ in 0 ..< 8 {
+            await Task.yield()
+        }
+        async let relaunch: Void = core.apply(curveConfig(persists: false))
+        _ = try await (handBack, relaunch)
+
+        // The invariant is agreement, not a particular winner: whatever the
+        // daemon settled on, the hardware must match it. The bug was the two
+        // disagreeing — fans parked at the floor while the daemon reported a
+        // curve, with only the next tick's re-assert to rescue it.
+        let status = await core.currentStatus()
+        let zero = try await smc.readDouble("F0Tg")
+        let one = try await smc.readDouble("F1Tg")
+        #expect(zero == one, "fans split between two intents: \(zero) vs \(one)")
+        if status.mode == .curve {
+            #expect(zero != 2317, "daemon reports a curve while the fans sit at the floor")
+        }
+        // Whatever happened, both fans are ours and neither was left at rest.
+        #expect(try await smc.readDouble("F0Md") == 1)
+        #expect(zero >= 2317)
     }
 
     /// A persisting curve is explicitly allowed to outlive the app.
