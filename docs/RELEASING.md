@@ -11,28 +11,26 @@ a `v*` tag. The workflow picks its own mode:
 Either way the release is created as a **draft** — nothing goes public until
 you read the generated notes and press publish.
 
-## Before the FIRST public push
+## Repo setup (done 2026-07-27, kept as a record)
 
-- [ ] Enable two GitHub repo settings that this repo's config assumes but cannot
-      turn on for you (both under **Settings → General** / **Settings → Code
-      security**):
-      1. **Allow auto-merge** — without it `dependabot-auto-merge.yml` cannot
-         queue a merge and every routine bump waits on you forever.
-      2. **Dependabot alerts** + **security updates** — alerts on vulnerable
-         GitHub Actions. Free on public repos.
-- [ ] Add a branch protection rule on `main` requiring the CI check. Auto-merge
-      merges as soon as *required* checks pass; with no required checks it merges
-      immediately, which defeats the point of gating on CI.
+The repo went public at github.com/thijsvos/icecube. These were configured via
+the API at the time; they are listed so a future maintainer (or a fork) knows
+what the committed config assumes rather than discovering it by breakage:
 
-- [ ] `docs/img/` contains `popover.png`, `curve-editor.png`, `sensors.png`
-      and `first-run.png`. `README.md` links to all four, so a missing one shows a
-      broken image to everyone who opens the repo. See
-      [docs/img/README.md](img/README.md) for how to capture them.
-- [ ] *Optional:* a shot of the setup window for the "First run" section. It
-      can only be taken while fan control is **off** (with it on, Settings
-      offers "Reinstall" and there is no setup entry point at all), so the
-      free moment to take it is during a clean-machine install test — not by
-      unregistering a working daemon for a photo.
+- [x] **Allow auto-merge** — `dependabot-auto-merge.yml` cannot queue a merge
+      without it, and every routine bump would wait on a human forever.
+- [x] **Dependabot alerts + security updates** — free on public repos, and the
+      only vulnerability surface here is GitHub Actions.
+- [x] **Branch protection on `main` requiring `build-and-test`** — auto-merge
+      merges when *required* checks pass; with none required it merges
+      immediately, which defeats the gate. Admins can still push directly, on
+      purpose, so an emergency fix is not blocked.
+- [x] `docs/img/` holds `popover.png`, `curve-editor.png`, `sensors.png` and
+      `first-run.png`; `README.md` links all four.
+- [ ] *Still open, optional:* a shot of the setup window for "First run". It
+      can only be taken while fan control is **off** (with it on there is no
+      setup entry point at all), so the free moment is a clean-machine install
+      test — not unregistering a working daemon to stage a photo.
 
 ## Version bump checklist
 
