@@ -158,7 +158,33 @@ public actor DaemonCore {
     public func connectionInvalidated() async {
         if config.mode == .manual || (config.mode == .curve && !config.persistsWithoutApp) {
             await revertEverything(reason: "app connection invalidated")
+            await keepFansSpinning(reason: "app quit")
         }
+    }
+
+    /// Immediately after a deliberate hand-back, decides whether the fans may
+    /// stop — and if not, takes them straight back at their floor.
+    ///
+    /// Called *only* from the two hand-backs that are a choice (the user picking
+    /// macOS mode, and the app quitting), never from a safety revert. When the
+    /// daemon reverts because it lost read-back control or tripped the ceiling,
+    /// letting go is the point; grabbing the fans again a millisecond later
+    /// would defeat it.
+    ///
+    /// Why here and not in the tick: see ``FanGuardian/handBack(fans:dieCelsius:)``.
+    /// A 2 s tick cannot catch a fan that coasts to a stop in 2.5 s, and a fan
+    /// that has stopped needs ~9 s to move again no matter what it is commanded.
+    private func keepFansSpinning(reason: String) async {
+        let generation = revertGeneration
+        guard config.mode == .auto, !revertPending else { return }
+        guard let fans = try? await readFans(), !fans.isEmpty else { return }
+        guard let die = await (try? readTemperatures())?.hottestDieCelsius else { return }
+        guard case let .holdAtFloor(targets) = guardian.handBack(fans: fans, dieCelsius: die) else {
+            return
+        }
+        record("\(reason) at \(Int(die)) °C — holding the fans at minimum rather than letting them stop")
+        await engage(targets: targets, fans: fans, since: generation)
+        status.guardianActive = guardian.isActive
     }
 
     // MARK: - XPC entry points
@@ -235,6 +261,7 @@ public actor DaemonCore {
         switch newConfig.mode {
         case .auto:
             await revertEverything(reason: "app requested auto")
+            await keepFansSpinning(reason: "macOS mode")
         case .manual:
             let generation = revertGeneration
             let fans = try await readFans()

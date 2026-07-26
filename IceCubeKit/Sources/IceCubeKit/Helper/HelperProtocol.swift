@@ -38,7 +38,41 @@ public enum HelperConstants {
     ///     a stopped fan at 6800 instead of 4250 produced an identical ramp
     ///     (295/573/839/1731… either way) and an identical 1.5 s dead time, so
     ///     the push was cost without benefit.
-    public static let protocolVersion = "8"
+    /// v9: since the ramp cannot be made faster (v8), the daemon stops starting
+    ///     from rest. On a warm machine (>= 55 °C die) it catches a fan that is
+    ///     coasting below its own `Mn` with nobody forcing it, and holds it at
+    ///     the floor instead of letting it stop — so switching away from macOS
+    ///     mode is a ~1 s adjustment rather than a 4.4 s standing start. Three
+    ///     details are load-bearing, all measured on Mac14,9:
+    ///     - the catch is on the way DOWN (below `Mn`, no debounce, and
+    ///       evaluated the instant the app asks for auto). Handed back from
+    ///       4400 RPM the fans read zero four seconds later, so waiting for a
+    ///       stop, or for a two-tick debounce, arrives after the event.
+    ///     - a fan far below `Mn` gets ~50 % drive until it is most of the way
+    ///       back, then settles onto the floor. Unlike the v7 breakaway (6800
+    ///       vs 4250, no difference), this end of the scale matters: commanded
+    ///       2317 from rest the fan sat still 6.5 s; commanded ~4550 it moved
+    ///       in 1.5 s.
+    ///     - it matches any non-forced mode, not just SMC mode 0. Our own
+    ///       hand-back writes mode 3, so the old orphan ladder never saw the
+    ///       fans macOS declined to reclaim, and they sat dead indefinitely.
+    /// v10: the breakaway triggers below 75 % of `Mn`, not merely at a
+    ///     standstill. v9 caught a fan mid-coast at 293 RPM, commanded it its
+    ///     own 2317 minimum, and watched it decay to a stop anyway and sit
+    ///     there 9.4 s — a fan far below its minimum needs more than its
+    ///     minimum whether or not it has technically stopped yet.
+    /// v11: the keep-spinning decision moved to the *moment* of the hand-back
+    ///     (`FanGuardian.handBack`), because the tick cannot make it in time.
+    ///     Traced twice on hardware: the fans coast to a standstill in ~2.5 s,
+    ///     the next tick landed 1.7 s and 3.0 s later, and neither catch helped
+    ///     — a fan at 293 RPM commanded its 2317 minimum decayed to a stop
+    ///     anyway, and once stopped both runs took the same 9.4 s to move
+    ///     again, one commanded 2317 and the other 4600. Drive buys nothing
+    ///     (v8's finding, at the other end of the range), and restart latency
+    ///     is not even consistent: an engage from a settled stop took 1.1 s.
+    ///     Nothing here is controllable, so the fans must simply never stop. On
+    ///     a warm machine they now ramp DOWN to their floor with no gap.
+    public static let protocolVersion = "11"
     /// How often the app sends a heartbeat while connected.
     public static let heartbeatInterval: TimeInterval = 5
     /// SAFETY: no heartbeat for this long → the daemon's watchdog reverts to

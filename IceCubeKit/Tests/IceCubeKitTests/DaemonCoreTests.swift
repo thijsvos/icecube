@@ -166,6 +166,58 @@ struct DaemonCoreRevertTests {
         #expect(await smc.resetCount > 0, "SMC connection released so thermalmonitord resumes")
     }
 
+    /// The reason leaving macOS mode used to take four and a half seconds: the
+    /// hand-back let the fans stop, and a stopped fan cannot be hurried. Traced
+    /// on a Mac14,9, they coast to a standstill in ~2.5 s — faster than the 2 s
+    /// safety tick can reliably react — so the decision is taken here, while
+    /// they are still turning, and they ramp down to the floor instead.
+    @Test("Asking for macOS mode on a warm machine keeps the fans at their floor")
+    func warmHandBackKeepsTheFansSpinning() async throws {
+        let smc = FakeSMC(temperature: 60) // warm, but under the guardian's curve
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(manualConfig(5000))
+
+        try await core.apply(FanConfig(mode: .auto))
+        #expect(await core.config.mode == .auto, "the daemon really is in auto")
+        // Never stopped: still driven, and driven at the floor rather than 5000.
+        #expect(try await smc.readDouble("F0Md") == 1)
+        #expect(try await smc.readDouble("F0Tg") == 2317)
+        #expect(try await smc.readDouble("F1Tg") == 2317)
+        #expect(await core.currentStatus().guardianActive, "the UI must not claim macOS is in charge")
+    }
+
+    /// The counterweight: macOS mode on a cold machine must mean actual silence,
+    /// or the app has quietly removed the option the user picked.
+    @Test("Asking for macOS mode on a cold machine really does hand the fans back")
+    func coldHandBackReleasesTheFans() async throws {
+        let smc = FakeSMC(temperature: 35)
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(manualConfig(5000))
+
+        try await core.apply(FanConfig(mode: .auto))
+        #expect(await core.config.mode == .auto)
+        #expect(try await smc.readDouble("F0Md") != 1, "handed back, not re-taken")
+        #expect(await core.currentStatus().guardianActive == false)
+    }
+
+    /// SAFETY: only the two *deliberate* hand-backs keep the fans. A revert the
+    /// daemon took because it lost control must actually let go — grabbing them
+    /// again a millisecond later would defeat the point of the revert.
+    @Test("A safety revert lets go even on a warm machine")
+    func safetyRevertDoesNotReTakeTheFans() async throws {
+        let smc = FakeSMC(temperature: 60)
+        let core = makeCore(smc: smc)
+        // Deliberately no `heartbeat()` — the watchdog's strongest case, and the
+        // opposite of a user choosing macOS mode.
+        try await core.apply(manualConfig(5000))
+
+        await core.tick(sleptFor: .zero)
+        #expect(await core.config.mode == .auto)
+        #expect(try await smc.readDouble("F0Md") != 1, "a safety revert must let go")
+    }
+
     /// A persisting curve is explicitly allowed to outlive the app.
     @Test("Losing the connection does NOT revert a curve that persists without the app")
     func persistingCurveSurvivesInvalidation() async throws {
