@@ -80,6 +80,11 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.thijsvos.icecube
         PRODUCT_NAME: Ice Cube
+        # Without this the Swift module is named after PRODUCT_NAME with the
+        # space escaped — `Ice_Cube` — so the test target would have to say
+        # `@testable import Ice_Cube`. Naming it explicitly keeps the import
+        # matching the target and the repo.
+        PRODUCT_MODULE_NAME: IceCube
         # UI code defaults to the main actor; helper/kit stay nonisolated.
         SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
         SWIFT_APPROACHABLE_CONCURRENCY: YES
@@ -95,12 +100,50 @@ targets:
         copy:
           destination: executables
 
+  # Unit tests for the APP target. IceCubeKit has its own SwiftPM tests
+  # (`swift test`); this exists because a good deal of real logic lives on the
+  # app side and, until now, none of it could be tested at all — a bug in
+  # `HelperManager` and a locale bug in the fan-speed formatting both had to be
+  # caught by hand on hardware, and the formatter had to be moved into
+  # IceCubeKit before it could carry a regression test.
+  #
+  # HOST-LESS on purpose. Hosting the tests in Ice Cube.app was tried first and
+  # hangs: it is an LSUIElement menu-bar app that opens an XPC connection to the
+  # root daemon during launch, and XCTest gives up with "the test runner hung
+  # before establishing connection". Even if it were coaxed into working, every
+  # CI run would be launching a menu-bar app and talking to a daemon that does
+  # not exist on the runner.
+  #
+  # So the app sources under test are compiled INTO the test bundle instead of
+  # imported from the app binary. That works because these are self-contained
+  # value/state types — the moment a file needs the running app around it, it is
+  # the wrong thing to unit-test anyway. Add such files to `sources` below.
+  IceCubeTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - IceCubeTests
+      - IceCube/CurveEditorModel.swift
+    dependencies:
+      - package: IceCubeKit
+    settings:
+      base:
+        # Matches the app target: these tests exercise MainActor-isolated types.
+        SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.thijsvos.icecube.tests
+
 # Schemes are generated from here so they are versioned (no .xcuserdatad needed).
 schemes:
   IceCube:
     build:
       targets:
         IceCube: all
+        IceCubeTests: [test]
+    test:
+      config: Debug
+      targets:
+        - IceCubeTests
     run:
       config: Debug
   "IceCube (Simulated)":

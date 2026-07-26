@@ -65,6 +65,17 @@ jobs:
           build CODE_SIGNING_ALLOWED=NO
 
       # Layout + the capability boundary (app must link no SMC writer).
+      # Ad-hoc signed (`CODE_SIGN_IDENTITY=-`), NOT unsigned like the build step
+      # above. An unsigned .xctest bundle will not load: the runner sits there
+      # and xcodebuild eventually reports "the test runner timed out while
+      # preparing to run tests", which reads like a hang rather than a signing
+      # problem. Ad-hoc needs no certificate, so it works on a bare runner.
+      - name: Run app-target tests
+        run: >
+          xcodebuild test -project IceCube.xcodeproj -scheme IceCube
+          -configuration Debug -derivedDataPath build
+          CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=YES DEVELOPMENT_TEAM=""
+
       - name: Verify bundle
         run: sh scripts/verify-bundle.sh
 
