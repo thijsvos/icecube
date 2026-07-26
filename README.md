@@ -17,7 +17,10 @@ dependencies**; small footprint is a design goal, not an accident.
 </p>
 
 > **Status: beta.** Fully functional — monitoring, manual control, curves,
-> presets, boot persistence — developed and tested on a MacBook Pro 14" M2 Pro
+> presets, boot persistence. The [download](#install) is a complete hardware
+> monitor; fan control needs a one-minute local build (a free Apple ID is
+> enough) because macOS will not let an unsigned app register a root helper.
+> Developed and tested on a MacBook Pro 14" M2 Pro
 > (Mac14,9) under macOS 26. Other Apple Silicon Macs should work for
 > monitoring out of the box; fan-control write paths for M3/M4 (`Ftst`
 > unlock) and M5 are implemented from community research but unverified —
@@ -84,20 +87,38 @@ directions. The app itself contains **no fan-write code at all**.
 
 Ice Cube is not in the App Store (sandboxed apps cannot touch the SMC).
 
-**Building from source is the recommended path, and currently the only one
-that gives you fan control.** Prebuilt archives on the
-[Releases](https://github.com/thijsvos/icecube/releases) page are unsigned
-until the project moves to a paid Apple Developer account: macOS will quarantine
-them, and — more importantly — the root helper will only register on a Mac that
-trusts the identity that signed it, which in practice is the machine that built
-it. Downloaded builds therefore give you **monitoring only**. Building from
-source signs with your own Apple ID (a free one works) and everything runs.
+### Download — the full hardware monitor, no build required
+
+Grab the archive from [Releases](https://github.com/thijsvos/icecube/releases).
+You get **everything except fan control**: live temperature and RPM charts, all
+four history windows, the crosshair and min/avg/max readouts, CSV export, the
+sensors browser and diagnostics export. Reading the SMC needs no privileges, so
+none of that asks anything of you.
+
+It is unsigned, so macOS quarantines it on first launch — right-click the app
+and choose **Open**, or System Settings → Privacy & Security → **Open Anyway**.
+
+### Build — adds fan control, takes about a minute
+
+Fan control needs a **root helper daemon**, and macOS will not register one from
+an unsigned app: `SMAppService` refuses the plist outright with *"Codesigning
+failure loading plist … code: -67056"*. That is Apple's rule, not ours, and it is
+why the download cannot include it. Shipping a build that everyone could use
+for fan control requires a **paid** Apple Developer ID for notarization — the
+project is not there yet.
+
+Building locally sidesteps it entirely: you sign with **your own Apple ID, and a
+free one is enough.** Ice Cube pins its XPC channel to whatever team signed it,
+resolved at runtime, so your build trusts itself with nothing to configure
+beyond your team ID.
 
 ```bash
 git clone https://github.com/thijsvos/icecube && cd icecube
 brew bundle              # xcodegen + swiftformat
 xcodegen generate
-sh scripts/set-team.sh YOURTEAMID   # your Apple Development team (free ID works)
+# Your 10-character Apple team ID. Xcode -> Settings -> Accounts shows it next
+# to your team name; a free Apple ID works. Sign in there first if you never have.
+sh scripts/set-team.sh YOURTEAMID
 sh scripts/install-debug.sh          # builds, installs to /Applications, launches
 ```
 
