@@ -27,7 +27,7 @@ swiftformat --lint .              # must be clean
 sh scripts/verify-bundle.sh       # bundle layout sanity
 ```
 
-Helper-daemon changes additionally need `sh scripts/install-debug.sh` and a
+Helper-daemon changes additionally need `sh scripts/install.sh --debug` and a
 **Re-register** from the app's Settings (launchd keeps running the old binary
 otherwise — the #1 "why isn't my change live" trap).
 

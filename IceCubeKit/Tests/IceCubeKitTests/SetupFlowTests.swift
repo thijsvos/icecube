@@ -34,7 +34,7 @@ struct AppRelocationTests {
         )
     }
 
-    /// Never nag the developer: install-debug.sh is the supported path, and
+    /// Never nag the developer: install.sh is the supported path, and
     /// relocating a build product would break the next build.
     @Test("Xcode build products are never relocated")
     func developerBuildsAreLeftAlone() {

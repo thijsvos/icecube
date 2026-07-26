@@ -27,7 +27,7 @@ public enum RegistrationPreflight {
         // plist outright, and no amount of retrying helps.
         guard teamID?.isEmpty == false else {
             return "This build isn’t code-signed, so macOS won’t load the helper. "
-                + "Build and install a signed copy with scripts/install-debug.sh "
+                + "Build and install a signed copy with scripts/install.sh "
                 + "(XCODE_GUIDE §4), then try again."
         }
         // XCODE_GUIDE §4: "Registering daemons from Xcode's DerivedData path is
@@ -35,7 +35,7 @@ public enum RegistrationPreflight {
         guard isInApplications(bundlePath) else {
             return "Ice Cube has to run from /Applications to register its helper — "
                 + "it’s running from \(bundlePath). Install it with "
-                + "scripts/install-debug.sh (XCODE_GUIDE §4), then try again."
+                + "scripts/install.sh (XCODE_GUIDE §4), then try again."
         }
         return nil
     }

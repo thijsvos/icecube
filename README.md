@@ -98,7 +98,7 @@ none of that asks anything of you.
 It is unsigned, so macOS quarantines it on first launch — right-click the app
 and choose **Open**, or System Settings → Privacy & Security → **Open Anyway**.
 
-### Build — adds fan control, takes about a minute
+### Build — adds fan control
 
 Fan control needs a **root helper daemon**, and macOS will not register one from
 an unsigned app: `SMAppService` refuses the plist outright with *"Codesigning
@@ -112,15 +112,43 @@ free one is enough.** Ice Cube pins its XPC channel to whatever team signed it,
 resolved at runtime, so your build trusts itself with nothing to configure
 beyond your team ID.
 
+**You need first:**
+
+| | |
+| --- | --- |
+| **Xcode** | From the App Store. The full app — Command Line Tools alone cannot build or sign this. It is a large download; if you do not already have it, budget for that rather than for the build. |
+| **An Apple ID signed into Xcode** | Xcode → Settings → Accounts → **+** → Apple ID. Free accounts work. Without this there is no team to sign with. |
+| **[Homebrew](https://brew.sh)** | For `xcodegen` and `swiftformat`. |
+
+Then, from a Terminal:
+
 ```bash
 git clone https://github.com/thijsvos/icecube && cd icecube
 brew bundle              # xcodegen + swiftformat
-xcodegen generate
-# Your 10-character Apple team ID. Xcode -> Settings -> Accounts shows it next
-# to your team name; a free Apple ID works. Sign in there first if you never have.
+
+# Your 10-character Apple team ID:
+security find-certificate -c "Apple Development" -p \
+  | openssl x509 -noout -subject | sed -n 's/.*OU *= *\([A-Z0-9]\{10\}\).*/\1/p'
+
 sh scripts/set-team.sh YOURTEAMID
-sh scripts/install-debug.sh          # builds, installs to /Applications, launches
+sh scripts/install.sh    # builds Release, installs to /Applications, launches
 ```
+
+The build itself takes a couple of minutes on a warm machine.
+
+> **Careful with the team ID.** It is the certificate's `OU`, which is what the
+> command above prints. It is **not** the value in parentheses that
+> `security find-identity` shows next to your email — that is the certificate's
+> own ID and using it will fail signing with a confusing error.
+
+**If it fails:**
+
+| Symptom | Cause |
+| --- | --- |
+| `xcodebuild: command not found`, or errors about a missing SDK | Command Line Tools only. Install Xcode, open it once, accept the licence. |
+| The team-ID command prints nothing | No Apple Development certificate yet. Open Xcode → Settings → Accounts, add your Apple ID, then open the project once so Xcode issues one. |
+| `error: Local.xcconfig missing` | `set-team.sh` has not run yet. |
+| App builds but fan control says "connecting…" forever | The signature is not what the helper expects. Re-run `set-team.sh` with the `OU` value and reinstall. |
 
 ### First run
 

@@ -37,7 +37,7 @@ public enum AppRelocation {
     public static func verdict(bundlePath: String, isTranslocated: Bool = false) -> Verdict {
         let normalized = bundlePath.hasSuffix("/") ? String(bundlePath.dropLast()) : bundlePath
 
-        // A build product is not an installation. `install-debug.sh` puts a
+        // A build product is not an installation. `install.sh` puts a
         // signed copy in /Applications; moving DerivedData would break the next
         // build and confuse Xcode about what it just produced.
         if isDeveloperBuild(normalized) {
