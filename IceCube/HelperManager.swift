@@ -112,6 +112,14 @@ final class HelperManager {
     /// type had no tests at all until now.
     func start() {
         guard maintenanceTask == nil else { return }
+        // Fast path. The 5 s poll in `maintain()` remains the guarantee — see
+        // `PowerSourceMonitor` for why this is belt AND braces rather than a
+        // failure to choose.
+        powerSource.onChange = { [weak self] in
+            guard let self else { return }
+            Task { await self.powerSourceChanged(to: self.powerSource.current) }
+        }
+        powerSource.start()
         // One maintenance loop: keeps registration fresh (approval happens in
         // System Settings, outside our process), reconnects when enabled, and
         // drives heartbeat + status while connected.

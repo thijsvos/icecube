@@ -124,9 +124,15 @@ private final class FakeRegistrar: DaemonRegistering {
 @MainActor
 private final class FakePowerSource: PowerSourceObserving {
     var current: PowerProfilePolicy.PowerSource
+    var onChange: (@MainActor () -> Void)?
+    private(set) var startCalls = 0
 
     init(_ initial: PowerProfilePolicy.PowerSource = .wall) {
         current = initial
+    }
+
+    func start() {
+        startCalls += 1
     }
 }
 
@@ -735,6 +741,25 @@ struct HelperManagerTests {
         await manager.powerSourceChanged(to: .wall)
 
         #expect(channel.appliedConfigs.last?.sharedCurve == FanCurve.cold)
+    }
+
+    /// The poll in `maintain()` guarantees a charger change is *noticed*; this
+    /// wiring is what makes it noticed **now** instead of up to 5 s later. It is
+    /// asserted separately because it has already been shipped broken once: the
+    /// first version of the feature had only the instant path, it silently never
+    /// fired, and nothing failed.
+    @Test("start() wires the instant path instead of leaving it to the 5 s poll")
+    func startWiresTheInstantPath() {
+        let registrar = FakeRegistrar(); registrar.status = .enabled
+        let power = FakePowerSource(.wall)
+        let manager = makeManager(
+            registrar: registrar, channel: FakeChannel(), defaults: makeDefaults(), power: power
+        )
+
+        manager.start()
+
+        #expect(power.startCalls == 1, "the monitor was never told to begin observing")
+        #expect(power.onChange != nil, "nothing is listening — detection would wait for the poll")
     }
 
     /// A rule that silently failed to persist would read as "off" next launch,
