@@ -233,6 +233,29 @@ jobs:
             echo "any user setting, and manual mode reverts to automatic if the app"
             echo "stops heartbeating for 15 s."
             echo
+            # A protocol bump means the installed background service and the
+            # new app cannot talk to each other, so fan control keeps running
+            # the OLD build until the user re-registers. The app detects this
+            # and offers "Update Now", but someone reading the release notes
+            # should not be surprised by it. Path is hardcoded; if it ever
+            # moves, both greps come back empty and the section is simply
+            # omitted rather than the release failing.
+            PROTO=IceCubeKit/Sources/IceCubeKit/Helper/HelperProtocol.swift
+            prev=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)
+            now_p=$(grep -oE 'protocolVersion = "[0-9]+"' "$PROTO" \
+              | grep -oE '[0-9]+' || true)
+            old_p=$(git show "$prev:$PROTO" 2>/dev/null \
+              | grep -oE 'protocolVersion = "[0-9]+"' | grep -oE '[0-9]+' || true)
+            if [ -n "$old_p" ] && [ -n "$now_p" ] && [ "$old_p" != "$now_p" ]; then
+              echo "### Upgrading from ${prev#v}"
+              echo
+              echo "The background service's protocol changed in this release"
+              echo "($old_p -> $now_p), so fan control needs re-registering once."
+              echo "Ice Cube notices the mismatch on launch and offers"
+              echo "**Update Now** — take it. Until you do, the previous"
+              echo "version's service keeps running your fans."
+              echo
+            fi
             echo "### Changes"
             echo
             git log --pretty='- %s' "$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)..HEAD" \
