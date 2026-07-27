@@ -20,6 +20,7 @@ dependencies**; small footprint is a design goal, not an accident.
 > presets, boot persistence. The [download](#install) is a complete hardware
 > monitor; fan control needs a one-minute local build (a free Apple ID is
 > enough) because macOS will not let an unsigned app register a root helper.
+> Verified on one Mac so far — see [Compatibility](#compatibility).
 > Developed and tested on a MacBook Pro 14" M2 Pro
 > (Mac14,9) under macOS 26. Other Apple Silicon Macs should work for
 > monitoring out of the box; fan-control write paths for M3/M4 (`Ftst`
@@ -44,6 +45,48 @@ dependencies**; small footprint is a design goal, not an accident.
   <img src="docs/img/curve-editor.png" alt="The fan-curve editor: draggable temperature-to-RPM points with a live marker showing the current die temperature." width="620">
   <br><em>The curve editor — drag points, double-click to add, arrow keys to nudge.</em>
 </p>
+
+## Compatibility
+
+**One Mac has actually been verified.** Everything else is either implemented
+from community research or falls back to generic probing, and this table says
+which is which rather than implying broader support than exists.
+
+| Mac | Monitoring | Fan control | Status |
+| --- | --- | --- | --- |
+| **MacBook Pro 14" M2 Pro** (`Mac14,9`) | curated sensor labels | works — `direct` path, `Md` key | **Verified** on macOS 26.4.1. The machine Ice Cube is developed on. |
+| Other **M2** family (`Mac14,x`) | curated sensor labels | expected — same `direct` path | Not yet reported |
+| **M1** family | generic probe | implemented — `direct` path | Not yet reported |
+| **M3 / M4** | generic probe | implemented — `Ftst` unlock, **from research only** | Not yet reported |
+| **M5** | generic probe | implemented — `md` key rename, **from research only** | Not yet reported |
+| **MacBook Air** (any, fanless) | works | no fans to control | Supported by design |
+| **Intel** | not supported | not supported | Out of scope for v1 |
+
+**Monitoring is the safe bet everywhere.** Unmapped models fall back to probing
+every plausible `T***` sensor key, so temperatures and fan readings generally
+work out of the box — you may just see rawer labels than the curated M2 set.
+
+**Fan control is the part that varies by generation.** The write sequence differs
+across SoCs: M3/M4 need an `Ftst` unlock to make `thermalmonitord` yield, and M5
+renamed the fan-mode key. Both are implemented from
+[community research](docs/CREDITS.md) and **have never run on the hardware they
+describe** — that is exactly what the table's "from research only" means.
+
+### Fill in a row
+
+Ice Cube can now answer this about your Mac itself:
+
+**Settings → Fan Control → Check Fan Control.**
+
+It forces the fan mode, writes each fan's *current* target back to itself, checks
+the firmware kept it, and reverts — a real exercise of the write path that
+commands no change in speed. It takes a few milliseconds and nothing spins up.
+
+If it reports anything other than "works", that is worth sending: export
+diagnostics from the **Sensors** window and open a
+[New Mac model report](https://github.com/thijsvos/icecube/issues/new?template=new_mac_model.md).
+The JSON includes the verdict, which unlock path your firmware needed, and which
+mode key your generation uses — the three facts a row in this table is made of.
 
 ## Safety design
 
@@ -183,10 +226,17 @@ scavenger hunt.
 
 ## Supporting a new Mac model
 
-Temperature-sensor keys change with every Apple SoC generation. If your model
-shows few or oddly-labeled sensors: popover → **Sensors…** → **Export
-Diagnostics…**, then open a "New Mac model report" issue with the JSON
-attached. That file is exactly what's needed to add a curated mapping.
+Two separate things vary by generation, and a report can help with either.
+
+**Sensor labels.** Temperature-key names change with every Apple SoC, and only
+the M2 family has a curated map so far. If your Mac shows few or oddly-labeled
+sensors, that is the fallback probe doing its best — popover → **Sensors…** →
+**Export Diagnostics…** and open a report. The JSON is exactly what a curated
+mapping is written from.
+
+**The fan-control write path.** See [Compatibility](#compatibility) — Settings →
+**Check Fan Control** answers this in a few milliseconds, and the result rides
+along in the same export.
 
 <p align="center">
   <img src="docs/img/sensors.png" alt="The SMC sensors browser listing every temperature key this Mac exposes, with live values." width="620">
