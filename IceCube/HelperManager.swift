@@ -391,6 +391,84 @@ final class HelperManager {
         log.notice("preset: \(preset.name, privacy: .public) applied in \(ms, privacy: .public) ms")
     }
 
+    /// The app-wide "keep the curve running when I quit" preference.
+    ///
+    /// Reads the **injected** suite. `powerSourceChanged(to:)` used to reach for
+    /// `UserDefaults.standard` here instead, which quietly undid the point of
+    /// injecting it: under test that read the developer's own preference, so
+    /// the power rule's assertions depended on a setting outside the test.
+    private var persistCurvePreference: Bool {
+        defaults.bool(forKey: Self.persistCurveKey)
+    }
+
+    private static let persistCurveKey = "persistCurve"
+
+    /// Why a quick-switch was declined, or nil when it may proceed.
+    ///
+    /// Pure and static so the rule can be tested directly. The obvious
+    /// alternative — hold a self-test open with a continuation and observe the
+    /// manager mid-flight — was tried and **hung the test runner for ten
+    /// minutes**, which is precisely the host-less-bundle hazard `project.yml`
+    /// already documents. Extracting the decision costs one function and needs
+    /// no concurrency at all.
+    enum QuickSwitchRefusal: String {
+        case daemonUnreachable = "the daemon is unreachable"
+        /// A self-test drives the fans directly and restores the interrupted
+        /// config when it finishes (PLAN.md §4.3.6). A preset landing mid-test
+        /// would be undone a moment later by that restore — which reads to the
+        /// user as the click being ignored, after the fans have moved twice.
+        case selfTestInFlight = "a self-test holds the fans"
+    }
+
+    static func quickSwitchRefusal(connected: Bool, isSelfTesting: Bool) -> QuickSwitchRefusal? {
+        if !connected {
+            return .daemonUnreachable
+        }
+        if isSelfTesting {
+            return .selfTestInFlight
+        }
+        return nil
+    }
+
+    /// Switches to the next preset in `cycle` — the ⌥-click quick-switch
+    /// (PLAN.md §1.1).
+    ///
+    /// Goes through ``applyPreset(_:persistCurve:)`` rather than `apply` so the
+    /// gesture cannot become a second path with its own idea of the persist
+    /// rule; it is the same call the popover's buttons make.
+    ///
+    /// - Returns: the preset applied, or `nil` when the gesture was declined —
+    ///   which is not a failure. There is genuinely nothing to switch to while
+    ///   the daemon is unreachable or a write-path self-test holds the fans, and
+    ///   the caller uses nil to decide whether to say anything to the user.
+    @discardableResult
+    func cyclePreset(in cycle: [Preset]) async -> Preset? {
+        if let refusal = Self.quickSwitchRefusal(
+            connected: {
+                if case .connected = connection {
+                    true
+                } else {
+                    false
+                }
+            }(),
+            isSelfTesting: isSelfTesting
+        ) {
+            // Bound to a local first. `os.Logger`'s interpolation is an
+            // autoclosure, so `self.` is required inside it — and swiftformat's
+            // redundant-self rule strips it back out, which fails the build in a
+            // way that reads as a mistake rather than a tooling collision.
+            let reason = refusal.rawValue
+            log.notice("quick-switch: declined — \(reason, privacy: .public)")
+            return nil
+        }
+        guard let next = PresetCycle.next(after: lastAppliedConfig, in: cycle) else { return nil }
+        log.notice("quick-switch: \(next.name, privacy: .public)")
+        await applyPreset(next, persistCurve: persistCurvePreference)
+        // `applyPreset` swallows failures into `lastError`; report honestly
+        // rather than claiming a switch that did not happen.
+        return lastError == nil ? next : nil
+    }
+
     /// Re-applies the currently active curve with a new persist setting, so
     /// toggling "Keep running" takes effect immediately instead of only on the
     /// next preset click. No-op unless a curve is active.
@@ -406,7 +484,7 @@ final class HelperManager {
         guard let data = defaults.data(forKey: Self.lastCurveKey),
               var config = try? JSONDecoder().decode(FanConfig.self, from: data),
               config.mode == .curve else { return nil }
-        config.persistsWithoutApp = defaults.bool(forKey: "persistCurve")
+        config.persistsWithoutApp = persistCurvePreference
         return config
     }
 
@@ -520,7 +598,7 @@ final class HelperManager {
               let preset = PresetStore.builtins.first(where: { $0.kind == kind })
         else { return }
         log.notice("power rule: switching to \(preset.name, privacy: .public)")
-        await applyPreset(preset, persistCurve: UserDefaults.standard.bool(forKey: "persistCurve"))
+        await applyPreset(preset, persistCurve: persistCurvePreference)
     }
 
     // MARK: - Write-path self-test (PLAN.md §4.3.6)

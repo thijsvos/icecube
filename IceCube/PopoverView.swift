@@ -43,8 +43,29 @@ struct PopoverView: View {
             }
         }
         .task { await state.helper.maintainOnce() }
-        .onAppear { state.popoverAppeared() }
+        .onAppear {
+            state.popoverAppeared()
+            quickSwitchIfOptionHeld()
+        }
         .onDisappear { state.popoverDisappeared() }
+    }
+
+    /// ⌥-click on the menu bar item switches to the next preset (PLAN.md §1.1).
+    ///
+    /// **The popover still opens** — it just opens already switched. That is the
+    /// cheap half of the plan's two variants and it is deliberately first:
+    /// `MenuBarExtra` gives no way to intercept a click before the window
+    /// appears, and the silent variant needs a hand-rolled `NSStatusItem` to
+    /// host the glyph. Doing that here would put the whole menu bar at risk for
+    /// a gesture; this reads one flag.
+    ///
+    /// Read at *appear* rather than captured earlier because there is nowhere
+    /// earlier to read it. `NSEvent.modifierFlags` is the live keyboard state,
+    /// so a user who releases ⌥ between the click and the window appearing gets
+    /// an ordinary open — which is the harmless direction to be wrong in.
+    private func quickSwitchIfOptionHeld() {
+        guard NSEvent.modifierFlags.contains(.option) else { return }
+        Task { await state.helper.cyclePreset(in: PresetStore.builtins) }
     }
 
     private var liveContent: some View {

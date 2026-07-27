@@ -666,6 +666,109 @@ struct HelperManagerTests {
         #expect(manager.writePathReport?.isWorthReporting == true)
     }
 
+    // MARK: - Preset quick-switch (⌥-click)
+
+    private var cycle: [Preset] {
+        PresetStore.builtins
+    }
+
+    @Test("The quick-switch advances to the next preset and sends it")
+    func quickSwitchAdvances() async {
+        let registrar = FakeRegistrar(); registrar.status = .enabled
+        let channel = FakeChannel()
+        let manager = makeManager(registrar: registrar, channel: channel, defaults: makeDefaults())
+        await manager.maintainOnce()
+        await manager.applyPreset(PresetStore.builtins[0], persistCurve: false) // Quiet
+        let before = channel.appliedConfigs.count
+
+        let applied = await manager.cyclePreset(in: cycle)
+
+        #expect(applied?.kind == .balanced)
+        #expect(channel.appliedConfigs.count == before + 1)
+        #expect(channel.appliedConfigs.last?.sharedCurve == FanCurve.balanced)
+    }
+
+    /// The gesture has no UI of its own, so a click that silently does nothing is
+    /// indistinguishable from the modifier not being detected. It must decline
+    /// loudly (a log line) and tell the caller, not pretend.
+    @Test("The quick-switch declines while the daemon is unreachable")
+    func quickSwitchDeclinesWhenDisconnected() async {
+        let registrar = FakeRegistrar(); registrar.status = .notRegistered
+        let channel = FakeChannel()
+        let manager = makeManager(registrar: registrar, channel: channel, defaults: makeDefaults())
+        let before = channel.appliedConfigs.count
+
+        let applied = await manager.cyclePreset(in: cycle)
+
+        #expect(applied == nil)
+        #expect(channel.appliedConfigs.count == before, "nothing may be sent while disconnected")
+    }
+
+    /// The gate, tested directly. Holding a real self-test open with a
+    /// continuation and observing the manager mid-flight hung the test runner
+    /// for ten minutes — the host-less-bundle hazard `project.yml` documents.
+    @Test(
+        "The quick-switch is refused when the daemon cannot act on it",
+        arguments: [
+            (connected: false, selfTesting: false, refused: true),
+            (connected: false, selfTesting: true, refused: true),
+            (connected: true, selfTesting: true, refused: true),
+            (connected: true, selfTesting: false, refused: false),
+        ]
+    )
+    func quickSwitchGate(_ c: (connected: Bool, selfTesting: Bool, refused: Bool)) {
+        let refusal = HelperManager.quickSwitchRefusal(
+            connected: c.connected, isSelfTesting: c.selfTesting
+        )
+        #expect((refusal != nil) == c.refused)
+    }
+
+    /// Every refusal must carry a reason the log can name. "declined" on its own
+    /// is the shape of message this project has already been burned by twice.
+    @Test("A refusal always says why")
+    func refusalNamesItsReason() {
+        #expect(
+            HelperManager.quickSwitchRefusal(connected: false, isSelfTesting: false)
+                == .daemonUnreachable
+        )
+        #expect(
+            HelperManager.quickSwitchRefusal(connected: true, isSelfTesting: true)
+                == .selfTestInFlight
+        )
+    }
+
+    @Test("The quick-switch honours the injected keep-running preference")
+    func quickSwitchHonoursPersistPreference() async {
+        let registrar = FakeRegistrar(); registrar.status = .enabled
+        let channel = FakeChannel()
+        let defaults = makeDefaults()
+        defaults.set(true, forKey: "persistCurve")
+        let manager = makeManager(registrar: registrar, channel: channel, defaults: defaults)
+        await manager.maintainOnce()
+
+        _ = await manager.cyclePreset(in: cycle)
+
+        #expect(channel.appliedConfigs.last?.persistsWithoutApp == true)
+    }
+
+    /// Four clicks from a known start must come back to it, through the real
+    /// apply path rather than only in `PresetCycle`'s arithmetic.
+    @Test("Cycling the full length through the daemon returns to the start")
+    func quickSwitchFullLoop() async {
+        let registrar = FakeRegistrar(); registrar.status = .enabled
+        let channel = FakeChannel()
+        let manager = makeManager(registrar: registrar, channel: channel, defaults: makeDefaults())
+        await manager.maintainOnce()
+        await manager.applyPreset(PresetStore.builtins[0], persistCurve: false) // Quiet
+
+        var names: [String] = []
+        for _ in 0 ..< cycle.count {
+            await names.append(manager.cyclePreset(in: cycle)?.name ?? "declined")
+        }
+
+        #expect(names == ["Balanced", "Cold", "Max", "Quiet"])
+    }
+
     // MARK: - Power-aware profiles
 
     private func enabledRule() -> PowerProfilePolicy.Rule {
