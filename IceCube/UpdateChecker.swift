@@ -6,6 +6,14 @@ import Observation
 /// Checks the GitHub Releases API for a newer version. Deliberately minimal
 /// (small-footprint rule: no auto-download, no auto-install, no framework):
 /// one HTTPS GET, a version compare, and a link the user can click.
+///
+/// **It lists releases rather than asking for `/releases/latest`,** which is
+/// not a stylistic choice. `latest` excludes prereleases, and every release
+/// this project has published is a prerelease on purpose — a 0.x unsigned
+/// build is not something to hand people as "latest", and GitHub refuses to
+/// apply that flag to a prerelease anyway. So `latest` returned 404, 404 was
+/// read as "nothing newer", and the check reported *up to date* forever, to
+/// everyone, whatever was shipped. It said nothing while doing it.
 @Observable
 final class UpdateChecker {
     enum Status: Equatable {
@@ -26,46 +34,98 @@ final class UpdateChecker {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
     }
 
-    private struct Release: Decodable {
-        let tag_name: String
-        let html_url: String
+    /// One entry from the releases list — only the three fields that decide
+    /// anything.
+    struct Release: Decodable, Equatable {
+        let tagName: String
+        let htmlURL: String
+        /// Unpublished. Never offered: a draft is a work in progress, not an
+        /// offer, and its assets may not exist yet.
+        let draft: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case tagName = "tag_name"
+            case htmlURL = "html_url"
+            case draft
+        }
+
+        init(tagName: String, htmlURL: String, draft: Bool = false) {
+            self.tagName = tagName
+            self.htmlURL = htmlURL
+            self.draft = draft
+        }
+    }
+
+    /// How many releases to consider. The newest is almost always first, but
+    /// the version compare below decides rather than the ordering, so a
+    /// backported patch published after a newer minor cannot win by recency.
+    private static let pageSize = 20
+
+    /// The endpoint, as its own value so a test can pin it.
+    ///
+    /// Worth pinning because the defect this replaced was *entirely* a choice of
+    /// URL: `/releases/latest` is a perfectly reasonable-looking request that
+    /// silently excludes every release this project has ever made.
+    static var releasesURL: URL {
+        URL(string: "https://api.github.com/repos/\(repository)/releases?per_page=\(pageSize)")!
     }
 
     func check() async {
         status = .checking
         do {
-            let url = URL(string: "https://api.github.com/repos/\(Self.repository)/releases/latest")!
-            var request = URLRequest(url: url)
+            var request = URLRequest(url: Self.releasesURL)
             request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse else {
                 throw URLError(.badServerResponse)
             }
             guard http.statusCode != 404 else {
-                // Repo not published or no releases yet — not an error state.
+                // The repo is private or has no releases. Genuinely nothing to
+                // offer — unlike the 404 this endpoint replaced, which meant
+                // "there are releases, just none GitHub calls latest".
                 status = .upToDate
                 return
             }
             guard http.statusCode == 200 else {
                 throw URLError(.badServerResponse)
             }
-            let release = try JSONDecoder().decode(Release.self, from: data)
-            let latest = release.tag_name.hasPrefix("v")
-                ? String(release.tag_name.dropFirst())
-                : release.tag_name
-            if Self.isVersion(latest, newerThan: Self.currentVersion),
-               let pageURL = URL(string: release.html_url),
-               pageURL.scheme == "https", pageURL.host == "github.com"
-            {
-                // Only ever offer an https github.com link — a tampered API
-                // response can't slip a file:// or custom-scheme URL past this.
-                status = .available(version: latest, url: pageURL)
+            let releases = try JSONDecoder().decode([Release].self, from: data)
+            if let offer = Self.offer(from: releases, current: Self.currentVersion) {
+                status = .available(version: offer.version, url: offer.url)
             } else {
                 status = .upToDate
             }
         } catch {
             status = .failed("Could not check for updates — are you online?")
         }
+    }
+
+    /// The release to offer, or nil when the running build is current.
+    ///
+    /// Pure, so the selection rules are testable without a network: the bug
+    /// this replaced was in exactly this decision and was invisible from the
+    /// outside.
+    ///
+    /// Prereleases are eligible **on purpose.** While the project is 0.x they
+    /// are the only releases there are, and filtering them out is what made
+    /// the previous implementation a no-op.
+    static func offer(from releases: [Release], current: String) -> (version: String, url: URL)? {
+        var best: (version: String, url: URL)?
+        for release in releases where !release.draft {
+            let version = release.tagName.hasPrefix("v")
+                ? String(release.tagName.dropFirst())
+                : release.tagName
+            guard isVersion(version, newerThan: current) else { continue }
+            // Only ever offer an https github.com link — a tampered API
+            // response can't slip a file:// or custom-scheme URL past this.
+            guard let pageURL = URL(string: release.htmlURL),
+                  pageURL.scheme == "https", pageURL.host == "github.com"
+            else { continue }
+            if best == nil || isVersion(version, newerThan: best!.version) {
+                best = (version, pageURL)
+            }
+        }
+        return best
     }
 
     /// Numeric semver-ish comparison: `"0.10.1" > "0.9"`.
