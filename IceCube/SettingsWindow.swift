@@ -14,6 +14,10 @@ import SwiftUI
 struct SettingsWindowView: View {
     @Bindable var state: AppState
     @AppStorage("persistCurve") private var persistCurve = false
+    /// Default false, deliberately: `object(forKey:) == nil` and "the user
+    /// turned it off" are indistinguishable through `@AppStorage`, so a
+    /// default-true toggle cannot tell a fresh install from a considered no.
+    @AppStorage(MenuBarMode.preferenceKey) private var silentOptionClick = false
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var loginItemError: String?
     @State private var updates = UpdateChecker()
@@ -163,6 +167,13 @@ struct SettingsWindowView: View {
                 Picker("Show beside the icon", selection: $state.menuBarDisplay) {
                     ForEach(MenuBarDisplayMode.allCases) { Text($0.title).tag($0) }
                 }
+                Toggle("⌥-click switches preset silently", isOn: $silentOptionClick)
+                    .help(
+                        "Off: ⌥-click opens the popover already switched to the next preset. "
+                            + "On: it switches without opening anything, using Ice Cube's own "
+                            + "menu bar item. Either way, a preset you pick by hand still gives "
+                            + "way to the power-source rule the next time you plug in or unplug."
+                    )
             }
             Section("In the menu") {
                 Toggle("Fan controls", isOn: $chart.showControls)
