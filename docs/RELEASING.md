@@ -106,5 +106,12 @@ update alongside the requirement string.
 
 Draft releases can simply be deleted. If a published release turns out bad:
 delete the release (the tag can stay), fix forward, and cut a new patch
-version — the in-app update check reads `releases/latest`, so removing the bad
-release is enough to stop offering it.
+version — the in-app update check lists `/releases` and offers the highest
+version it finds, so removing the bad release is enough to stop offering it.
+
+It lists rather than reading `releases/latest` on purpose. `latest` excludes
+prereleases, and every release here is one, so that endpoint returned 404 and
+the check reported "up to date" to everyone forever (#12). Marking a release
+as latest is not an escape either — GitHub refuses that flag on a prerelease.
+Drafts are excluded by the client, which is why deleting a bad release works
+but merely un-publishing it back to draft also would.

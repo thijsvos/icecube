@@ -66,8 +66,8 @@ targets:
       properties:
         LSUIElement: true
         CFBundleDisplayName: Ice Cube
-        CFBundleShortVersionString: "0.1.1"
-        CFBundleVersion: "2"
+        CFBundleShortVersionString: "0.1.2"
+        CFBundleVersion: "3"
         NSHumanReadableCopyright: "MIT — github.com/thijsvos"
         # AppIcon.icns has always shipped in Resources but was never DECLARED,
         # so macOS fell back to the generic application icon everywhere the app
@@ -129,6 +129,7 @@ targets:
       - IceCube/HelperClient.swift
       - IceCube/PresetStore.swift
       - IceCube/PowerSourceMonitor.swift
+      - IceCube/UpdateChecker.swift
     dependencies:
       - package: IceCubeKit
     settings:
