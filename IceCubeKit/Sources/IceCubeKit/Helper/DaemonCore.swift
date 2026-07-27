@@ -7,16 +7,22 @@ import os
 /// the write sequencer, the SafetyMonitor, and the 2-second tick that keeps
 /// the safety invariants true no matter what the app does (or fails to do).
 ///
-/// **A deliberate exception to the ~300-line file guideline.** Splitting this
-/// into `DaemonCore+Safety/+Curve/+Guardian/+Hardware` extensions was tried and
-/// reverted: Swift's `private` is file-scoped, so the split forces ~15
-/// safety-critical members (`config`, `revertGeneration`, `revertsInFlight`,
-/// `revertPending`, `status`, the sequencer, the port…) to module-internal
-/// visibility, reachable from every other file in IceCubeKit. These are not
-/// separable features — they are one control loop sharing one set of race
-/// guards, and the guards only work because nothing outside can touch them.
-/// Trading that encapsulation for a line count would make the file shorter and
-/// the daemon less safe. Navigate by the MARK sections instead.
+/// **A deliberate exception to the ~300-line file guideline — and it is now
+/// roughly 1,200 lines, so the exception deserves the real number.** Splitting
+/// this into `DaemonCore+Safety/+Curve/+Guardian/+Hardware` extensions has been
+/// tried and reverted TWICE (most recently 2026-07-26, with the split written
+/// and building before it was thrown away). Swift's `private` is file-scoped,
+/// so the split forces the safety-critical members to module-internal
+/// visibility, reachable from every other file in IceCubeKit: `config`,
+/// `revertGeneration`, `revertsInFlight`, `revertPending`, `status`, the
+/// sequencer, the port — and since then also `writeInFlight`/`writeWaiters`
+/// (the write lock), `writeIntent` (the ledger deciding which decision wins)
+/// and `selfTestInFlight`.
+///
+/// These are not separable features. They are one control loop sharing one set
+/// of race guards, and the guards only work because nothing outside can touch
+/// them. Trading that encapsulation for a line count would make the file
+/// shorter and the daemon less safe. Navigate by the MARK sections instead.
 public actor DaemonCore {
     private let port: any SMCControlPort
     private let store: any FanConfigStoring
@@ -309,6 +315,12 @@ public actor DaemonCore {
         await port.reset()
     }
 
+    /// Puts the daemon into `newConfig` — the app's main entry point, and the
+    /// only way a user-chosen mode reaches the hardware.
+    ///
+    /// - Throws: when the config is unusable (a curve with no usable points) or
+    ///   the firmware refuses the write sequence. On a throw the fans are left
+    ///   reverted, never half-applied.
     public func apply(_ newConfig: FanConfig) async throws {
         // SERIALIZATION: `HelperService` spawns an independent Task per XPC
         // message, and this method suspends repeatedly (`readFans`, then
@@ -510,6 +522,16 @@ public actor DaemonCore {
         )
     }
 
+    /// Releases the fans and stops driving them — the daemon side of Settings →
+    /// "Turn Off Fan Control".
+    ///
+    /// Deliberately does NOT call `keepFansSpinning`, unlike `apply(.auto)`.
+    /// That distinction is the whole point: a hand-back the user *chose* while
+    /// still wanting the app around should not leave the fans at a standstill,
+    /// but turning the feature **off** has to mean off. Since the macOS preset
+    /// was removed this is a user's only way to release the fans, so quietly
+    /// re-taking them here would make the setting a lie. Pinned by
+    /// `DaemonCoreTests.turningOffReleasesEvenWhenWarm`.
     public func setAllAuto() async {
         await revertEverything(reason: "app requested revert")
     }

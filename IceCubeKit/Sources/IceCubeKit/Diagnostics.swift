@@ -53,8 +53,18 @@ public enum HostInfo {
 }
 
 /// The full diagnostics report — what the "new Mac model" GitHub issue
-/// template asks users to attach (PLAN.md §3.3): enough to write a curated
-/// sensor map for a machine the developers have never touched.
+/// template asks users to attach (PLAN.md §3.3).
+///
+/// Two halves, and the second was missing until 2026-07-27. Everything above
+/// ``writePath`` describes **reads**: the SMC key dump, the sensors, the fan
+/// ranges — enough to write a curated sensor map for a machine the developers
+/// have never touched. ``writePath`` describes **writes**: whether the fans
+/// could actually be driven, which unlock path the firmware needed, which
+/// mode-key spelling the generation uses.
+///
+/// Both matter, because a new-model report is usually about fan control rather
+/// than sensor labels — and for a while this report could not describe the
+/// thing it was being collected for.
 public struct DiagnosticsReport: Sendable, Codable, Equatable {
     /// Bump when the report's shape changes, so tooling can dispatch.
     public let schemaVersion: Int

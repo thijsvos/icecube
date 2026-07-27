@@ -24,6 +24,10 @@ public enum StartupPolicy {
         case curve
     }
 
+    /// What the app should do on reaching the daemon. `.leaveAlone` is not
+    /// "nothing went wrong" — it is the deliberate refusal to stomp a mode the
+    /// daemon is already enforcing, such as a curve resumed at boot before the
+    /// app existed, or manual control in active use.
     public enum Decision: Sendable, Equatable {
         /// Change nothing.
         case leaveAlone

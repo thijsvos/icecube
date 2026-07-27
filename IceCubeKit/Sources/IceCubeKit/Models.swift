@@ -183,6 +183,8 @@ public struct SMCSnapshot: Sendable, Codable, Equatable {
 /// Manual mode is always heartbeat-watchdogged and never persists app-less;
 /// only curve mode may keep running after the app quits.
 public struct FanConfig: Sendable, Codable, Equatable {
+    /// What the daemon is enforcing. Note `.auto` is a resting state rather
+    /// than a choice — no UI can select it since the macOS preset was removed.
     public enum Mode: String, Sendable, Codable {
         /// Nobody is driving the fans from a user choice: the daemon's state
         /// before the first config arrives, and what every revert lands in.
@@ -272,6 +274,8 @@ public struct FanConfig: Sendable, Codable, Equatable {
 
 /// A named, user-selectable fan configuration.
 public struct Preset: Identifiable, Sendable, Codable, Equatable {
+    /// Which built-in a preset is. Every case means **Ice Cube is driving**;
+    /// there is deliberately no "hand the fans back" kind any more.
     public enum Kind: String, Sendable, Codable {
         case quiet, balanced, cold, max, custom
 

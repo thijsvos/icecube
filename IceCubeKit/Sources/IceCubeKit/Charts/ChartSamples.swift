@@ -48,6 +48,13 @@ public struct SeriesStats: Sendable, Equatable {
     }
 }
 
+/// Reduces a series to the visible-point budget PLAN.md §1.2 makes a hard
+/// requirement.
+///
+/// A 60-minute window at 1 Hz is 3600 samples per series across ~6 series —
+/// "squarely in Swift Charts' documented degradation zone". Min-max bucketing
+/// keeps spikes visible at a fraction of the cost: a naive stride would drop
+/// the one sample that showed the machine hitting 95 °C.
 public enum ChartDownsampler {
     /// Reduces `samples` within `[start, end]` to at most `budget` buckets.
     ///

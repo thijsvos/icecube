@@ -11,6 +11,18 @@ import ServiceManagement
 /// registration with launchd (SMAppService), the pinned XPC connection with
 /// its version handshake, the 5 s heartbeat that feeds the daemon watchdog,
 /// and the daemon's reported status.
+///
+/// **Constructing one starts nothing.** Call ``start()`` to begin the
+/// maintenance loop and the wake observer; the app does that once, and tests
+/// drive ``maintainOnce()`` directly instead. This used to happen in `init`,
+/// which meant merely *making* a manager talked to launchd and spawned a 5 s
+/// timer — and is why this type had no tests at all until 2026-07-27, despite
+/// being where two real bugs had already been found by hand.
+///
+/// The three system seams are injected for the same reason and default to the
+/// production wiring, so `HelperManager()` still means the real daemon:
+/// ``DaemonRegistering`` (SMAppService), ``HelperChanneling`` (the XPC
+/// channel), and `UserDefaults` for the startup preference.
 @Observable
 final class HelperManager {
     /// Where the helper stands with launchd/Background Task Management.

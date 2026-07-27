@@ -16,6 +16,22 @@ import Foundation
 /// deliberately ignored. See ``Limits/engageCelsius`` for why a lower floor
 /// cannot turn this into a second curve.
 ///
+/// There are three rungs, not one, and the newest two are the ones a reader
+/// meets first:
+///
+/// - ``handBack(fans:dieCelsius:)`` — consulted at the *instant* the daemon
+///   gives the fans up. On a warm machine it keeps them at their floor rather
+///   than letting them stop, because a fan restarted from a standstill needs
+///   4.4 s where one already turning needs about one, and no amount of drive
+///   shortens that. The tick cannot make this call: the fans reach a standstill
+///   in ~2.5 s, faster than a 2 s tick reliably reacts.
+/// - The **floor hold** in ``evaluate(fans:dieCelsius:)`` — the backstop for
+///   fans that stopped some other way. Deliberately matches any non-forced
+///   mode, not just SMC mode 0: our own hand-back writes mode 3, so the old
+///   orphan ladder never saw the fans macOS declined to reclaim.
+/// - The **built-in curve** — the original rung, for a machine that is getting
+///   genuinely hot while nothing cools it.
+///
 /// Pure decision engine, shaped exactly like ``SafetyMonitor``: readings in, an
 /// action out, no I/O and no clock — so every rung of the escalation ladder is
 /// unit-testable without a hot Mac. ``DaemonCore`` keeps the hardware writes.
@@ -60,19 +76,27 @@ public struct FanGuardian: Sendable {
         public var releaseCelsius: Double = 58
         /// Above this die temperature the fans are never left fully stopped.
         ///
-        /// This is the difference between "switching away from macOS is
-        /// instant" and "it takes four and a half seconds". Measured on a
-        /// Mac14,9: a STOPPED fan given a target reads 0 RPM for 1.5 s and
-        /// needs 4.4 s to reach speed, and that ramp is firmware-paced —
-        /// commanding 6800 instead of 4250 produces an identical curve, so it
-        /// cannot be hurried. A fan already turning at its floor covers the
-        /// same ground in about a second, which is exactly why curve-to-curve
-        /// always felt instant and leaving macOS never did.
+        /// Measured on a Mac14,9: a STOPPED fan given a target reads 0 RPM for
+        /// 1.5 s and needs 4.4 s to reach speed, and that ramp is
+        /// firmware-paced — commanding 6800 instead of 4250 produces an
+        /// identical curve, so it cannot be hurried. A fan already turning at
+        /// its floor covers the same ground in about a second.
         ///
         /// So the fix is not to make the ramp faster; it is not to start from
-        /// rest. Holding the floor on a warm machine also happens to be what
-        /// the guardian is for — macOS parking the fans while the die sits in
-        /// the sixties is the behaviour this app exists to correct.
+        /// rest. Which matters wherever the daemon lands in `.auto` — the app
+        /// quitting, or a safety revert — because the next thing to happen is
+        /// usually the app reconnecting and asking for a curve again, and that
+        /// request should not be paying for a standing start.
+        ///
+        /// (This was originally written about a user-facing "macOS" preset that
+        /// handed the fans back on demand. That preset was removed on
+        /// 2026-07-26 — nobody installs a fan-control app to stop controlling
+        /// their fans — but every path that reaches `.auto` still benefits, and
+        /// the measurement above is unchanged.)
+        ///
+        /// Holding the floor on a warm machine is also simply what the guardian
+        /// is for: macOS parking the fans while the die sits in the sixties is
+        /// the behaviour this app exists to correct.
         public var keepSpinningCelsius: Double = 55
         /// …and the fans may stop again below this (wide hysteresis).
         public var keepSpinningReleaseCelsius: Double = 45

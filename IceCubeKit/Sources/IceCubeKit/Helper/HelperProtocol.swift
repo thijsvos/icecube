@@ -229,6 +229,11 @@ public struct HelperStatus: Codable, Sendable, Equatable {
         try JSONEncoder().encode(self)
     }
 
+    /// Rebuilds a status from its JSON, as it arrives over XPC.
+    ///
+    /// - Throws: when the payload does not decode — which the app treats as a
+    ///   dead connection rather than a fatal error, since the daemon on the
+    ///   other end may be a different version.
     public static func decode(_ data: Data) throws -> HelperStatus {
         try JSONDecoder().decode(HelperStatus.self, from: data)
     }

@@ -124,6 +124,13 @@ public actor ChartStore {
 
     // MARK: - Ingest (1 Hz)
 
+    /// Records one poll into the per-series ring buffers.
+    ///
+    /// Called at the polling cadence (1 Hz by default) whatever the UI is
+    /// doing: recording continues while the popover is closed and while the
+    /// display is paused, because pause freezes the picture, not the history.
+    /// Buffers are fixed at 3600 samples, so an hour is retained and the memory
+    /// cost cannot grow with uptime.
     public func ingest(_ snapshot: SMCSnapshot) {
         // Classification lives in SMCKeyMaps so the chart and the popover's
         // compact readout cannot disagree about what counts as a CPU sensor.
