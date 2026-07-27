@@ -165,6 +165,75 @@ struct ChartStoreTests {
         return store
     }
 
+    // Phase 2's acceptance line asks for "no dropped frames" on the 60-minute
+    // window, which PLAN.md §1.2 calls out as the hazard: 3600 samples per
+    // series across ~6 series, "squarely in Swift Charts' documented
+    // degradation zone" without the <=600-point budget.
+    //
+    // Measured on a Mac14,9 in release — worst of 50 runs per window:
+    //
+    //     1-minute    1.6 ms      15-minute   2.0 ms
+    //     5-minute    1.6 ms      60-minute   3.3 ms
+    //
+    // The 60-minute case is the one that was supposed to hurt, and it lands at
+    // a fifth of a 60 fps frame — while never actually needing to fit in one:
+    // `AppState` calls `rows(window:)` once per 1 Hz poll, only while the
+    // popover is visible and unpaused, and `ChartStore` is an actor so the work
+    // happens off the main thread entirely. SwiftUI then renders an
+    // already-computed array. Against the interval it really runs on, 3.3 ms is
+    // 0.3 %.
+    //
+    // RELEASE ONLY. Debug Swift runs this path 5-20x slower (72 ms was
+    // observed for one window), so asserting a millisecond figure in the debug
+    // build CI uses would be a flake, not a guard. The deterministic guard is
+    // `budgetBindsOnFullHistory` below — if the point budget ever stops
+    // binding, that fails everywhere, immediately, with no timing involved.
+    #if !DEBUG
+        @Test("A full 60-minute history builds its rows in a fraction of a frame")
+        func rowsFitInsideAFrame() async {
+            let store = await fedStore(seconds: 3600) // the documented worst case
+            // Half a 60 fps frame: this is the data path only, and a number that
+            // merely squeaked under the full 16.6 ms would leave the chart
+            // drawing nothing to work with.
+            let halfFrameMilliseconds = 8.3
+
+            for window in [60.0, 300, 900, 3600] {
+                // Warmed once — the first call pays one-off allocation costs a
+                // live app pays long before anyone opens the popover.
+                _ = await store.rows(window: window)
+
+                var worst = 0.0
+                for _ in 0 ..< 50 {
+                    let started = ContinuousClock.now
+                    _ = await store.rows(window: window)
+                    let elapsed = Double((ContinuousClock.now - started)
+                        .components.attoseconds) / 1e15
+                    worst = max(worst, elapsed)
+                }
+                #expect(
+                    worst < halfFrameMilliseconds,
+                    "\(Int(window))s window took \(worst) ms — over half a 60 fps frame"
+                )
+            }
+        }
+    #endif
+
+    /// The budget is what makes the above true, so pin that it actually binds:
+    /// an hour of samples must still come back capped, not thinned "mostly".
+    @Test("The point budget binds even on a full hour of history")
+    func budgetBindsOnFullHistory() async {
+        let store = await fedStore(seconds: 3600)
+        let rows = await store.rows(window: 3600)
+        for row in rows {
+            for series in row.series {
+                #expect(
+                    series.buckets.count <= ChartStore.pointBudget,
+                    "\(row.id)/\(series.id) returned \(series.buckets.count) points"
+                )
+            }
+        }
+    }
+
     @Test("Row set is stable and correctly shaped: CPU, GPU, one row per fan")
     func rowContract() async {
         let store = await fedStore(seconds: 120)

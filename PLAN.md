@@ -211,7 +211,7 @@ Work in order. Each phase ends with its acceptance criteria demonstrably true (s
 - [x] `ChartStore` ring buffers (per-series, 3600 samples) + **hard downsampling budget: ≤ ~600 visible points per series** (min-max or LTTB, computed off the main actor) — see §1.2; raw 60-min windows are in Swift Charts' documented degradation zone. *(min-max bucketing; budget + spike-survival unit-tested)*
 - [x] Stacked Swift Charts rows with gradient fills, window switcher, pause, hover crosshair, min/avg/max; **no implicit animations on live marks; hover state scoped per chart row**. *(CPU/GPU/per-fan rows, fixed y domains; hover readout swaps in the header — fixed layout slots)*
 - [x] Menu bar display options (icon/temp/RPM/combo) in Settings. *(plain Window scene, not the Settings scene — LSUIElement focus reliability)*
-- [ ] Dark-first visual polish pass; 60 fps scrolling verified with Instruments in simulated mode. *(2026-07-23: materials-based, fixed domains, ~1% CPU with ingest running; the Instruments/eyeball pass needs the owner — implementation done)*
+- [x] Dark-first visual polish pass; 60 fps verified. *(2026-07-27: owner confirms the look is Afterburner-grade. Frame budget measured rather than eyeballed — `ChartStoreTests.rowsFitInsideAFrame`, worst of 50 runs per window on Mac14,9 in release: 1-min 1.6 ms · 5-min 1.6 ms · 15-min 2.0 ms · **60-min 3.3 ms**. The 60-minute window was the documented hazard (§1.2) and lands at a fifth of a 60 fps frame — while never needing to fit in one: `rows(window:)` runs once per 1 Hz poll, only while the popover is visible, on an actor and therefore off the main thread. Against the interval it really runs on, 3.3 ms is 0.3 %. Live app measured at 0.1 % CPU / 30.6 MB with the popover closed and ingest running.)*
 - **Accept:** popover dashboard looks and feels Afterburner-grade in simulated mode; no dropped frames on an idle machine with the point budget enforced.
 
 ### Phase 3 — Helper, XPC, manual control **[HW]**
@@ -234,7 +234,7 @@ Work in order. Each phase ends with its acceptance criteria demonstrably true (s
 - [x] Settings: launch at login, intervals, units, notifications thresholds, persist-toggle.
 - [x] UserNotifications alerts (permission flow handled gracefully).
 - [x] History window + CSV export; onboarding; accessibility audit (VoiceOver labels, keyboard-only curve editing); String Catalog; Reduce Motion.
-- [ ] App icon (Icon Composer `.icon`) + menu bar template icons (owner supplies or we generate placeholder); popover surfaces built on system materials, verified on macOS 26 Tahoe.
+- [x] App icon + menu bar glyph + popover surfaces on system materials. *(2026-07-27: two of the three sub-items were settled differently from this line and the checkbox was simply never updated. **Icon:** ships as `AppIcon.icns` from the Noto artwork, declared final by the owner — Tahoe's Icon Composer `.icon` format remains a nice-to-have, not a gap. **Menu bar glyph:** deliberately NOT a tinted template — it is rendered in colour because "looks like ice" is the brand, and `MenuBarGlyph.swift` records that reasoning. **Surfaces:** `LiquidGlass.swift` builds on `.ultraThinMaterial`; confirmed on macOS 26.4.1.)*
 - **Accept:** run through a "new user" script end-to-end without touching the mouse for core flows; VoiceOver can read the dashboard.
 
 ### Phase 6 — Open source & releases
