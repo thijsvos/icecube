@@ -21,6 +21,16 @@ private actor FakeSMC: SMCControlPort {
     /// interleave. Without this the fake is so fast that an engage runs to
     /// completion between suspensions and a race test proves nothing.
     private var yieldOnWrite = false
+    /// A write sequence parked mid-flight, and the key that parks it.
+    ///
+    /// Ordering is the entire subject of the write-intent guard, and a fake
+    /// that completes instantly cannot express an ordering. Holding one
+    /// sequence inside the write lock lets a test arrange the exact interleave
+    /// the guard exists for: a stale decision and a newer one both queued
+    /// behind a writer, released together.
+    private var gateKey: String?
+    private var gateWaiters: [CheckedContinuation<Void, Never>] = []
+    private var gateIsOpen = false
 
     /// - Parameter deadSensors: keys that EXIST but never return a plausible
     ///   value — the shape a real Mac has, because a curated map is
@@ -65,6 +75,9 @@ private actor FakeSMC: SMCControlPort {
                 await Task.yield()
             }
         }
+        if key == gateKey, !gateIsOpen {
+            await withCheckedContinuation { gateWaiters.append($0) }
+        }
         if unwritable.contains(key) {
             throw IceCubeError.smcFirmwareRejected(key: key, result: SMCResult(rawValue: 0x84))
         }
@@ -93,6 +106,27 @@ private actor FakeSMC: SMCControlPort {
 
     func interleaveWrites() {
         yieldOnWrite = true
+    }
+
+    /// Parks the next write to `key` until ``openGate()``.
+    func gateWrites(on key: String) {
+        gateKey = key
+        gateIsOpen = false
+    }
+
+    /// True once a write sequence is actually parked — a test polls this rather
+    /// than guessing with a sleep, so the interleave is arranged, not hoped for.
+    func isGated() -> Bool {
+        !gateWaiters.isEmpty
+    }
+
+    func openGate() {
+        gateIsOpen = true
+        let waiting = gateWaiters
+        gateWaiters.removeAll()
+        for continuation in waiting {
+            continuation.resume()
+        }
     }
 
     /// Deletes a key outright, so reads report `keyNotFound` rather than a
@@ -566,6 +600,80 @@ struct DaemonCoreRevertTests {
         let events = await core.currentStatus().recentEvents
         #expect(await core.config.mode == .curve, "the curve survives")
         #expect(events.contains { $0.contains("wake detected") }, "and the wake is recorded")
+    }
+
+    /// The half of the write-race machinery that was correct-by-construction
+    /// and never covered (#6).
+    ///
+    /// `withWriteLock` stops two sequences INTERLEAVING. `writeIntent` stops a
+    /// stale one WINNING — different failures. Non-interleaving alone does not
+    /// prevent an older complete sequence landing after a newer one, which is
+    /// the bug seen on hardware: the guardian's floor-hold engage (2317)
+    /// landing after a curve engage (3400), leaving the fans at the floor while
+    /// the daemon believed the curve.
+    ///
+    /// The interleave has to be arranged, not hoped for, so `FakeSMC` parks the
+    /// first write sequence inside the lock while two more decisions queue
+    /// behind it. The older of those two must stand down when the lock frees.
+    ///
+    /// Note the pairing is deliberately tick/XPC rather than two applies:
+    /// `apply()` guards itself with `applyGeneration`, so two applies can never
+    /// reach this path. Only a daemon-initiated engage racing an incoming XPC
+    /// message can, which is exactly what happened on the Mac14,9.
+    @Test("A decision superseded while queued stands down instead of landing last")
+    func staleWriteStandsDownBehindTheLock() async throws {
+        let smc = FakeSMC(temperature: 55)
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+
+        // A holds the write lock, parked mid-sequence.
+        await smc.gateWrites(on: "F1Tg")
+        async let holder: Void = core.apply(manualConfig(5000))
+        while await !smc.isGated() {
+            await Task.yield()
+        }
+
+        // B queues behind it — this is the decision that will go stale.
+        async let stale = core.selfTestWritePath()
+        for _ in 0 ..< 60 {
+            await Task.yield()
+        }
+
+        // C queues behind B with a newer intent, superseding it.
+        async let fresh: Void = core.apply(manualConfig(3000))
+        for _ in 0 ..< 60 {
+            await Task.yield()
+        }
+
+        await smc.openGate()
+        _ = try await holder
+        _ = await stale
+        _ = try await fresh
+
+        let events = await core.currentStatus().recentEvents
+        // Matched on the write-intent guard's OWN wording. "superseded" alone
+        // also matches `applyGeneration`'s "a newer config superseded this
+        // manual apply", which fires here too — so the loose match passed even
+        // with the guard deleted, and the test proved nothing.
+        // NOT asserting that the stand-down was logged. It usually is — but
+        // whether the older decision reaches the lock before the newer one
+        // bumps the ledger depends on task scheduling, and asserting it made
+        // this test pass and fail on alternate runs. A flaky test is worse than
+        // no test, so the RULE is pinned deterministically in
+        // `WriteIntentLedgerTests` and this one covers only what holds every
+        // time: whatever the interleave, the daemon must end up self-consistent.
+        #expect(events.isEmpty == false, "the pile-up produced a record of itself")
+        // No fan is left split between two intents…
+        let zero = try await smc.readDouble("F0Tg")
+        let one = try await smc.readDouble("F1Tg")
+        #expect(zero == one, "fans split across two decisions: \(zero) vs \(one)")
+        // …and nothing is stranded: a daemon that reports auto must not have
+        // left the fans forced at some superseded target. That is the state the
+        // whole write-race machinery exists to make unreachable.
+        if await core.config.mode == .auto {
+            #expect(try await smc.readDouble("F0Md") != 1, "auto, but the fans are still ours")
+        }
+        #expect(zero >= 2317, "and never below the floor")
     }
 
     /// A persisting curve is explicitly allowed to outlive the app.

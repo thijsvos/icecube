@@ -230,7 +230,7 @@ public actor DaemonCore {
     /// fan control permanently impossible until the daemon restarts. `defer`
     /// here means no future early return inside a revert body can break it.
     private func asRevert(_ body: () async -> Void) async {
-        writeIntent &+= 1
+        _ = writeIntent.issue()
         revertGeneration &+= 1
         revertsInFlight += 1
         defer { revertsInFlight -= 1 }
@@ -239,14 +239,9 @@ public actor DaemonCore {
 
     // MARK: - Serializing the write sequences themselves
 
-    /// Bumped by every new "the fans should be X" decision, whoever makes it.
-    ///
-    /// The lock below stops two sequences INTERLEAVING; this stops a stale one
-    /// WINNING. They are different failures: without the counter the floor-hold
-    /// engage and the curve engage each write cleanly, and the fans end up
-    /// wherever the older sequence finished. Checked inside the lock, so a
-    /// decision that queued behind a newer one simply stands down.
-    private var writeIntent = 0
+    /// Which fan-write decision is current. See ``WriteIntentLedger`` — the
+    /// rule lives there so it can be tested without staging a race.
+    private var writeIntent = WriteIntentLedger()
     /// True while a write sequence owns the hardware; waiters queue below.
     private var writeInFlight = false
     private var writeWaiters: [CheckedContinuation<Void, Never>] = []
@@ -667,8 +662,7 @@ public actor DaemonCore {
         // target PER FAN, so a second engage slipping between those writes
         // leaves the fans split between two intents. Released before the error
         // path below, which reverts.
-        writeIntent &+= 1
-        let myIntent = writeIntent
+        let myIntent = writeIntent.issue()
         let outcome: FanWriteOutcome?
         do {
             outcome = try await withWriteLock {
@@ -676,7 +670,7 @@ public actor DaemonCore {
                 // anything: a newer intent may have arrived while this one
                 // queued, and writing now would hand the fans to the older of
                 // two live decisions.
-                guard myIntent == self.writeIntent else {
+                guard self.writeIntent.isCurrent(myIntent) else {
                     self.record("stale fan write superseded by a newer one — standing down")
                     return nil
                 }
@@ -710,7 +704,7 @@ public actor DaemonCore {
     ///   for auto, or we lost control); false only for daemon shutdown, where
     ///   the intent should survive the restart.
     private func revertEverything(reason: String, clearsPersistence: Bool = true) async {
-        writeIntent &+= 1
+        _ = writeIntent.issue()
         revertGeneration &+= 1
         revertsInFlight += 1
         defer { revertsInFlight -= 1 }
