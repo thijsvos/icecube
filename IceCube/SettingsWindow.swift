@@ -218,6 +218,8 @@ struct SettingsWindowView: View {
                     Text("Open the menu and enable fan control first.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                powerProfileRule
+
                 Toggle("Keep the curve running when Ice Cube quits", isOn: $persistCurve)
                     .onChange(of: persistCurve) { _, on in
                         // Push the new setting to the daemon now, so an already-
@@ -315,6 +317,45 @@ struct SettingsWindowView: View {
         case let .versionMismatch(helper): "version mismatch (v\(helper))"
         }
         return "\(registration) · \(connection)"
+    }
+
+    /// "Quiet on battery, cool on the desk" — the one thing a laptop genuinely
+    /// wants differentiated, and the only situational awareness Ice Cube has.
+    ///
+    /// Reads as a sentence rather than three labelled controls, because that is
+    /// how someone thinks about it: *on battery use Quiet, plugged in use
+    /// Balanced.* The pickers stay visible but disabled when the toggle is off,
+    /// so the shape of the setting is legible before you commit to it.
+    @ViewBuilder
+    private var powerProfileRule: some View {
+        let rule = Binding(
+            get: { state.helper.powerRule },
+            set: { state.helper.powerRule = $0 }
+        )
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle("Switch presets when I plug in or unplug", isOn: rule.isEnabled)
+            HStack(spacing: 6) {
+                Text("On battery use").font(.callout)
+                Picker("", selection: rule.onBattery) {
+                    ForEach(PresetStore.builtins) { Text($0.name).tag($0.kind) }
+                }
+                .labelsHidden().fixedSize()
+                Text("· plugged in use").font(.callout)
+                Picker("", selection: rule.onWall) {
+                    ForEach(PresetStore.builtins) { Text($0.name).tag($0.kind) }
+                }
+                .labelsHidden().fixedSize()
+            }
+            .controlSize(.small)
+            .disabled(!state.helper.powerRule.isEnabled)
+            // Says plainly that this responds to a change rather than policing
+            // a state — the distinction that keeps it from fighting the user,
+            // and the one someone needs to trust it.
+            Text("Only when the power source changes. Pick a different preset "
+                + "any time and it stays until you next plug in or unplug.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     /// "Does fan control actually work on this Mac?" — answerable, at last.

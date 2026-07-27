@@ -64,6 +64,8 @@ final class HelperManager {
     /// bundle path — neither of which says anything useful inside a test bundle.
     /// The logic it wraps is covered by `RegistrationPreflightTests`.
     private let blocker: () -> String?
+    /// Where the Mac is drawing power, for ``PowerProfilePolicy``.
+    private let powerSource: any PowerSourceObserving
     // `HelperConstants.logSubsystem`, not the literal: under test this resolves
     // to a separate subsystem. These files are compiled into the test bundle, so
     // without it a `swift`/`xcodebuild test` run writes lines like "startup:
@@ -87,12 +89,14 @@ final class HelperManager {
                 teamID: CodesignPinning.currentTeamID(),
                 bundlePath: Bundle.main.bundleURL.resolvingSymlinksInPath().path
             )
-        }
+        },
+        powerSource: any PowerSourceObserving = PowerSourceMonitor()
     ) {
         self.service = service
         self.client = client
         self.defaults = defaults
         self.blocker = blocker
+        self.powerSource = powerSource
         self.client.onDisconnect = { [weak self] in
             self?.connection = .disconnected
             self?.status = nil
@@ -108,6 +112,10 @@ final class HelperManager {
     /// type had no tests at all until now.
     func start() {
         guard maintenanceTask == nil else { return }
+        powerSource.onChange = { [weak self] source in
+            Task { await self?.powerSourceChanged(to: source) }
+        }
+        powerSource.start()
         // One maintenance loop: keeps registration fresh (approval happens in
         // System Settings, outside our process), reconnects when enabled, and
         // drives heartbeat + status while connected.
@@ -459,6 +467,47 @@ final class HelperManager {
         case .manual:
             break
         }
+    }
+
+    // MARK: - Power-aware profiles
+
+    private static let powerRuleKey = "powerProfileRule"
+    /// The source at the last decision. `nil` until the first one, which is why
+    /// launching already unplugged still honours the rule.
+    @ObservationIgnored private var lastPowerSource: PowerProfilePolicy.PowerSource?
+
+    /// The user's battery/wall preset mapping. Off until they configure it.
+    var powerRule: PowerProfilePolicy.Rule {
+        get {
+            guard let data = defaults.data(forKey: Self.powerRuleKey),
+                  let rule = try? JSONDecoder().decode(
+                      PowerProfilePolicy.Rule.self, from: data
+                  )
+            else { return .suggested }
+            return rule
+        }
+        set {
+            if let data = try? JSONEncoder().encode(newValue) {
+                defaults.set(data, forKey: Self.powerRuleKey)
+            }
+        }
+    }
+
+    /// Applies the mapped preset when — and only when — the power source
+    /// actually changed. See ``PowerProfilePolicy`` for why that distinction is
+    /// the whole safety of the feature rather than an optimisation.
+    func powerSourceChanged(to source: PowerProfilePolicy.PowerSource) async {
+        let decision = PowerProfilePolicy.decide(
+            source: source, previous: lastPowerSource, rule: powerRule
+        )
+        lastPowerSource = source
+        guard case let .apply(kind) = decision,
+              let preset = PresetStore.builtins.first(where: { $0.kind == kind })
+        else { return }
+        log.notice(
+            "power source is now \(source.rawValue, privacy: .public) — switching to \(preset.name, privacy: .public)"
+        )
+        await applyPreset(preset, persistCurve: UserDefaults.standard.bool(forKey: "persistCurve"))
     }
 
     // MARK: - Write-path self-test (PLAN.md §4.3.6)

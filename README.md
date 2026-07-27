@@ -36,6 +36,7 @@ dependencies**; small footprint is a design goal, not an accident.
 | Fan-curve editor: drag points, double-click add, keyboard nudge, live marker | ✅ |
 | Presets: Quiet · Balanced · Cold · Max + your own | ✅ |
 | Manual per-fan sliders (watchdogged, never persisted) | ✅ |
+| Switch presets automatically when you plug in or unplug | ✅ |
 | Curve keeps running at boot, app closed — daemon-side | ✅ |
 | Sensors browser (every SMC key, live) + JSON diagnostics export | ✅ |
 | CSV history export, temperature alerts, launch at login, °C/°F | ✅ |
@@ -87,6 +88,21 @@ diagnostics from the **Sensors** window and open a
 [New Mac model report](https://github.com/thijsvos/icecube/issues/new?template=new_mac_model.md).
 The JSON includes the verdict, which unlock path your firmware needed, and which
 mode key your generation uses — the three facts a row in this table is made of.
+
+### Quiet on battery, cool on the desk
+
+A laptop wants opposite things in the two situations: unplugged it is on your
+lap, probably at night, and quieter is worth a warmer machine; on a desk cool
+costs nothing. Settings → Fan Control can map a preset to each — *on battery use
+Quiet, plugged in use Cold* — and switch as you plug and unplug.
+
+It fires **only when the power source changes**, never continuously. Pick a
+different preset any time and it stays until you next plug in or unplug; the
+rule responds to a change rather than policing a state, so it cannot end up
+fighting you. Off until you turn it on, and both sides are your own choices.
+
+Being app-side, it does not fire while a persisted curve runs with Ice Cube
+closed — that curve keeps running exactly as configured.
 
 ## Safety design
 

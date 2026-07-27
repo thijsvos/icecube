@@ -119,6 +119,31 @@ private final class FakeRegistrar: DaemonRegistering {
     }
 }
 
+/// A power source the test can flip by hand — no battery, and no dependence on
+/// whether the CI runner happens to be plugged in (it always is).
+@MainActor
+private final class FakePowerSource: PowerSourceObserving {
+    private(set) var current: PowerProfilePolicy.PowerSource
+    var onChange: ((PowerProfilePolicy.PowerSource) -> Void)?
+    private(set) var started = false
+
+    init(_ initial: PowerProfilePolicy.PowerSource = .wall) {
+        current = initial
+    }
+
+    func start() {
+        started = true
+    }
+
+    /// Simulates the charger going in or coming out. Mirrors the real monitor,
+    /// which reports nothing unless AC-vs-battery actually flipped.
+    func change(to source: PowerProfilePolicy.PowerSource) {
+        guard source != current else { return }
+        current = source
+        onChange?(source)
+    }
+}
+
 /// `DaemonRegistering` is a protocol, not a class, so a value copy would lose
 /// the fake's recorded calls. This forwards to a shared reference.
 @MainActor
@@ -164,13 +189,15 @@ struct HelperManagerTests {
         registrar: FakeRegistrar,
         channel: FakeChannel,
         defaults: UserDefaults,
-        blocker: String? = nil
+        blocker: String? = nil,
+        power: FakePowerSource = FakePowerSource()
     ) -> HelperManager {
         HelperManager(
             service: RegistrarProxy(inner: registrar),
             client: channel,
             defaults: defaults,
-            blocker: { blocker }
+            blocker: { blocker },
+            powerSource: power
         )
     }
 
@@ -645,6 +672,107 @@ struct HelperManagerTests {
         #expect(manager.writePathReport?.verdict == .rejected)
         #expect(defaults.string(forKey: "writePathVerifiedOS") == nil, "not a pass")
         #expect(manager.writePathReport?.isWorthReporting == true)
+    }
+
+    // MARK: - Power-aware profiles
+
+    private func enabledRule() -> PowerProfilePolicy.Rule {
+        PowerProfilePolicy.Rule(isEnabled: true, onBattery: .quiet, onWall: .cold)
+    }
+
+    @Test("Unplugging switches to the battery preset")
+    func unplugAppliesBatteryPreset() async {
+        let registrar = FakeRegistrar(); registrar.status = .enabled
+        let channel = FakeChannel()
+        let manager = makeManager(registrar: registrar, channel: channel, defaults: makeDefaults())
+        manager.powerRule = enabledRule()
+        await manager.maintainOnce()
+        let before = channel.appliedConfigs.count
+
+        await manager.powerSourceChanged(to: .battery)
+
+        #expect(channel.appliedConfigs.count == before + 1)
+        #expect(channel.appliedConfigs.last?.sharedCurve == FanCurve.quiet)
+    }
+
+    /// THE test for this feature. Between two power changes the user is free to
+    /// pick whatever they like, and nothing may take it away — which is only
+    /// true because the rule responds to transitions instead of enforcing a
+    /// state. Ice Cube has shipped the enforcing kind of default before.
+    @Test("A preset chosen by hand survives while the power source is unchanged")
+    func manualPickSurvivesBetweenTransitions() async {
+        let registrar = FakeRegistrar(); registrar.status = .enabled
+        let channel = FakeChannel()
+        let manager = makeManager(registrar: registrar, channel: channel, defaults: makeDefaults())
+        manager.powerRule = enabledRule()
+        await manager.maintainOnce()
+
+        await manager.powerSourceChanged(to: .battery) // → Quiet
+        // The user disagrees and picks Max while still unplugged.
+        await manager.applyPreset(
+            Preset(name: "Max", kind: .max, config: .curve(.max)), persistCurve: false
+        )
+        let afterManualPick = channel.appliedConfigs.count
+
+        // Anything that re-evaluates while still on battery must change nothing.
+        for _ in 0 ..< 5 {
+            await manager.powerSourceChanged(to: .battery)
+        }
+
+        #expect(channel.appliedConfigs.count == afterManualPick, "the manual pick was overridden")
+        #expect(channel.appliedConfigs.last?.sharedCurve == FanCurve.max)
+    }
+
+    @Test("A disabled rule ignores the charger entirely")
+    func disabledRuleIgnoresPowerChanges() async {
+        let registrar = FakeRegistrar(); registrar.status = .enabled
+        let channel = FakeChannel()
+        let manager = makeManager(registrar: registrar, channel: channel, defaults: makeDefaults())
+        await manager.maintainOnce()
+        let before = channel.appliedConfigs.count
+
+        await manager.powerSourceChanged(to: .battery)
+        await manager.powerSourceChanged(to: .wall)
+
+        #expect(channel.appliedConfigs.count == before, "off means off")
+    }
+
+    @Test("Plugging back in switches to the wall preset")
+    func replugAppliesWallPreset() async {
+        let registrar = FakeRegistrar(); registrar.status = .enabled
+        let channel = FakeChannel()
+        let manager = makeManager(registrar: registrar, channel: channel, defaults: makeDefaults())
+        manager.powerRule = enabledRule()
+        await manager.maintainOnce()
+
+        await manager.powerSourceChanged(to: .battery)
+        await manager.powerSourceChanged(to: .wall)
+
+        #expect(channel.appliedConfigs.last?.sharedCurve == FanCurve.cold)
+    }
+
+    /// A rule that silently failed to persist would read as "off" next launch,
+    /// quietly abandoning something the user configured.
+    @Test("The rule survives a manager rebuild")
+    func rulePersists() {
+        let defaults = makeDefaults()
+        let first = makeManager(
+            registrar: FakeRegistrar(), channel: FakeChannel(), defaults: defaults
+        )
+        first.powerRule = enabledRule()
+
+        let second = makeManager(
+            registrar: FakeRegistrar(), channel: FakeChannel(), defaults: defaults
+        )
+        #expect(second.powerRule == enabledRule())
+    }
+
+    @Test("Nothing is configured until the user turns it on")
+    func defaultRuleIsOff() {
+        let manager = makeManager(
+            registrar: FakeRegistrar(), channel: FakeChannel(), defaults: makeDefaults()
+        )
+        #expect(manager.powerRule.isEnabled == false)
     }
 
     // MARK: - Errors
