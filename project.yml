@@ -130,6 +130,7 @@ targets:
       - IceCube/PresetStore.swift
       - IceCube/PowerSourceMonitor.swift
       - IceCube/UpdateChecker.swift
+      - IceCube/MenuBarMode.swift
     dependencies:
       - package: IceCubeKit
     settings:

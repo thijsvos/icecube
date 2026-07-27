@@ -37,8 +37,21 @@ struct IceCubeApp: App {
         _appState = State(initialValue: state)
     }
 
+    /// False withdraws SwiftUI's status item so ``StatusItemController`` can take
+    /// its place. `MenuBarExtra(isInserted:)` has existed since macOS 13, one
+    /// version below this app's deployment target.
+    private var swiftUIItemInserted: Binding<Bool> {
+        Binding(
+            get: { appState.menuBar?.isSwiftUIItemInserted ?? true },
+            // The system writes back when the user ⌘-drags the item out of the
+            // menu bar. Ignored: which item is hosted is Ice Cube's decision,
+            // and honouring a drag-out here would silently disable the app.
+            set: { _ in }
+        )
+    }
+
     var body: some Scene {
-        MenuBarExtra {
+        MenuBarExtra(isInserted: swiftUIItemInserted) {
             PopoverView(state: appState)
         } label: {
             // A custom melting-ice-cube glyph (see MenuBarGlyph) — a stable

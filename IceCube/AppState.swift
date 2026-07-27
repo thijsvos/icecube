@@ -14,7 +14,7 @@ import os
 /// app process does; see `SMCProviding`), and it never crashes on a provider
 /// error: failures become a short message and polling keeps trying.
 @Observable
-final class AppState {
+final class AppState: PopoverLifecycleObserving {
     /// The most recent successful reading, or `nil` before the first one lands.
     private(set) var snapshot: SMCSnapshot?
     /// The hottest sensor as shown in UI — updated with hysteresis so the
@@ -211,13 +211,36 @@ final class AppState {
 
     // MARK: - Polling
 
+    /// Swaps the menu bar item between SwiftUI's and ours. Nil until ``start()``.
+    @ObservationIgnored private(set) var menuBar: MenuBarModeCoordinator?
+
+    /// Re-reads the hosting decision.
+    ///
+    /// Driven from the 1 Hz poll rather than read once at launch, so turning the
+    /// preference on takes effect immediately. This app has no vocabulary for
+    /// "takes effect on relaunch" and should not grow one — and a launch-time
+    /// read has already shipped here as a bug once.
+    private func reconcileMenuBarMode() {
+        guard let menuBar else { return }
+        menuBar.apply(MenuBarMode.resolve(
+            prefersSilentOptionClick: UserDefaults.standard.bool(forKey: MenuBarMode.preferenceKey),
+            isSetUp: helper.registration == .enabled
+        ))
+    }
+
     /// Starts consuming the 1 Hz polling stream. A second call is a no-op.
     func start() {
         guard pollTask == nil else { return }
+        if menuBar == nil {
+            menuBar = MenuBarModeCoordinator(
+                host: StatusItemController(state: self), lifecycle: self
+            )
+        }
         let events = poller.events()
         pollTask = Task { [weak self] in
             for await event in events {
                 guard let self else { return } // strong only per event
+                reconcileMenuBarMode()
                 switch event {
                 case let .snapshot(new):
                     snapshot = new

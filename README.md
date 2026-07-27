@@ -37,6 +37,7 @@ dependencies**; small footprint is a design goal, not an accident.
 | Presets: Quiet · Balanced · Cold · Max + your own | ✅ |
 | Manual per-fan sliders (watchdogged, never persisted) | ✅ |
 | Switch presets automatically when you plug in or unplug | ✅ |
+| ⌥-click the menu bar icon to jump to the next preset | ✅ |
 | Curve keeps running at boot, app closed — daemon-side | ✅ |
 | Sensors browser (every SMC key, live) + JSON diagnostics export | ✅ |
 | CSV history export, temperature alerts, launch at login, °C/°F | ✅ |
