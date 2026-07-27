@@ -90,17 +90,44 @@ outside the working tree entirely.
 
 See XCODE_GUIDE §8 for obtaining the certificate and the notary key.
 
-### One code change is still required
+### Code signing pinning — no change needed, but verify it
 
-`CodesignPinning.developmentRequirement` builds the **TN3127 development**
-requirement (WWDR intermediate, marker `1.2.840.113635.100.6.2.1`). Developer
-ID-signed builds need the *distribution* variant instead — markers `6.2.6` plus
-leaf `6.1.13`. The two are not interchangeable: ship a Developer ID build
-against the development requirement and the app and its helper will refuse to
-talk to each other, which presents as "connecting…" forever in the popover.
+This used to be a required code change. Since 2026-07-27 `CodesignPinning`
+carries **both** requirements and picks between them by reading its own
+certificate chain:
 
-`CodesignPinningTests` asserts the current shape, so that test is the thing to
-update alongside the requirement string.
+| signed with | requirement imposed on the peer |
+| --- | --- |
+| Apple Development | WWDR intermediate `6.2.1` + team OU |
+| Developer ID Application | Developer ID CA `6.2.6` + leaf marker `6.1.13` + team OU |
+
+Detection is at runtime, not `#if DEBUG`, because Release builds are signed
+with Apple Development today — a compile-time switch would break
+`scripts/install.sh` the day it landed — and because a fork with its own
+Developer ID must not have to edit pinning code.
+
+The two are not interchangeable: ship a Developer ID build against the
+development requirement and the app and its helper refuse to talk to each
+other, which presents as "connecting…" forever in the popover with nothing
+saying why.
+
+**What is proven, and what isn't.** Both strings were checked with
+`codesign --verify -R` against real third-party binaries — a Developer
+ID-signed app matches the distribution requirement and not the development one,
+and Ice Cube's own Apple Development build matches the development one and not
+the distribution one. What cannot be proven until the account is upgraded is
+the *combination*: our identifier and our Team ID under a Developer ID chain.
+
+So on the first Developer ID build, verify by hand before shipping:
+
+```bash
+codesign -d -r- "/Applications/Ice Cube.app"        # dump the real requirement
+codesign --verify -R="<the distribution requirement>" "/Applications/Ice Cube.app"
+```
+
+Then install it and confirm the popover reaches "connected" rather than
+"connecting…". `CodesignPinningTests` covers the string shapes and that each
+variant selects its own.
 
 ## Rolling back
 
