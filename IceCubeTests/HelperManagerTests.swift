@@ -123,24 +123,10 @@ private final class FakeRegistrar: DaemonRegistering {
 /// whether the CI runner happens to be plugged in (it always is).
 @MainActor
 private final class FakePowerSource: PowerSourceObserving {
-    private(set) var current: PowerProfilePolicy.PowerSource
-    var onChange: ((PowerProfilePolicy.PowerSource) -> Void)?
-    private(set) var started = false
+    var current: PowerProfilePolicy.PowerSource
 
     init(_ initial: PowerProfilePolicy.PowerSource = .wall) {
         current = initial
-    }
-
-    func start() {
-        started = true
-    }
-
-    /// Simulates the charger going in or coming out. Mirrors the real monitor,
-    /// which reports nothing unless AC-vs-battery actually flipped.
-    func change(to source: PowerProfilePolicy.PowerSource) {
-        guard source != current else { return }
-        current = source
-        onChange?(source)
     }
 }
 

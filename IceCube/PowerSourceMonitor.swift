@@ -12,57 +12,30 @@ import IOKit.ps
 /// depends on the runner's power state — which on a rack-mounted build machine
 /// is permanently `wall` and would exercise nothing.
 protocol PowerSourceObserving: AnyObject {
+    /// Where the Mac is drawing power right now. Read fresh on each call.
     var current: PowerProfilePolicy.PowerSource { get }
-    /// Called on the main actor when the source changes.
-    var onChange: ((PowerProfilePolicy.PowerSource) -> Void)? { get set }
-    /// Begins observing. Separate from init, like ``HelperManager/start()``,
-    /// so constructing one has no side effects.
-    func start()
 }
 
-/// The real thing: IOKit's power-source notifications.
+/// The real thing: a fresh IOKit read, polled by the app's existing 5 s
+/// maintenance pass.
 ///
-/// `IOPSNotificationCreateRunLoopSource` fires on any power change — including
-/// battery percentage ticks, which arrive every few seconds — so this collapses
-/// them to the only distinction Ice Cube cares about and reports nothing unless
-/// AC-vs-battery actually flipped. Without that filter the policy would be
-/// asked to decide dozens of times an hour, and every one of those is a chance
-/// for a bug to become an override.
+/// **Polled, not notified, after the notification version silently never
+/// fired.** The first implementation used
+/// `IOPSNotificationCreateRunLoopSource` with a C callback added to the main
+/// run loop. It built, it ran, and on hardware it delivered nothing at all —
+/// unplugging and replugging produced no log line and no switch. It also had no
+/// logging of its own, so there was no way to tell whether the source had failed
+/// to create, the callback was never invoked, or the read was wrong.
+///
+/// Polling makes all of that moot. ``HelperManager`` already wakes every 5 s to
+/// feed the daemon's watchdog, reading this is a couple of microseconds, and
+/// ``PowerProfilePolicy`` is transition-based by design — so asking it the same
+/// question repeatedly is inert by construction, not by luck. Detecting a
+/// charger within five seconds is not a feature anyone will miss, and a
+/// mechanism that demonstrably works beats a more elegant one that does not.
 final class PowerSourceMonitor: PowerSourceObserving {
-    private(set) var current: PowerProfilePolicy.PowerSource
-    var onChange: ((PowerProfilePolicy.PowerSource) -> Void)?
-    private var runLoopSource: CFRunLoopSource?
-
-    init() {
-        current = Self.read()
-    }
-
-    // No `deinit` teardown on purpose. `CFRunLoopSource` is not `Sendable` and
-    // `deinit` is nonisolated, so Swift 6 refuses to touch it there — and
-    // working around that would be for a case that does not exist: exactly one
-    // monitor is created, it is owned by the app-lifetime `HelperManager`, and
-    // the run loop dies with the process. Tests inject a fake and never build
-    // this at all.
-
-    func start() {
-        guard runLoopSource == nil else { return }
-        let context = Unmanaged.passUnretained(self).toOpaque()
-        guard let source = IOPSNotificationCreateRunLoopSource({ context in
-            guard let context else { return }
-            let monitor = Unmanaged<PowerSourceMonitor>.fromOpaque(context)
-                .takeUnretainedValue()
-            MainActor.assumeIsolated { monitor.refresh() }
-        }, context)?.takeRetainedValue() else { return }
-        runLoopSource = source
-        CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
-    }
-
-    /// Re-reads and reports only a genuine AC-vs-battery flip.
-    private func refresh() {
-        let now = Self.read()
-        guard now != current else { return }
-        current = now
-        onChange?(now)
+    var current: PowerProfilePolicy.PowerSource {
+        Self.read()
     }
 
     /// Reads the current source.

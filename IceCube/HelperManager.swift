@@ -112,10 +112,6 @@ final class HelperManager {
     /// type had no tests at all until now.
     func start() {
         guard maintenanceTask == nil else { return }
-        powerSource.onChange = { [weak self] source in
-            Task { await self?.powerSourceChanged(to: source) }
-        }
-        powerSource.start()
         // One maintenance loop: keeps registration fresh (approval happens in
         // System Settings, outside our process), reconnects when enabled, and
         // drives heartbeat + status while connected.
@@ -500,13 +496,22 @@ final class HelperManager {
         let decision = PowerProfilePolicy.decide(
             source: source, previous: lastPowerSource, rule: powerRule
         )
+        let previous = lastPowerSource
+        if previous != source {
+            // Logged on every real transition, whether or not a rule acts on
+            // it. The first version of this feature logged only when it
+            // switched a preset, so when it silently never fired at all there
+            // was nothing in the log to say whether the power change had even
+            // been noticed.
+            log.notice(
+                "power source: \(previous?.rawValue ?? "unknown", privacy: .public) -> \(source.rawValue, privacy: .public)"
+            )
+        }
         lastPowerSource = source
         guard case let .apply(kind) = decision,
               let preset = PresetStore.builtins.first(where: { $0.kind == kind })
         else { return }
-        log.notice(
-            "power source is now \(source.rawValue, privacy: .public) — switching to \(preset.name, privacy: .public)"
-        )
+        log.notice("power rule: switching to \(preset.name, privacy: .public)")
         await applyPreset(preset, persistCurve: UserDefaults.standard.bool(forKey: "persistCurve"))
     }
 
@@ -652,6 +657,7 @@ final class HelperManager {
         client.heartbeat()
         await refreshStatus()
         await autoResumeIfNeeded()
+        await powerSourceChanged(to: powerSource.current)
         await selfTestAfterOSChangeIfNeeded()
         reconcileHighlight()
     }
