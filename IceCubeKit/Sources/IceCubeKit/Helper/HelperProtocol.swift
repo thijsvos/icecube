@@ -116,7 +116,14 @@ public enum HelperConstants {
     ///     (`autoResumeIfNeeded` latches once per session), so on hardware the
     ///     very first run swapped a live Balanced curve for the guardian's
     ///     floor hold and left it there. A diagnostic must not change settings.
-    public static let protocolVersion = "18"
+    /// v19: log honesty on wake. The wake re-assert now runs behind the safety
+    ///     verdict instead of in front of it — the app's heartbeat cannot tick
+    ///     while the machine sleeps, so a non-persisting curve is always about
+    ///     to be reverted on waking, and announcing "re-asserting curve
+    ///     control" first described the opposite of what happened. Blind
+    ///     temperature ticks are also reported once per spell rather than once
+    ///     each: one wake produced six identical lines for a single reconnect.
+    public static let protocolVersion = "19"
     /// How often the app sends a heartbeat while connected.
     public static let heartbeatInterval: TimeInterval = 5
     /// SAFETY: no heartbeat for this long → the daemon's watchdog reverts to

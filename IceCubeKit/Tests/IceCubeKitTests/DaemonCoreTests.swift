@@ -505,6 +505,69 @@ struct DaemonCoreRevertTests {
         #expect(decoded == original)
     }
 
+    /// Found in an overnight log: one wake produced six identical
+    /// "temperature read failed" lines describing a single reconnect window.
+    /// `resetPort()` closes the connection on every hand-back and on wake, so
+    /// these failures always come in runs — six lines reads as six faults.
+    @Test("A run of blind ticks is reported once, and its recovery is reported too")
+    func blindSpellIsReportedOnce() async {
+        let smc = FakeSMC(temperature: 60)
+        let core = makeCore(smc: smc)
+        await smc.breakRead("Tp01")
+        await smc.breakRead("Tg0f")
+
+        for _ in 0 ..< 4 {
+            await core.tick(sleptFor: .zero)
+        }
+        let blindLines = await core.currentStatus().recentEvents
+            .filter { $0.contains("temperature read failed") }
+        #expect(blindLines.count == 1, "one episode, not one per tick")
+
+        await smc.fixRead("Tp01")
+        await smc.fixRead("Tg0f")
+        await core.tick(sleptFor: .zero)
+        let recovered = await core.currentStatus().recentEvents
+            .contains { $0.contains("readable again") }
+        #expect(recovered, "and the end of the episode is visible")
+    }
+
+    /// The wake re-assert used to run before the safety verdict, so every wake
+    /// logged "re-asserting curve control" and then immediately reverted it —
+    /// the app's heartbeat cannot tick while the machine sleeps, so a
+    /// non-persisting curve is ALWAYS about to be reverted on waking.
+    @Test("Waking with a stale heartbeat reverts without announcing a re-assert first")
+    func wakeDoesNotAnnounceADoomedReassert() async throws {
+        let smc = FakeSMC(temperature: 55)
+        let core = makeCore(smc: smc)
+        // Deliberately no heartbeat: exactly the state a machine wakes in.
+        try await core.apply(curveConfig(persists: false))
+
+        await core.tick(sleptFor: .seconds(600))
+
+        let events = await core.currentStatus().recentEvents
+        #expect(await core.config.mode == .auto, "the watchdog still reverts")
+        #expect(
+            events.contains { $0.contains("wake detected") } == false,
+            "no re-assert is announced for something about to be reverted"
+        )
+    }
+
+    /// The counterweight: a wake with a live app must still re-establish the
+    /// curve, because the firmware resets fan control across sleep (§3.4).
+    @Test("Waking with a live app re-establishes curve control")
+    func wakeWithLiveAppReasserts() async throws {
+        let smc = FakeSMC(temperature: 55)
+        let core = makeCore(smc: smc)
+        try await core.apply(curveConfig(persists: false))
+        await core.heartbeat()
+
+        await core.tick(sleptFor: .seconds(600))
+
+        let events = await core.currentStatus().recentEvents
+        #expect(await core.config.mode == .curve, "the curve survives")
+        #expect(events.contains { $0.contains("wake detected") }, "and the wake is recorded")
+    }
+
     /// A persisting curve is explicitly allowed to outlive the app.
     @Test("Losing the connection does NOT revert a curve that persists without the app")
     func persistingCurveSurvivesInvalidation() async throws {

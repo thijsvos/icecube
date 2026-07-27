@@ -533,9 +533,15 @@ public actor DaemonCore {
         // Firmware silently resets manual control across sleep (§3.4), so any
         // real nap means re-assert or revert. Measured, not inferred: a slow
         // tick is no longer mistaken for a wake.
-        if slept > .seconds(HelperConstants.tickInterval) {
-            await handleWake()
-        }
+        //
+        // Handled BELOW, inside the `.ok` branch, not here. The app's 5 s
+        // heartbeat does not run while the machine sleeps, so on waking the
+        // watchdog is *always* about to revert a non-persisting curve — and
+        // re-asserting first meant every single wake logged "wake detected —
+        // re-asserting curve control" immediately before reverting the thing it
+        // had just re-asserted. Wasted SMC writes, and a log that described the
+        // opposite of what happened.
+        let wokeUp = slept > .seconds(HelperConstants.tickInterval)
 
         // A revert that could not be written earlier outranks everything else:
         // until it lands, the fans may still be physically forced.
@@ -553,6 +559,9 @@ public actor DaemonCore {
         switch verdict {
         case .ok:
             coolingOverride = false
+            if wokeUp {
+                await handleWake()
+            }
             switch config.mode {
             case .manual: await verifyManualState()
             case .curve: await runCurveTick()
@@ -624,9 +633,12 @@ public actor DaemonCore {
             record("SAFETY: wake re-assert failed — reverting to auto")
             await revertEverything(reason: "wake re-assert failed")
         case .curve:
-            record("wake detected — re-asserting curve control")
-            curveTargets = [:] // force a fresh engage on the next curve tick
-            await runCurveTick()
+            record("wake detected — re-establishing curve control")
+            // Just forget the remembered targets; the curve tick immediately
+            // below this call does the fresh engage. Running it here as well
+            // meant two full curve evaluations per wake, the first of them
+            // against an SMC connection that `resetPort()` had just closed.
+            curveTargets = [:]
         case .auto:
             break
         }
@@ -867,6 +879,10 @@ public actor DaemonCore {
 
     // MARK: - Guardian: Ice Cube cools when macOS won't
 
+    /// True while temperature reads are failing, so a run of blind ticks is
+    /// reported as one episode rather than one line each.
+    private var guardianIsBlind = false
+
     /// The decision engine; see ``FanGuardian`` for the field finding behind it.
     /// All policy lives there — this actor only performs the resulting I/O.
     private var guardian = FanGuardian()
@@ -880,8 +896,22 @@ public actor DaemonCore {
         // Mac back to a thermalmonitord that (per FanGuardian's own field note)
         // does not reliably resume. Skipping the tick holds the last decision.
         guard let dieHot = await (try? readTemperatures())?.hottestDieCelsius else {
-            record("guardian: temperature read failed — holding previous decision")
+            // Reported once per blind SPELL, not once per blind tick. These
+            // failures come in runs — `resetPort()` closes the connection on
+            // every hand-back and on wake, and everything that reads then
+            // misses until it reopens. One wake produced six identical lines
+            // describing a single 40-second reconnect, which reads as six
+            // separate faults. The recovery below is what says it ended.
+            if !guardianIsBlind {
+                guardianIsBlind = true
+                record("guardian: temperature read failed — holding previous decision")
+            }
             return
+        }
+
+        if guardianIsBlind {
+            guardianIsBlind = false
+            record("guardian: temperatures readable again")
         }
 
         // The guardian only ever acts while the daemon holds nothing itself.
