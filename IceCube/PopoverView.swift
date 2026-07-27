@@ -64,6 +64,11 @@ struct PopoverView: View {
     /// so a user who releases ⌥ between the click and the window appearing gets
     /// an ordinary open — which is the harmless direction to be wrong in.
     private func quickSwitchIfOptionHeld() {
+        // Only in SwiftUI hosting. `StatusItemController` reads the modifier
+        // from the click event itself and usually never opens the popover at
+        // all — but it does open it when a switch is refused, and ⌥ is often
+        // still down at that moment, which would apply a second switch here.
+        guard state.menuBar?.mode != .vendored else { return }
         guard NSEvent.modifierFlags.contains(.option) else { return }
         Task { await state.helper.cyclePreset(in: PresetStore.builtins) }
     }

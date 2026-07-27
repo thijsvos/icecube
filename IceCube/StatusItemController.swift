@@ -139,7 +139,22 @@ final class StatusItemController: NSObject, MenuBarHosting, NSPopoverDelegate {
         guard let button = item?.button else { return }
         let popover = popover ?? makePopover()
         self.popover = popover
+        // Clicking a status item does NOT activate an LSUIElement app, so
+        // without this the popover's window never becomes key — and both of the
+        // bugs that caused are invisible from the code:
+        //
+        //   1. SwiftUI draws every control in its inactive state, so the active
+        //      preset's `.tint(Theme.accent)` greys out and the popover looks
+        //      like nothing is selected at all.
+        //   2. `.transient` dismisses when its window resigns key. With no key
+        //      window there is nothing to resign, so clicking elsewhere on
+        //      screen left the popover stuck open until a button was pressed.
+        //
+        // `MenuBarExtra` does this for its own window; owning the item means
+        // owning this too.
+        NSApp.activate()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popover.contentViewController?.view.window?.makeKey()
     }
 
     private func makePopover() -> NSPopover {
