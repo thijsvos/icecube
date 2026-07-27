@@ -41,9 +41,15 @@ struct IceCubeApp: App {
         MenuBarExtra {
             PopoverView(state: appState)
         } label: {
-            // A custom melting-ice-cube template glyph (see MenuBarGlyph) —
-            // a stable brand mark, not the snowflake which read as a live
-            // "it's cold" status. The system tints the template for light/dark.
+            // A custom melting-ice-cube glyph (see MenuBarGlyph) — a stable
+            // brand mark, not the snowflake which read as a live "it's cold"
+            // status.
+            //
+            // NOT a template image, despite what this comment claimed until
+            // 2026-07-27: it is a colour PNG and `isTemplate` is never set
+            // anywhere. That is deliberate — MenuBarGlyph explains that a
+            // monochrome silhouette just reads as a box — so nothing tints it
+            // for light/dark, and nothing should start.
             HStack(spacing: 3) {
                 Image(nsImage: MenuBarGlyph.iceCube)
                 // The Text is ALWAYS present (empty when icon-only) — the
@@ -120,8 +126,6 @@ struct IceCubeApp: App {
 
         // The SMC key browser + diagnostics export. Opened from the popover
         // via WindowOpener (LSUIElement apps need the explicit activation).
-        // Settings deliberately have NO window: they render inline in the
-        // popover (see SettingsSection) so choosing an option can't dismiss it.
         Window("SMC Sensors", id: WindowOpener.ID.sensors) {
             SensorsBrowserView(state: appState)
         }
