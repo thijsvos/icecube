@@ -33,11 +33,13 @@ public actor DaemonCore {
     /// cannot masquerade as things that happened to the user's Mac.
     private let log = Logger(subsystem: HelperConstants.logSubsystem, category: "curve")
 
-    /// What the daemon is currently enforcing. A fresh start is `.auto` unless
-    /// a valid persisted curve loads (PLAN.md §4.3.3, the boot promise).
-    /// `internal`, not `private`, purely so `@testable import` can assert on it:
-    /// the daemon's whole safety contract is "what is `config` vs what the fans
-    /// are physically doing", and that is exactly what needs pinning by tests.
+    /// What the daemon is currently enforcing.
+    ///
+    /// A fresh start is `.auto` unless a valid persisted curve loads (PLAN.md
+    /// §4.3.3, the boot promise). `internal`, not `private`, purely so `@testable
+    /// import` can assert on it: the daemon's whole safety contract is "what is
+    /// `config` vs what the fans are physically doing", and that is exactly what
+    /// needs pinning by tests.
     var config: FanConfig = .auto
     /// Monotonic instant of the app's last heartbeat; see ``heartbeatAge()``.
     private var lastHeartbeatAt: ContinuousClock.Instant?
@@ -59,19 +61,23 @@ public actor DaemonCore {
     /// up on that pass. The tick then keeps retrying via ``revertPending``.
     private static let revertReadAttempts = 3
     /// True when a revert was requested but could not actually be written (the
-    /// fan list would not read). The tick retries it until it lands; until then
-    /// the daemon deliberately keeps `config` — and therefore every safety net —
-    /// exactly as it was, because the fans may still be physically forced.
-    /// `internal` for the same reason as ``config`` — a deferred revert is a
-    /// safety state that must be observable in tests.
+    /// fan list would not read).
+    ///
+    /// The tick retries it until it lands; until then the daemon deliberately
+    /// keeps `config` — and therefore every safety net — exactly as it was,
+    /// because the fans may still be physically forced. `internal` for the same
+    /// reason as ``config`` — a deferred revert is a safety state that must be
+    /// observable in tests.
     var revertPending = false
     private var revertPendingReason: String?
     /// Consecutive failed revert attempts, used only to throttle logging.
     private var failedRevertAttempts = 0
-    /// Reverts currently mid-flight. A revert suspends on every SMC write, so
-    /// an engage can begin *after* the generation was bumped but *before* the
-    /// revert's writes land — that engage would pass the generation check and
-    /// still leave the fans forced. Counting in-flight reverts closes it.
+    /// Reverts currently mid-flight.
+    ///
+    /// A revert suspends on every SMC write, so an engage can begin *after* the
+    /// generation was bumped but *before* the revert's writes land — that engage
+    /// would pass the generation check and still leave the fans forced. Counting
+    /// in-flight reverts closes it.
     private var revertsInFlight = 0
 
     /// - Parameters:
@@ -411,10 +417,11 @@ public actor DaemonCore {
 
     /// True while a self-test is running, so two cannot overlap.
     private var selfTestInFlight = false
-    /// The firmware's own words the last time a write sequence threw. Kept so a
-    /// report can quote it rather than paraphrase — "rejected the operation on
-    /// key 'F1Md' (result 0x84)" tells a maintainer what to fix; "write failed"
-    /// does not.
+    /// The firmware's own words the last time a write sequence threw.
+    ///
+    /// Kept so a report can quote it rather than paraphrase — "rejected the
+    /// operation on key 'F1Md' (result 0x84)" tells a maintainer what to fix;
+    /// "write failed" does not.
     private var lastWriteFailure: String?
 
     /// Checks whether this Mac's fans can actually be driven, and reports what

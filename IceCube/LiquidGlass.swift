@@ -33,11 +33,12 @@ extension View {
         }
     }
 
-    /// Glass surface for a small **floating** control cluster (a pod that
-    /// hovers over content). On macOS 26 it's real Liquid Glass; below it
-    /// approximates with `.ultraThinMaterial`. Do NOT use this on content
-    /// (charts) or inside the already-glass popover — only for floating
-    /// control clusters over content.
+    /// Glass surface for a small **floating** control cluster (a pod that hovers
+    /// over content).
+    ///
+    /// On macOS 26 it's real Liquid Glass; below it approximates with
+    /// `.ultraThinMaterial`. Do NOT use this on content (charts) or inside the
+    /// already-glass popover — only for floating control clusters over content.
     @ViewBuilder
     func floatingGlass(in shape: some Shape = Capsule()) -> some View {
         if #available(macOS 26, *) {

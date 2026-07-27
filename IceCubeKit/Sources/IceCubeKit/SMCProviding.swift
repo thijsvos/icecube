@@ -24,8 +24,10 @@ public protocol SMCProviding: Sendable {
 
     /// Every SMC key this machine exposes, with metadata and a best-effort
     /// decoded value — the raw material of the sensors browser and the
-    /// diagnostics report. Expensive (thousands of reads on real hardware):
-    /// call on demand, never from the polling loop.
+    /// diagnostics report.
+    ///
+    /// Expensive (thousands of reads on real hardware): call on demand, never
+    /// from the polling loop.
     func keyDump() async throws(IceCubeError) -> [SMCKeyDump]
 }
 

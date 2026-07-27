@@ -31,11 +31,12 @@ actor SMCWritePort: SMCControlPort {
     }
 
     /// FIELD CORRECTION (2026-07-23): thermalmonitord only reliably resumes
-    /// driving the fans when the controlling process's SMC connection goes
-    /// away (observed on Mac14,9: a daemon bounce restored system control;
-    /// an in-place mode hand-back did not). Dropping and lazily reopening
-    /// the connection after a revert reproduces that release without
-    /// restarting the daemon.
+    /// driving the fans when the controlling process's SMC connection goes away
+    /// (observed on Mac14,9: a daemon bounce restored system control; an in-place
+    /// mode hand-back did not).
+    ///
+    /// Dropping and lazily reopening the connection after a revert reproduces
+    /// that release without restarting the daemon.
     func reset() {
         if connection != 0 {
             IOServiceClose(connection)

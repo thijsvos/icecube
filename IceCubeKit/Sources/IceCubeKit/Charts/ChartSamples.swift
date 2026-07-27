@@ -14,6 +14,7 @@ public struct ChartSample: Sendable, Equatable {
 }
 
 /// One rendered chart point: a time bucket's min/max band and average line.
+///
 /// Min-max bucketing (rather than plain decimation) is deliberate: a one-tick
 /// temperature spike must survive downsampling — dropping extremes would make
 /// the chart lie about exactly the events a thermal monitor exists to show.

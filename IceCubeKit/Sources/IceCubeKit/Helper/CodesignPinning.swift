@@ -74,10 +74,12 @@ public enum CodesignPinning {
     }
 
     /// Rejects anything that could break out of the quoted literal it gets
-    /// interpolated into (or is simply empty). Real Team IDs are 10 alphanumeric
-    /// characters and bundle ids are reverse-DNS, so this excludes nothing
-    /// legitimate — it just means a surprising value fails closed instead of
-    /// producing a malformed requirement.
+    /// interpolated into (or is simply empty).
+    ///
+    /// Real Team IDs are 10 alphanumeric characters and bundle ids are
+    /// reverse-DNS, so this excludes nothing legitimate — it just means a
+    /// surprising value fails closed instead of producing a malformed
+    /// requirement.
     static func isSafeRequirementComponent(_ value: String) -> Bool {
         guard !value.isEmpty, value.count <= 255 else { return false }
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: ".-_"))

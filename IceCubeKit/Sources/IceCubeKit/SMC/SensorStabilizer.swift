@@ -5,8 +5,10 @@ import Foundation
 /// Merges one tick's raw sensor reads with the last known-good values so the
 /// published list **always** contains every discovered sensor, in the same
 /// order — a sensor that glitches for a tick holds its previous value instead
-/// of vanishing. Rows that appear and disappear make the whole popover resize
-/// every second; a static list is a UI requirement, not a nicety.
+/// of vanishing.
+///
+/// Rows that appear and disappear make the whole popover resize every second;
+/// a static list is a UI requirement, not a nicety.
 enum SensorStabilizer {
     /// - Parameters:
     ///   - sensors: the discovered sensor list (fixed at discovery time).

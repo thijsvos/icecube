@@ -7,8 +7,10 @@ import UserNotifications
 
 /// Sends one notification when the hottest die sensor crosses the user's
 /// threshold, then re-arms after it cools 5 °C below — a fever alarm, not a
-/// nag. Permission is requested lazily on first enable; a denial is surfaced
-/// as UI state, never an error dialog.
+/// nag.
+///
+/// Permission is requested lazily on first enable; a denial is surfaced as UI
+/// state, never an error dialog.
 @Observable
 final class AlertManager {
     /// The die-temperature threshold that fires an alert.

@@ -3,10 +3,12 @@
 import IceCubeKit
 import SwiftUI
 
-/// The control section of the popover. What it shows depends on where the
-/// helper stands: onboarding (not registered) → approval prompt → manual
-/// controls. Manual mode gets an unmissable orange tint (PLAN.md §1.2), and
-/// "Auto" is always the biggest, easiest action.
+/// The control section of the popover.
+///
+/// What it shows depends on where the helper stands: onboarding (not
+/// registered) → approval prompt → manual controls. Manual mode gets an
+/// unmissable orange tint (PLAN.md §1.2), and "Auto" is always the biggest,
+/// easiest action.
 struct FanControlSection: View {
     /// A plain `let`: observation-driven redraw works without @Bindable, which
     /// exists only to project `$`-bindings — and this view forms none.
@@ -55,10 +57,12 @@ struct FanControlSection: View {
     // MARK: - Onboarding & approval
 
     /// Both pre-enabled states hand off to the guided setup window rather than
-    /// trying to run the flow inside a popover. The popover dismisses itself
-    /// whenever the user clicks away — including when they go to System
-    /// Settings to grant the permission — so the one moment they most need
-    /// guidance was the one moment this card could not be on screen.
+    /// trying to run the flow inside a popover.
+    ///
+    /// The popover dismisses itself whenever the user clicks away — including
+    /// when they go to System Settings to grant the permission — so the one
+    /// moment they most need guidance was the one moment this card could not be
+    /// on screen.
     private var onboarding: some View {
         setupPrompt(
             title: "Fan control is off",

@@ -4,11 +4,13 @@ import IceCubeKit
 import ServiceManagement
 import SwiftUI
 
-/// Settings as three tabs — General, Menu, Fan Control. A custom toolbar-style
-/// tab bar (so the selection styling is ours, not the system-accent segmented
-/// control) sits above the single current pane, and the window sizes to that
-/// pane's natural height — so it resizes to fit each tab with no scroll and no
-/// empty space. Relies on the window's `.windowResizability(.contentSize)`.
+/// Settings as three tabs — General, Menu, Fan Control.
+///
+/// A custom toolbar-style tab bar (so the selection styling is ours, not the
+/// system-accent segmented control) sits above the single current pane, and
+/// the window sizes to that pane's natural height — so it resizes to fit each
+/// tab with no scroll and no empty space. Relies on the window's
+/// `.windowResizability(.contentSize)`.
 struct SettingsWindowView: View {
     @Bindable var state: AppState
     @AppStorage("persistCurve") private var persistCurve = false

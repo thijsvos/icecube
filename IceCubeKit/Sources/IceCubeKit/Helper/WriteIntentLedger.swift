@@ -36,10 +36,11 @@ struct WriteIntentLedger: Sendable, Equatable {
         return latest
     }
 
-    /// Whether `ticket` is still the newest decision — checked *inside* the
-    /// lock, which is the only place the answer means anything. A writer that
-    /// queued while a newer decision arrived must stand down rather than
-    /// commit an intent the daemon has already moved on from.
+    /// Whether `ticket` is still the newest decision — checked *inside* the lock,
+    /// which is the only place the answer means anything.
+    ///
+    /// A writer that queued while a newer decision arrived must stand down rather
+    /// than commit an intent the daemon has already moved on from.
     func isCurrent(_ ticket: Int) -> Bool {
         ticket == latest
     }

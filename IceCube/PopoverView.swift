@@ -265,9 +265,11 @@ struct PopoverView: View {
     }
 
     /// `actualRPM` as a fraction of the fan's maximum (0…1), measured from 0 —
-    /// NOT from the minimum. A fan spinning at its floor (e.g. Quiet parks it at
-    /// Mn) must still show a visibly partial bar, never an empty one that reads
-    /// as "stopped." The only empty bar is a genuinely stopped fan (0 RPM).
+    /// NOT from the minimum.
+    ///
+    /// A fan spinning at its floor (e.g. Quiet parks it at Mn) must still show a
+    /// visibly partial bar, never an empty one that reads as "stopped." The only
+    /// empty bar is a genuinely stopped fan (0 RPM).
     private func normalizedSpeed(of fan: Fan) -> Double {
         guard fan.maxRPM > 0 else { return 0 }
         return (fan.actualRPM / fan.maxRPM).clamped(to: 0 ... 1)

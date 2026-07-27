@@ -11,6 +11,7 @@ import os
 @Observable
 final class PresetStore {
     /// The four built-ins, in display order.
+    ///
     /// Every built-in means "Ice Cube is driving". There used to be a "macOS"
     /// entry here that meant the opposite — hand the fans back — and it was a
     /// persistent source of confusion no amount of naming fixed: first renamed
@@ -47,10 +48,12 @@ final class PresetStore {
         .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("IceCube/presets.json")
     /// `HelperConstants.logSubsystem`, not the literal: under test this resolves
-    /// to a separate subsystem. These files are compiled into the test bundle, so
-    /// without it a `swift`/`xcodebuild test` run writes lines like "startup:
-    /// applying curve config" into the SAME log a real investigation reads —
-    /// which already cost two misdiagnoses this project.
+    /// to a separate subsystem.
+    ///
+    /// These files are compiled into the test bundle, so without it a
+    /// `swift`/`xcodebuild test` run writes lines like "startup: applying curve
+    /// config" into the SAME log a real investigation reads — which already cost
+    /// two misdiagnoses this project.
     private let log = Logger(subsystem: HelperConstants.logSubsystem, category: "ui")
 
     init() {

@@ -8,9 +8,10 @@ import Foundation
 public enum SMCPollEvent: Sendable {
     case snapshot(SMCSnapshot)
     /// Why this tick failed, as the typed error — not a flattened string.
+    ///
     /// Consumers need to tell a permanent failure (`smcKeyNotFound` on an
-    /// unmapped Mac, which the diagnostics export exists to fix) from a
-    /// transient hiccup; a `String` made those indistinguishable.
+    /// unmapped Mac, which the diagnostics export exists to fix) from a transient
+    /// hiccup; a `String` made those indistinguishable.
     case failure(IceCubeError)
 }
 

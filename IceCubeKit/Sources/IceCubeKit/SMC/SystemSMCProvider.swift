@@ -249,10 +249,12 @@ public actor SystemSMCProvider: SMCProviding {
         return resolved
     }
 
-    /// The unknown-model fallback: every `T***` key of type `flt` whose
-    /// current value is plausible, labeled by its key. Ugly labels, real data
-    /// — and the sensors browser + diagnostics report exist so the community
-    /// can turn exactly this situation into a curated mapping.
+    /// The unknown-model fallback: every `T***` key of type `flt` whose current
+    /// value is plausible, labeled by its key.
+    ///
+    /// Ugly labels, real data — and the sensors browser + diagnostics report
+    /// exist so the community can turn exactly this situation into a curated
+    /// mapping.
     private func enumeratedTemperatureSensors() async throws(IceCubeError) -> [SMCKeyMaps.SensorDescriptor] {
         let count = try await connection.keyCount()
         var found: [SMCKeyMaps.SensorDescriptor] = []

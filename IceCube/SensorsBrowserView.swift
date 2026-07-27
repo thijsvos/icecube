@@ -4,12 +4,14 @@ import IceCubeKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Shows what the Mac is reporting. By default a **readable** list of the
-/// recognized, human-labeled sensors (CPU/GPU/battery/…) and fans, refreshed
-/// live. The full ~2000-key raw SMC dump — useful only to tinkerers and to the
-/// "new Mac model" diagnostics pipeline — is hidden behind an advanced toggle
-/// and loaded on demand. The Export button writes the full ``DiagnosticsReport``
-/// JSON, which a GitHub issue attaches to get an unmapped model supported.
+/// Shows what the Mac is reporting.
+///
+/// By default a **readable** list of the recognized, human-labeled sensors
+/// (CPU/GPU/battery/…) and fans, refreshed live. The full ~2000-key raw SMC
+/// dump — useful only to tinkerers and to the "new Mac model" diagnostics
+/// pipeline — is hidden behind an advanced toggle and loaded on demand. The
+/// Export button writes the full ``DiagnosticsReport`` JSON, which a GitHub
+/// issue attaches to get an unmapped model supported.
 struct SensorsBrowserView: View {
     /// The shared observable state; owned by `IceCubeApp`.
     let state: AppState

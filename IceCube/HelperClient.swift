@@ -12,17 +12,20 @@ import os
 final class HelperClient {
     private var connection: NSXPCConnection?
     /// `HelperConstants.logSubsystem`, not the literal: under test this resolves
-    /// to a separate subsystem. These files are compiled into the test bundle, so
-    /// without it a `swift`/`xcodebuild test` run writes lines like "startup:
-    /// applying curve config" into the SAME log a real investigation reads —
-    /// which already cost two misdiagnoses this project.
+    /// to a separate subsystem.
+    ///
+    /// These files are compiled into the test bundle, so without it a
+    /// `swift`/`xcodebuild test` run writes lines like "startup: applying curve
+    /// config" into the SAME log a real investigation reads — which already cost
+    /// two misdiagnoses this project.
     private let log = Logger(subsystem: HelperConstants.logSubsystem, category: "xpc")
     /// Called when the connection drops (helper crashed, unregistered, …).
     var onDisconnect: (() -> Void)?
-    /// Bumped on every connect and disconnect, so a callback can tell whether
-    /// the connection it reports on is still the current one. An `Int` rather
-    /// than the connection itself because `NSXPCConnection` is not `Sendable`
-    /// and these handlers must be.
+    /// Bumped on every connect and disconnect, so a callback can tell whether the
+    /// connection it reports on is still the current one.
+    ///
+    /// An `Int` rather than the connection itself because `NSXPCConnection` is
+    /// not `Sendable` and these handlers must be.
     private var generation = 0
 
     var isConnected: Bool {
@@ -128,10 +131,11 @@ final class HelperClient {
 
     private struct NotConnected: Error {}
 
-    /// Runs one XPC call inside a single continuation. The proxy's error
-    /// handler resumes the SAME `OnceResumer` — so a connection that dies
-    /// mid-call fails the `await` instead of leaking the continuation and
-    /// hanging forever (which is what happens if only the reply block can
+    /// Runs one XPC call inside a single continuation.
+    ///
+    /// The proxy's error handler resumes the SAME `OnceResumer` — so a connection
+    /// that dies mid-call fails the `await` instead of leaking the continuation
+    /// and hanging forever (which is what happens if only the reply block can
     /// resume it). `OnceResumer` guarantees exactly one of the two fires.
     private func call<T: Sendable>(
         _ body: @Sendable (HelperProtocol, @escaping @Sendable (Result<T, Error>) -> Void) -> Void

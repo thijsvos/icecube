@@ -117,9 +117,10 @@ public enum SetupGuidance {
     /// above.
     public static let approvalHelpDelay: TimeInterval = 15
 
-    /// How long "connecting" may last before it is treated as broken. Generous:
-    /// a real handshake is sub-second, but launchd can be slow to start a
-    /// service on a busy machine, and offering a repair too eagerly would train
+    /// How long "connecting" may last before it is treated as broken.
+    ///
+    /// Generous: a real handshake is sub-second, but launchd can be slow to start
+    /// a service on a busy machine, and offering a repair too eagerly would train
     /// people to press it during normal startup.
     public static let connectionStuckDelay: TimeInterval = 20
 

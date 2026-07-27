@@ -29,11 +29,12 @@ enum ChartHeight: String, CaseIterable, Identifiable {
     }
 }
 
-/// Everything the user can tune about the live charts. Kept out of `AppState`
-/// (already the polling/control hub) so the display surface is a
-/// self-contained unit — and so the popover can be made as minimal or as
-/// detailed as the user wants. Each property persists itself to `UserDefaults`
-/// on change; `Key` centralizes the string keys.
+/// Everything the user can tune about the live charts.
+///
+/// Kept out of `AppState` (already the polling/control hub) so the display
+/// surface is a self-contained unit — and so the popover can be made as
+/// minimal or as detailed as the user wants. Each property persists itself to
+/// `UserDefaults` on change; `Key` centralizes the string keys.
 @Observable
 final class ChartSettings {
     private enum Key {

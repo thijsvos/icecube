@@ -58,10 +58,11 @@ final class HelperManager {
     /// Where preferences live. Injected so tests get an isolated suite instead
     /// of scribbling on the developer's own `standard` defaults.
     private let defaults: UserDefaults
-    /// Why registration cannot proceed, or nil. A closure because the real
-    /// answer reads this process's code signature and bundle path — neither of
-    /// which says anything useful inside a test bundle. The logic it wraps is
-    /// covered by `RegistrationPreflightTests`.
+    /// Why registration cannot proceed, or nil.
+    ///
+    /// A closure because the real answer reads this process's code signature and
+    /// bundle path — neither of which says anything useful inside a test bundle.
+    /// The logic it wraps is covered by `RegistrationPreflightTests`.
     private let blocker: () -> String?
     // `HelperConstants.logSubsystem`, not the literal: under test this resolves
     // to a separate subsystem. These files are compiled into the test bundle, so
@@ -99,10 +100,12 @@ final class HelperManager {
         refreshRegistration()
     }
 
-    /// Starts the background work. Separate from `init` on purpose: constructing
-    /// a manager used to spawn a 5 s timer and a workspace observer, which meant
-    /// merely *making* one had side effects — fine for the app, impossible for a
-    /// test, and the reason this type had no tests at all until now.
+    /// Starts the background work.
+    ///
+    /// Separate from `init` on purpose: constructing a manager used to spawn a 5
+    /// s timer and a workspace observer, which meant merely *making* one had side
+    /// effects — fine for the app, impossible for a test, and the reason this
+    /// type had no tests at all until now.
     func start() {
         guard maintenanceTask == nil else { return }
         // One maintenance loop: keeps registration fresh (approval happens in
@@ -605,9 +608,10 @@ final class HelperManager {
     }
 
     /// How long the service may be registered-but-unreachable before the app
-    /// repairs it without being asked. Generous: launchd can be slow to start a
-    /// service on a busy machine, and re-registering during normal startup
-    /// would be churn, not healing.
+    /// repairs it without being asked.
+    ///
+    /// Generous: launchd can be slow to start a service on a busy machine, and
+    /// re-registering during normal startup would be churn, not healing.
     private static let wedgedThreshold: TimeInterval = 20
     /// When the current unreachable stretch began.
     @ObservationIgnored private var unreachableSince: Date?

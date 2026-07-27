@@ -5,13 +5,14 @@ import IceCubeKit
 import os
 
 /// Accepts XPC connections from the app (and nothing else) and forwards the
-/// tiny ``HelperProtocol`` surface to ``DaemonCore``.
-/// `Sendable`, not `@unchecked`: this is a final class whose only superclass
-/// is NSObject and whose stored properties are both immutable and Sendable (an
-/// actor and an os.Logger), which is exactly what checked conformance allows.
+/// tiny ``HelperProtocol`` surface to ``DaemonCore``. `Sendable`, not
+/// `@unchecked`: this is a final class whose only superclass is NSObject and
+/// whose stored properties are both immutable and Sendable (an actor and an
+/// os.Logger), which is exactly what checked conformance allows.
+///
 /// The escape hatch bought nothing: a future mutable stored property is now a
-/// compile error rather than a silent race at the daemon's XPC front door. The
-/// `let core = core` bindings below stay — those avoid an implicit strong
+/// compile error rather than a silent race at the daemon's XPC front door.
+/// The `let core = core` bindings below stay — those avoid an implicit strong
 /// `self` capture in escaping closures, which is a capture-semantics rule
 /// independent of Sendable.
 final class HelperService: NSObject, NSXPCListenerDelegate, HelperProtocol, Sendable {

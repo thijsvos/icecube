@@ -54,10 +54,12 @@ public actor MockSMCProvider: SMCProviding {
         Self.temperatures(at: now().timeIntervalSince1970)
     }
 
-    /// A miniature key dump mirroring what the real provider reports for the
-    /// same values, so the sensors browser and diagnostics export are fully
-    /// demonstrable in simulated mode. (A simulated report is marked as such
-    /// by `DiagnosticsReport.simulated` — it can never pass as a machine map.)
+    /// A miniature key dump mirroring what the real provider reports for the same
+    /// values, so the sensors browser and diagnostics export are fully
+    /// demonstrable in simulated mode.
+    ///
+    /// (A simulated report is marked as such by `DiagnosticsReport.simulated` —
+    /// it can never pass as a machine map.)
     public func keyDump() async throws(IceCubeError) -> [SMCKeyDump] {
         let t = now().timeIntervalSince1970
         var dump: [SMCKeyDump] = [
@@ -241,11 +243,12 @@ extension MockSMCProvider {
             / (demandCeilingCelsius - demandFloorCelsius))
     }
 
-    /// Demand filtered through the first-order lag — what fraction of the
-    /// range the fan has physically reached. Integrated over the last 80 s
-    /// (8 time constants, so the arbitrary starting value has decayed to
-    /// ~0.03 %) on a grid of absolute 0.5 s steps. Anchoring the grid to
-    /// wall time makes consecutive reads mutually consistent.
+    /// Demand filtered through the first-order lag — what fraction of the range
+    /// the fan has physically reached.
+    ///
+    /// Integrated over the last 80 s (8 time constants, so the arbitrary starting
+    /// value has decayed to ~0.03 %) on a grid of absolute 0.5 s steps. Anchoring
+    /// the grid to wall time makes consecutive reads mutually consistent.
     static func laggedDemand(at t: TimeInterval) -> Double {
         let gridStep = 0.5 // power of two, so grid points are exact Doubles
         let horizon = 8 * fanTimeConstant

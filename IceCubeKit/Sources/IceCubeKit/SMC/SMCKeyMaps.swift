@@ -100,9 +100,10 @@ public enum SMCKeyMaps {
         return candidates
     }()
 
-    /// The sanity filter for the enumeration fallback (and for dropping
-    /// glitched readings): a real Mac temperature is above 10 °C (a dead or
-    /// unpopulated sensor reads 0) and below 120 °C (beyond silicon limits).
+    /// The sanity filter for the enumeration fallback (and for dropping glitched
+    /// readings): a real Mac temperature is above 10 °C (a dead or unpopulated
+    /// sensor reads 0) and below 120 °C (beyond silicon limits).
+    ///
     /// Bounds follow narugit/smctemp's field-tested filter.
     public static func isPlausibleTemperature(_ celsius: Double) -> Bool {
         celsius > 10 && celsius < 120
