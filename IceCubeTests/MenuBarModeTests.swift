@@ -27,6 +27,10 @@ private final class FakeHost: MenuBarHosting {
     func removeVendoredItem() {
         recorder.record("remove")
     }
+
+    func closePopover() {
+        recorder.record("closePopover")
+    }
 }
 
 @MainActor
@@ -147,6 +151,75 @@ struct MenuBarModeTests {
                 )
             }
         }
+    }
+
+    // MARK: - Closing the popover to open a window
+
+    /// The vendored popover has to be closed explicitly, because SwiftUI's
+    /// `@Environment(\.dismiss)` only closes an `NSPopover` while its window is
+    /// key — and `showPopover`'s `makeKey()` is best-effort.
+    @Test("Opening a window closes the vendored popover")
+    func closesTheVendoredPopover() {
+        let (coordinator, recorder) = makeCoordinator()
+        coordinator.apply(.vendored)
+        let afterSwap = recorder.calls.count
+
+        coordinator.closeVendoredPopover()
+
+        #expect(Array(recorder.calls.dropFirst(afterSwap)) == ["closePopover"])
+    }
+
+    /// THE other test. If this ever records `popoverDisappeared`, the flag goes
+    /// false while the popover is still animating out — and `PopoverView` swaps
+    /// in its 1 pt placeholder, collapsing the popover to a 380×1 sliver in
+    /// front of the user. That is the inverse of the ~17 % CPU bug and it is
+    /// just as invisible from the code. A close is reported by
+    /// `popoverDidClose`, never by whoever asked for it.
+    @Test("Closing the popover for a window never reports it as gone")
+    func closingNeverReportsDisappearance() {
+        let (coordinator, recorder) = makeCoordinator()
+        coordinator.apply(.vendored)
+        let afterSwap = recorder.calls.count
+
+        coordinator.closeVendoredPopover()
+
+        #expect(!recorder.calls.dropFirst(afterSwap).contains("popoverDisappeared"))
+    }
+
+    /// In SwiftUI hosting the vendored controller holds no popover at all, so
+    /// routing a close at it would be a silent no-op on the *default*
+    /// configuration — the one the bug was reported against. That path is
+    /// `PopoverView`'s ambient dismissal instead, and this asserts the
+    /// coordinator knows the difference.
+    @Test("In SwiftUI hosting, nothing is asked of the vendored item")
+    func closingIsVendoredOnly() {
+        let (coordinator, recorder) = makeCoordinator()
+
+        coordinator.closeVendoredPopover()
+
+        #expect(recorder.calls.isEmpty)
+    }
+
+    /// Two different jobs. A swap pauses the popover (and must clear the flag);
+    /// opening a window closes it (and must not). Folding one into the other
+    /// would break the exact-order assertions above — deliberately.
+    ///
+    /// Scoped to the COORDINATOR on purpose. A real swap to `.swiftUI` does
+    /// close the popover — `StatusItemController.removeVendoredItem()` calls
+    /// `closePopover()` before dropping the item, and that close is load-bearing:
+    /// without it an `NSPopover` would be released while still anchored to a
+    /// status item that no longer exists. `FakeHost` models only the call, so
+    /// what this pins is narrower and is the part that matters here: the
+    /// coordinator must not ALSO close it, because the flag-clearing order
+    /// asserted above depends on its exact call sequence.
+    @Test("The coordinator itself never calls closePopover during a swap")
+    func swapDoesNotClosePopover() {
+        let (coordinator, recorder) = makeCoordinator()
+
+        coordinator.apply(.vendored)
+        coordinator.apply(.swiftUI)
+
+        #expect(!recorder.calls.contains("closePopover"))
     }
 
     /// Both status items present at once would show the glyph twice.

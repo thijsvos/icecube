@@ -18,6 +18,45 @@ struct PopoverView: View {
     /// The shared observable state; owned by `IceCubeApp`.
     let state: AppState
 
+    /// Closes whichever window is hosting this view — SwiftUI's `MenuBarExtra`
+    /// window, or the `NSPopover` in vendored hosting. Named for what it is, so
+    /// `dismissPopover()` below can be the one thing the rest of the file calls.
+    @Environment(\.dismiss) private var dismissHostingWindow
+
+    /// Closes the popover in both hosting modes. Call this before opening any
+    /// window from inside the popover.
+    ///
+    /// **Why the popover has to be closed at all:** its window sits at window
+    /// level 101 while a `Window` scene sits at level 0, so it covers the
+    /// window it just opened even though that window is correctly key and main.
+    /// The Settings window was never opening behind anything — it was being
+    /// drawn over.
+    ///
+    /// **Why two calls.** Neither one covers both modes. `dismissHostingWindow`
+    /// is the only thing that closes SwiftUI's `MenuBarExtra` window without
+    /// desyncing its presentation state — `NSWindow.close()` makes the next
+    /// click on the menu bar icon do nothing and `performClose(_:)` does not
+    /// hide it at all, both measured on macOS 26.4. It closes a vendored
+    /// `NSPopover` too, but *only while that popover's window is key*, and the
+    /// `makeKey()` in `StatusItemController.showPopover` is best-effort; when
+    /// it has failed, `.transient`'s close-on-resign has no key window to
+    /// resign either, so the explicit close is all that is left.
+    ///
+    /// **Neither call touches `state.isPopoverVisible`.** Whichever close wins
+    /// reports itself — `.onDisappear` below in SwiftUI hosting,
+    /// `popoverDidClose` in vendored. Clearing the flag here as well would do
+    /// it while the popover is still animating out, and `body` would swap in
+    /// the 1 pt placeholder: a 380×1 sliver in the user's face.
+    private func dismissPopover() {
+        dismissHostingWindow()
+        // The optional is not a caveat: `AppState.start()` builds the
+        // coordinator before the poll task, and `reconcileMenuBarMode()` — the
+        // only thing that can ever select `.vendored` — returns early while it
+        // is nil. So it is non-nil from launch, and vendored-with-no-coordinator
+        // is unreachable rather than merely unlikely.
+        state.menuBar?.closeVendoredPopover()
+    }
+
     /// The easing used for live readings, or `nil` when the user has turned the
     /// "smooth readings" preference off (values then snap instantly).
     private var readingAnimation: Animation? {
@@ -84,7 +123,11 @@ struct PopoverView: View {
             } else {
                 fanCard
                 if state.chartSettings.showControls {
-                    FanControlSection(helper: state.helper, fans: state.fans)
+                    FanControlSection(
+                        helper: state.helper,
+                        fans: state.fans,
+                        dismissPopover: dismissPopover
+                    )
                 }
                 if state.chartSettings.showCharts {
                     DashboardView(state: state)
@@ -388,11 +431,15 @@ struct PopoverView: View {
     private var footer: some View {
         HStack {
             Button("Sensors…") {
-                WindowOpener.open(WindowOpener.ID.sensors, using: openWindow)
+                WindowOpener.openFromPopover(
+                    WindowOpener.ID.sensors, using: openWindow, dismissing: dismissPopover
+                )
             }
             .help("Browse every SMC key and export a diagnostics report")
             Button("Settings…") {
-                WindowOpener.open(WindowOpener.ID.settings, using: openWindow)
+                WindowOpener.openFromPopover(
+                    WindowOpener.ID.settings, using: openWindow, dismissing: dismissPopover
+                )
             }
             .help("All Ice Cube settings")
             Spacer()
