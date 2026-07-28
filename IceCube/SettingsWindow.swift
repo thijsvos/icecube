@@ -302,17 +302,15 @@ struct SettingsWindowView: View {
     }
 
     /// The one-line answer to "is fan control working?", in plain language.
+    ///
+    /// The twelve registration × connection pairs are classified once in
+    /// ``FanControlStatus`` — shared with the popover, so the two surfaces
+    /// cannot come to disagree about whether the user's fans are controlled.
     private var setupStatusText: String {
-        switch state.helper.registration {
-        case .enabled:
-            switch state.helper.connection {
-            case .connected: "On"
-            case .versionMismatch: "Update needed"
-            case .disconnected: "Starting up…"
-            }
-        case .requiresApproval: "Waiting for your approval"
-        case .notRegistered, .unknown: "Off"
-        }
+        FanControlStatus.summary(
+            registration: state.helper.registration,
+            connection: state.helper.connection
+        ).settingsText
     }
 
     private var helperStateText: String {

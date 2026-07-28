@@ -218,7 +218,10 @@ struct PopoverView: View {
     }
 
     private func fanRow(_ fan: Fan) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        // Derived once so every part of the row answers from the same snapshot
+        // rather than re-deriving from `fan` four times.
+        let activity = FanActivity(fan)
+        return VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(fan.name)
                     .font(.callout.weight(.medium))
@@ -227,74 +230,26 @@ struct PopoverView: View {
                 // when empty. Here the Spacer absorbs the hint appearing and
                 // disappearing, so the reading never moves — which is the rule
                 // this popover holds to: no reflow on data change.
-                if isRampingUp(fan) {
-                    Text(verbatim: "→ \(RPM.text(fan.targetRPM))")
+                if let heading = activity.rampTargetRPM {
+                    Text(verbatim: "→ \(RPM.text(heading))")
                         .font(.caption2)
                         .monospacedDigit()
                         .foregroundStyle(Theme.accent)
                         .transition(.opacity)
                 }
                 Spacer()
-                rpmReadout(fan)
+                rpmReadout(fan, activity: activity)
             }
-            .animation(readingAnimation, value: isRampingUp(fan))
+            // Keyed on the hint's PRESENCE, not on `activity`: the value is
+            // Equatable but carries `fillFraction`, so it differs on every 1 Hz
+            // reading and would animate this row continuously.
+            .animation(readingAnimation, value: activity.rampTargetRPM != nil)
             FanSpeedBar(
-                fraction: normalizedSpeed(of: fan),
-                target: targetSpeed(of: fan),
+                fraction: activity.fillFraction,
+                target: activity.rampTargetFraction,
                 animated: state.chartSettings.smoothReadings
             )
         }
-    }
-
-    /// The fan's target speed as 0…1 of max, for the gauge tick — nil when
-    /// there's nothing meaningful to aim at.
-    ///
-    /// Same `.forced` requirement as ``isRampingUp(_:)`` and for the same
-    /// reason: once control is handed back to macOS the last written target
-    /// lingers in `F{i}Tg`, so the tick would sit at the fan's minimum
-    /// indefinitely while the fan is stopped, marking a destination nothing is
-    /// travelling to.
-    private func targetSpeed(of fan: Fan) -> Double? {
-        guard fan.mode == .forced, fan.maxRPM > 0, fan.targetRPM > 0 else { return nil }
-        return (fan.targetRPM / fan.maxRPM).clamped(to: 0 ... 1)
-    }
-
-    /// How far a fan may trail its target before the row says where it is
-    /// heading. Below this, the gauge tick alone tells the story.
-    private static let rampVisibleRPM: Double = 300
-
-    /// Whether this fan is still meaningfully short of its commanded speed.
-    ///
-    /// Requires `.forced` — Ice Cube actually driving this fan. `targetRPM` is
-    /// simply the last value written to `F{i}Tg`, and it PERSISTS after control
-    /// is handed back: a revert parks it at the fan's minimum and then gives
-    /// the fan to macOS, which may well settle on 0 RPM. Reading that stale
-    /// number as a destination made Automatic display a permanent "→ 2317"
-    /// while the fan sat still — promising something nothing was working
-    /// toward, which is worse than saying nothing.
-    ///
-    /// Only counts ramping UP: winding down is not something a user waits on,
-    /// and showing it would put a hint on screen most of the time for no gain.
-    private func isRampingUp(_ fan: Fan) -> Bool {
-        fan.mode == .forced
-            && fan.targetRPM > 0
-            && fan.targetRPM - fan.actualRPM > Self.rampVisibleRPM
-    }
-
-    /// Whether this fan is commanded but not yet reporting motion.
-    ///
-    /// Measured on a Mac14,9 at 5 samples/s: a stopped fan given a target reads
-    /// EXACTLY 0 RPM for ~1.5 s before the tachometer shows anything, then
-    /// climbs to speed over another ~3 s. The whole ramp is firmware-paced —
-    /// driving the fan at 6800 instead of 4250 produced an identical curve
-    /// (295/573/839/1731…) and an identical dead time, so it cannot be made
-    /// faster from here.
-    ///
-    /// What it CAN do is stop lying about it. "0 RPM" during that window says
-    /// nothing is happening when the fan is in fact starting, which is exactly
-    /// when someone concludes the app is broken and switches back.
-    private func isStarting(_ fan: Fan) -> Bool {
-        fan.mode == .forced && fan.targetRPM > fan.minRPM && fan.actualRPM < 100
     }
 
     /// The current RPM, prominent, with a quiet unit label, plus where the fan
@@ -310,9 +265,9 @@ struct PopoverView: View {
     /// new speed within a second, but the fan takes many seconds to physically
     /// wind up. Without this the popover reads "0 RPM" while everything is in
     /// fact working, which is indistinguishable from broken.
-    private func rpmReadout(_ fan: Fan) -> some View {
+    private func rpmReadout(_ fan: Fan, activity: FanActivity) -> some View {
         HStack(spacing: 3) {
-            if isStarting(fan) {
+            if activity.readout == .starting {
                 Text("starting…")
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(Theme.accent)
@@ -331,17 +286,6 @@ struct PopoverView: View {
         .accessibilityLabel(
             "\(fan.name) fan: \(RPM.labeled(fan.actualRPM)), target \(RPM.labeled(fan.targetRPM))"
         )
-    }
-
-    /// `actualRPM` as a fraction of the fan's maximum (0…1), measured from 0 —
-    /// NOT from the minimum.
-    ///
-    /// A fan spinning at its floor (e.g. Quiet parks it at Mn) must still show a
-    /// visibly partial bar, never an empty one that reads as "stopped." The only
-    /// empty bar is a genuinely stopped fan (0 RPM).
-    private func normalizedSpeed(of fan: Fan) -> Double {
-        guard fan.maxRPM > 0 else { return 0 }
-        return (fan.actualRPM / fan.maxRPM).clamped(to: 0 ... 1)
     }
 
     // MARK: - Minimalist temperature views (when charts are hidden)
