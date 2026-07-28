@@ -46,7 +46,20 @@ public enum HelperConstants {
     ///     control" first described the opposite of what happened. Blind
     ///     temperature ticks are also reported once per spell rather than once
     ///     each: one wake produced six identical lines for a single reconnect.
-    public static let protocolVersion = "19"
+    /// v20: the sleep half of the sleep/wake contract. The daemon now registers
+    ///     for IOKit power notifications and hands every fan back to the
+    ///     firmware on `kIOMessageSystemWillSleep`, then writes no fan at all
+    ///     until it wakes — except the temperature ceiling, which stays armed
+    ///     because the ticks that run while parked are dark wakes. `F{i}Md = 1`
+    ///     survives sleep on Apple Silicon (§3.4 assumed the firmware would drop
+    ///     control for us by resetting `Ftst`; `Ftst` does not even exist on
+    ///     Mac14,9), so before this the fans ran forced for the whole closed-lid
+    ///     window — 16 min 34 s in the owner's own log — until an unrelated
+    ///     Power Nap dark wake happened to run a tick and the watchdog fired.
+    ///     A park is deliberately NOT a revert: `config`, the persisted curve
+    ///     and the ceiling hysteresis all survive it, so wake resumes the user's
+    ///     curve instead of silently landing in auto.
+    public static let protocolVersion = "20"
     /// How often the app sends a heartbeat while connected.
     public static let heartbeatInterval: TimeInterval = 5
     /// SAFETY: no heartbeat for this long → the daemon's watchdog reverts to

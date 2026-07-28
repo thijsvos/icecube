@@ -65,6 +65,9 @@ public enum IceCubeError: Error, Sendable, Equatable {
     case smcDecodingFailed(key: String, type: String, bytes: [UInt8])
     /// A value could not be encoded for writing (e.g. out of the type's range).
     case smcEncodingFailed(type: String, value: Double)
+    /// The Mac is parked for sleep: the fans belong to the firmware until it
+    /// wakes, so a config cannot be applied and a write sequence must abandon.
+    case systemAsleep
 }
 
 extension IceCubeError: LocalizedError {
@@ -84,6 +87,8 @@ extension IceCubeError: LocalizedError {
             "Could not decode SMC key '\(key)' as type '\(type)'."
         case let .smcEncodingFailed(type, value):
             "Could not encode value \(value) as SMC type '\(type)'."
+        case .systemAsleep:
+            "The Mac is going to sleep — fan control resumes when it wakes."
         }
     }
 }

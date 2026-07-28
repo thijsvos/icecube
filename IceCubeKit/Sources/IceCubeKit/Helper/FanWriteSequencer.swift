@@ -54,12 +54,23 @@ public actor FanWriteSequencer {
     static let ftstRetryInterval = Duration.milliseconds(100)
     static let ftstRetryLimit = 70 // ≈ 7 s of retries after the settle delay
 
+    /// Injected so a sleep transition can abandon a sequence that would
+    /// otherwise hold the daemon's write lock past the acknowledgement budget.
+    ///
+    /// A THROW, not a skipped sleep: skipping the pacing would turn the ftst
+    /// unlock into a burst of 70 back-to-back rejected SMC writes during the
+    /// sleep transition. Throwing routes into `DaemonCore`'s `engage` catch,
+    /// which parks the fans — the outcome we actually want.
+    private let shouldAbandon: @Sendable () -> Bool
+
     public init(
         port: any SMCControlPort,
-        sleep: @escaping @Sendable (Duration) async -> Void = { try? await Task.sleep(for: $0) }
+        sleep: @escaping @Sendable (Duration) async -> Void = { try? await Task.sleep(for: $0) },
+        shouldAbandon: @escaping @Sendable () -> Bool = { false }
     ) {
         self.port = port
         self.sleep = sleep
+        self.shouldAbandon = shouldAbandon
     }
 
     // MARK: - Engage manual mode
@@ -78,6 +89,12 @@ public actor FanWriteSequencer {
         var allVerified = true
 
         for fan in fans {
+            // SAFETY: the machine is going to sleep. Abandoning mid-sequence is
+            // safe because the caller's catch parks EVERY fan, including any
+            // already forced above; carrying on would race the hand-back.
+            if shouldAbandon() {
+                throw IceCubeError.systemAsleep
+            }
             guard let requested = targets[fan.id], requested.isFinite else { continue }
             // SAFETY: a fan whose [Mn,Mx] range didn't read cleanly is SKIPPED —
             // clamping into a range with no positive floor would command 0 RPM,
@@ -168,8 +185,17 @@ public actor FanWriteSequencer {
                 throw IceCubeError.smcFirmwareRejected(key: modeKey, result: result)
             }
             try await port.writeDouble("Ftst", value: 1, as: .uint8)
+            if shouldAbandon() {
+                throw IceCubeError.systemAsleep
+            }
             await sleep(Self.ftstSettleDelay)
+            if shouldAbandon() {
+                throw IceCubeError.systemAsleep
+            }
             for _ in 0 ..< Self.ftstRetryLimit {
+                if shouldAbandon() {
+                    throw IceCubeError.systemAsleep
+                }
                 do {
                     try await port.writeDouble(modeKey, value: 1, as: .uint8)
                     return .ftst

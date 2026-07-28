@@ -8,7 +8,7 @@ import os
 /// the safety invariants true no matter what the app does (or fails to do).
 ///
 /// **A deliberate exception to the ~300-line file guideline — and it is now
-/// roughly 1,200 lines, so the exception deserves the real number.** Splitting
+/// roughly 1,400 lines, so the exception deserves the real number.** Splitting
 /// this into `DaemonCore+Safety/+Curve/+Guardian/+Hardware` extensions has been
 /// tried and reverted TWICE (most recently 2026-07-26, with the split written
 /// and building before it was thrown away). Swift's `private` is file-scoped,
@@ -80,6 +80,44 @@ public actor DaemonCore {
     /// in-flight reverts closes it.
     private var revertsInFlight = 0
 
+    /// Whether the machine is parked for sleep as far as we know. See
+    /// ``SleepLatch``. `internal` for the same reason as ``config`` — a parked
+    /// daemon is a safety state that must be assertable in tests.
+    var sleepLatch = SleepLatch()
+    /// True while a hand-back is running, so N racing engages that all discover
+    /// the park produce ONE `revertAllAuto`, not N.
+    private var parkInFlight = false
+    /// Set whenever the latch releases, consumed by the next tick.
+    ///
+    /// NOT a direct call to ``handleWake()``: protocol v19 deliberately moved
+    /// the wake re-assert BEHIND the safety verdict, and calling it from the
+    /// power callback would put it back in front. It also closes the race that
+    /// makes a naive latch silently break the wake half — at the instant of
+    /// wake, the tick loop's long-expired `Task.sleep(until:clock: continuous)`
+    /// fires with `slept` = the whole nap, and a latched tick that returns early
+    /// CONSUMES that diff. No later tick would ever see `wokeUp`, so manual
+    /// would never be re-asserted and `curveTargets` never cleared.
+    private var pendingWake = false
+    /// Read by ``FanWriteSequencer``'s abandon hook from its own actor.
+    private let abandonWrites = AbandonFlag()
+    private static let tickDuration = Duration.seconds(HelperConstants.tickInterval)
+
+    /// A `Bool` the write sequencer can read without hopping onto this actor.
+    ///
+    /// ``sleepLatch`` is actor-isolated and the sequencer's abandon hook is a
+    /// synchronous `@Sendable` closure with no way back in. One lock-guarded box
+    /// is the whole bridge.
+    private final class AbandonFlag: @unchecked Sendable {
+        private let lock = OSAllocatedUnfairLock(initialState: false)
+        var isSet: Bool {
+            lock.withLock { $0 }
+        }
+
+        func set(_ new: Bool) {
+            lock.withLock { $0 = new }
+        }
+    }
+
     /// - Parameters:
     ///   - port: the SMC surface. The real daemon passes `SMCWritePort` (the
     ///     only IOKit writer in the system, which lives in the helper target);
@@ -94,7 +132,11 @@ public actor DaemonCore {
         self.port = port
         self.store = store
         self.sleep = sleep
-        sequencer = FanWriteSequencer(port: port)
+        // The injected `sleep` reaches the sequencer for the first time here.
+        // Production behaviour is identical (both defaults are `Task.sleep`); it
+        // exists so a future ftst-branch `DaemonCoreTests` case is instant.
+        let flag = abandonWrites
+        sequencer = FanWriteSequencer(port: port, sleep: sleep, shouldAbandon: { flag.isSet })
     }
 
     private let sleep: @Sendable (Duration) async -> Void
@@ -171,6 +213,16 @@ public actor DaemonCore {
     /// XPC connection dropped. Manual mode reverts immediately (faster than
     /// waiting out the watchdog); persistent curve mode would keep running.
     public func connectionInvalidated() async {
+        // Parked: the fans are already with macOS — the strongest form of what
+        // this invariant asks for — and `keepFansSpinning` would take them
+        // straight back, into the sleep this exists to prevent. The watchdog
+        // re-evaluates on the first tick after the wake, which is the real
+        // backstop. Recorded in PLAN.md §4.3.6 as an explicit part of the
+        // contract, not left as an emergent property of a guard.
+        guard !sleepLatch.isAsleep else {
+            record("the app went away while the Mac is parked for sleep — the fans stay with macOS")
+            return
+        }
         if config.mode == .manual || (config.mode == .curve && !config.persistsWithoutApp) {
             await revertEverything(reason: "app connection invalidated")
             await keepFansSpinning(reason: "app quit")
@@ -215,6 +267,175 @@ public actor DaemonCore {
         status.guardianActive = guardian.isActive
     }
 
+    // MARK: - The sleep half of the power contract (PLAN.md §4.3.6)
+
+    /// `kIOMessageSystemWillSleep`: hand the fans back to the firmware before
+    /// the machine loses the ability to be told anything.
+    ///
+    /// On Apple Silicon the SMC keeps honouring `F{i}Md = 1` with `F{i}Tg` at
+    /// whatever we last commanded, and nothing of ours runs while the machine
+    /// sleeps — so the watchdog, the ceiling and the tick are all inert. The
+    /// owner's own log: `curve engaged` 18:16:39, `Clamshell Sleep` 18:21:47,
+    /// then not one daemon line until 18:38:20, when an unrelated 2-second
+    /// Power Nap dark wake finally ran a tick. 994 seconds of forced fans.
+    ///
+    /// PLAN.md §3.4 assumed the firmware would drop control for us by resetting
+    /// `Ftst` across sleep. `Ftst` **does not exist on Mac14,9** (2169 keys,
+    /// dumped with `icecube-diag --json`), and clearing an unlock flag would not
+    /// clear an already-set mode latch in any case.
+    ///
+    /// Must return promptly: the caller acknowledges IOKit on completion or on
+    /// ``SleepPolicy/acknowledgementBudget``, whichever comes first.
+    public func prepareForSleep() async {
+        // Latched and flagged BEFORE the first suspension, so no new engage can
+        // start behind us and any sequence already inside the sequencer
+        // abandons at its next checkpoint.
+        let isNewSleep = sleepLatch.willSleep()
+        abandonWrites.set(true)
+        if isNewSleep {
+            record("the Mac is going to sleep — handing the fans back (keeping the \(config.mode.rawValue) config)")
+            if coolingOverride {
+                // Honest, and deliberately not a veto: a fan daemon must never
+                // stop the user's Mac going to sleep. The SoC stops producing
+                // heat in a moment and the firmware owns cooling from here,
+                // which is what happens on every Mac with no fan app installed.
+                record(
+                    "SAFETY: parking for sleep while the temperature ceiling is active — the firmware owns cooling now"
+                )
+            }
+        } else if sleepLatch.parkLanded {
+            // Dark wake → sleep again fires this repeatedly. The hardware is
+            // already parked; re-running `revertAllAuto` would push a `Tg`
+            // command at fans that are already stopped, ten times a night.
+            return
+        }
+        await sleepLatch.noteParkLanded(parkHardware())
+    }
+
+    /// `kIOMessageSystemHasPoweredOn`. See ``SystemPowerMessage`` for why this
+    /// is believed — but not documented — to be suppressed on a dark wake, and
+    /// why the design stays correct either way.
+    public func systemDidPowerOn() {
+        unpark(reason: "the system powered on")
+    }
+
+    /// Hands the FANS back to the firmware without touching a single piece of
+    /// daemon state.
+    ///
+    /// The deliberate opposite of ``revertEverything(reason:clearsPersistence:)``,
+    /// and the distinction is the whole fix. A revert means "the user's intent
+    /// is over": `config = .auto`, followers and curveTargets dropped, guardian
+    /// and monitor reset, and — on its default `clearsPersistence: true` — the
+    /// persisted curve DELETED. A pre-sleep `revertEverything` would therefore
+    /// make every lid close silently uninstall the user's fan control, with
+    /// nothing to put it back (``handleWake()``'s `.auto` case is `break`,
+    /// `store.load()` runs only in ``start()``, and the app's
+    /// `autoResumeIfNeeded()` latches once per session). Worse, `config == .auto`
+    /// immediately arms ``autoSafetyNet()``, whose keep-spinning rung has
+    /// `floorDebounceTicks = 1` — no debounce at all — so the fans would be
+    /// re-forced within one 2 s tick, at up to 50 % of range. The machine would
+    /// go to sleep LOUDER.
+    ///
+    /// A park means "the hardware is about to lose power". `config`, the
+    /// followers, the persisted curve and the SafetyMonitor's ceiling
+    /// hysteresis all survive it, so the ordinary wake path re-establishes
+    /// control with no new machinery.
+    ///
+    /// - Returns: whether the hand-back actually reached the hardware.
+    private func parkHardware() async -> Bool {
+        // N engages can all discover the park at once (`revertUnlessParked`);
+        // one hand-back is enough, and the actor guarantees this check and set
+        // are not interleaved.
+        guard !parkInFlight else { return sleepLatch.parkLanded }
+        parkInFlight = true
+        defer { parkInFlight = false }
+
+        let started = ContinuousClock().now
+        guard let fans = try? await readFans() else {
+            record("SAFETY: could not read the fans to park them for sleep — they may still be forced")
+            return false
+        }
+        // Read-based, NOT config-based. ``FanGuardian`` forces the fans while
+        // `config.mode == .auto` (autoSafetyNet's `.engage`/`.holdAtFloor`, and
+        // `keepFansSpinning` on app quit), so a park gated on the config would
+        // miss a user who never picked a preset at all.
+        let believesInControl = config.mode != .auto || guardian.isActive || revertPending
+        let toPark = believesInControl ? fans : fans.filter { $0.mode == .forced }
+        // Its remembered `targets` describe hardware that no longer exists, and
+        // `isActive` would otherwise make the popover claim "Automatic · cooling"
+        // about a sleeping Mac.
+        guardian.reset()
+        status.guardianActive = false
+        guard !toPark.isEmpty else {
+            // Do NOT write. `revertAllAuto` parks `F{i}Tg` at `F{i}Mn` first,
+            // which is a SPIN command, and its justification ("if the firmware
+            // keeps honoring it, the floor spins — never silence") is a
+            // waking-machine argument that inverts on a sleeping one.
+            record("sleep: nothing of ours is on the fans — leaving them to the firmware")
+            return true
+        }
+        let parked = await asRevert { () async -> Bool in
+            do {
+                try await self.withWriteLock { try await self.sequencer.revertAllAuto(fans: toPark) }
+                return true
+            } catch {
+                self.record(
+                    "SAFETY: parking the fans for sleep failed (\(error.localizedDescription)) — they may still be forced"
+                )
+                return false
+            }
+        }
+        // Kept from `revertEverything`: thermalmonitord reliably resumes only
+        // once the writer's connection is gone (field-observed on Mac14,9).
+        await resetPort()
+        if parked {
+            record("fans parked for sleep in \(ContinuousClock().now - started) (config kept: \(config.mode.rawValue))")
+        }
+        return parked
+    }
+
+    /// Releases the latch and forgets everything that described the pre-sleep
+    /// hardware. The single place the latch ever drops.
+    private func unpark(reason: String) {
+        guard sleepLatch.release() else { return }
+        abandonWrites.set(false)
+        pendingWake = true
+        // The hardware is on macOS auto. Remembered curve targets would make
+        // `runCurveTick` take the verify branch and read our OWN hand-back as a
+        // read-back mismatch, burning a `verifyFailures` strike toward a
+        // spurious revert; a `CurveFollower` would carry hysteresis and ramp
+        // state across an eight-hour gap. Cleared as a pair, like every other
+        // transition in this file.
+        followers = [:]
+        curveTargets = [:]
+        verifyFailures = 0
+        guardian.reset()
+        status.guardianActive = false
+        record("wake: resuming \(config.mode.rawValue) control (\(reason))")
+    }
+
+    /// ``revertEverything(reason:clearsPersistence:)``, unless we are parked —
+    /// in which case the hardware is what needs handing back, and only the
+    /// hardware.
+    ///
+    /// SAFETY, and this is the single most important guard in the change:
+    /// ``engage(targets:fans:since:)`` reaches `revertEverything` from TWO
+    /// places its own pre-checks cannot cover — the mid-sequence `catch` and the
+    /// post-write race guard — both of which run AFTER the writes have started.
+    /// An SMC write failing as the machine quiesces at lid close is not exotic;
+    /// it is the single most likely moment for one. Without this, a lid close
+    /// that races a curve tick would delete the user's persisted curve from
+    /// `/Library/Application Support/IceCube`, breaking the Phase 4 boot promise
+    /// across the next reboot too.
+    private func revertUnlessParked(reason: String) async {
+        guard sleepLatch.isAsleep else {
+            await revertEverything(reason: reason)
+            return
+        }
+        record("\(reason) — but the Mac is parked for sleep, so the config is kept and the fans stay with macOS")
+        await sleepLatch.noteParkLanded(parkHardware())
+    }
+
     // MARK: - XPC entry points
 
     public func heartbeat() {
@@ -241,12 +462,12 @@ public actor DaemonCore {
     /// `engage` believe a revert is in flight and undo itself, which would make
     /// fan control permanently impossible until the daemon restarts. `defer`
     /// here means no future early return inside a revert body can break it.
-    private func asRevert(_ body: () async -> Void) async {
+    private func asRevert<T>(_ body: () async -> T) async -> T {
         _ = writeIntent.issue()
         revertGeneration &+= 1
         revertsInFlight += 1
         defer { revertsInFlight -= 1 }
-        await body()
+        return await body()
     }
 
     // MARK: - Serializing the write sequences themselves
@@ -328,6 +549,9 @@ public actor DaemonCore {
     ///   the firmware refuses the write sequence. On a throw the fans are left
     ///   reverted, never half-applied.
     public func apply(_ newConfig: FanConfig) async throws {
+        // Not a silent success: `HelperService.apply` would reply `nil` and the
+        // popover would show a config the hardware is not in, indefinitely.
+        guard !sleepLatch.isAsleep else { throw IceCubeError.systemAsleep }
         // SERIALIZATION: `HelperService` spawns an independent Task per XPC
         // message, and this method suspends repeatedly (`readFans`, then
         // `engageManual`, which on the ftst branch can sleep 3 s + 7 s of
@@ -449,6 +673,9 @@ public actor DaemonCore {
     /// user clicked a preset. A diagnostic that changes your fan settings is
     /// not a diagnostic. Caught on the Mac14,9 the moment it first ran.
     public func selfTestWritePath() async -> WritePathReport {
+        guard !sleepLatch.isAsleep else {
+            return WritePathReport(verdict: .unavailable, detail: "The Mac is going to sleep.")
+        }
         guard !selfTestInFlight else {
             return WritePathReport(verdict: .unavailable, detail: "A check is already running.")
         }
@@ -554,18 +781,12 @@ public actor DaemonCore {
     /// `internal` so tests can drive single ticks deterministically instead of
     /// racing the 2 s loop that `start()` spawns.
     func tick(sleptFor slept: Duration) async {
-        // Firmware silently resets manual control across sleep (§3.4), so any
-        // real nap means re-assert or revert. Measured, not inferred: a slow
-        // tick is no longer mistaken for a wake.
-        //
-        // Handled BELOW, inside the `.ok` branch, not here. The app's 5 s
-        // heartbeat does not run while the machine sleeps, so on waking the
-        // watchdog is *always* about to revert a non-persisting curve — and
-        // re-asserting first meant every single wake logged "wake detected —
-        // re-asserting curve control" immediately before reverting the thing it
-        // had just re-asserted. Wasted SMC writes, and a log that described the
-        // opposite of what happened.
-        let wokeUp = slept > .seconds(HelperConstants.tickInterval)
+        // Parked for sleep: nothing but the temperature ceiling may touch a fan,
+        // and even a deferred revert waits until the machine is genuinely awake.
+        // Must come before everything else in the tick.
+        if sleepLatch.isAsleep, await !parkedTick(slept: slept) {
+            return
+        }
 
         // A revert that could not be written earlier outranks everything else:
         // until it lands, the fans may still be physically forced.
@@ -575,6 +796,24 @@ public actor DaemonCore {
                 return // still cannot reach the hardware; try again next tick
             }
         }
+
+        // Manual control does NOT survive sleep, so any real nap means re-assert
+        // or revert. Measured, not inferred: a slow tick is no longer mistaken
+        // for a wake. `pendingWake` carries the edge when the power notification
+        // beat the tick to it — a parked tick consumes the whole
+        // ContinuousClock−SuspendingClock diff, so without it no later tick
+        // would ever see `wokeUp`.
+        //
+        // Consumed HERE, after the deferred-revert retry, so an early return
+        // above cannot swallow the wake edge — and acted on BELOW, inside the
+        // `.ok` branch. The app's 5 s heartbeat does not run while the machine
+        // sleeps, so on waking the watchdog is *always* about to revert a
+        // non-persisting curve — and re-asserting first meant every single wake
+        // logged "wake detected — re-asserting curve control" immediately before
+        // reverting the thing it had just re-asserted. Wasted SMC writes, and a
+        // log that described the opposite of what happened.
+        let wokeUp = pendingWake || slept > Self.tickDuration
+        pendingWake = false
 
         let temps = try? await readTemperatures()
         let verdict = monitor.evaluate(
@@ -599,11 +838,88 @@ public actor DaemonCore {
             await forceMaximumCooling()
         case let .revertToAuto(reason):
             record("SAFETY: reverting to auto — \(reason)")
-            await revertEverything(reason: reason)
+            await revertUnlessParked(reason: reason)
         }
         // Mirror the guardian's live state into the reported status so the app
         // can explain "Automatic, but Ice Cube is cooling."
         status.guardianActive = guardian.isActive
+    }
+
+    /// One tick while parked for sleep.
+    ///
+    /// SAFETY: nothing here may write a fan except the temperature ceiling —
+    /// every branch of the normal tick ends in a fan write, and a fan write on a
+    /// machine that is asleep or dark-waking is the bug the sleep half exists to
+    /// prevent. The watchdog, the curve, the guardian and a deferred revert are
+    /// all DEFERRED, not disabled: `config` is untouched, so the first tick
+    /// after the latch releases still reverts a stale non-persisting curve, with
+    /// the real reason in the log.
+    ///
+    /// - Returns: true when the latch was released and the caller should carry
+    ///   on with a normal tick.
+    private func parkedTick(slept: Duration) async -> Bool {
+        // INVARIANT 3, kept rather than narrowed: the ceiling stays armed.
+        // A tick only executes while the CPU is running, so the ticks that reach
+        // here are dark wakes and any missed-wake window — precisely when the
+        // SoC is live and the fans are in the hands of a thermalmonitord that
+        // ``FanGuardian`` documents does not reliably resume.
+        let temperatures = try? await readTemperatures()
+        if case let .forceMaxCooling(offender) = monitor.evaluateCeiling(temperatures: temperatures) {
+            record("SAFETY: over the temperature ceiling while parked for sleep (\(offender)) — taking the fans back")
+            unpark(reason: "the temperature ceiling tripped")
+            return true
+        }
+
+        let action = sleepLatch.tick(slept: slept, tickInterval: Self.tickDuration)
+        // A heartbeat can only come from the user session, which is not
+        // scheduled during a dark wake — so a fresh heartbeat AFTER an observed
+        // nap is positive evidence of a real wake, and the cheapest insurance
+        // against a `kIOMessageSystemHasPoweredOn` that never arrives.
+        //
+        // The nap is required, and it is the whole safety of this rule: a
+        // heartbeat landing in the window between the lid closing and the power
+        // dropping must NOT unpark us, because no second `systemWillSleep` would
+        // arrive to park us again. That would reproduce the original bug.
+        if sleepLatch.sawNap, let age = heartbeatAge(),
+           age <= .seconds(HelperConstants.watchdogTimeout)
+        {
+            unpark(reason: "the app checked in after a nap")
+            return true
+        }
+
+        switch action {
+        case .stayParked:
+            // Drop the connection the ceiling read above reopened:
+            // thermalmonitord reliably resumes only once the writer's connection
+            // is gone (see `resetPort()`).
+            await resetPort()
+            return false
+        case .retryPark:
+            // A park still IN FLIGHT is not a park that failed. `parkLanded`
+            // only turns true when `parkHardware` returns, and the first tick
+            // after `prepareForSleep` can easily land inside its suspensions —
+            // 9 ms into it on the owner's Mac14,9, between the `F0Tg` and
+            // `F0Md` writes of the very hand-back it then declared missing.
+            //
+            // The hardware was never at risk: `parkInFlight` already collapses
+            // concurrent parks to one `revertAllAuto`, and the field log shows
+            // a single write sequence. Only the log lied — and a daemon whose
+            // every write must be auditable cannot afford a line that says the
+            // opposite of what happened. Protocol v19 exists for this class of
+            // bug; this was the same mistake in the new sleep path.
+            guard !parkInFlight else { return false }
+            record("the pre-sleep hand-back never landed — trying again")
+            await sleepLatch.noteParkLanded(parkHardware())
+            return false
+        case .missedWake:
+            record(
+                "SAFETY: awake \(SleepLatch.Limits().missedWakeBudget) with no wake notification — releasing the sleep latch"
+            )
+            unpark(reason: "no wake notification arrived")
+            return true
+        case .proceed:
+            return true // not latched; unreachable from here
+        }
     }
 
     /// Read-back + re-assert: firmware or thermalmonitord can silently take
@@ -628,7 +944,7 @@ public actor DaemonCore {
             await engage(targets: config.manualTargets, fans: fans, since: generation)
         } else {
             record("SAFETY: control lost (read-back failed twice) — reverting to auto")
-            await revertEverything(reason: "read-back verification failed")
+            await revertUnlessParked(reason: "read-back verification failed")
         }
     }
 
@@ -655,7 +971,7 @@ public actor DaemonCore {
                 return
             }
             record("SAFETY: wake re-assert failed — reverting to auto")
-            await revertEverything(reason: "wake re-assert failed")
+            await revertUnlessParked(reason: "wake re-assert failed")
         case .curve:
             record("wake detected — re-establishing curve control")
             // Just forget the remembered targets; the curve tick immediately
@@ -687,6 +1003,11 @@ public actor DaemonCore {
     private func engage(
         targets: [Int: Double], fans: [Fan], since generation: Int
     ) async -> FanWriteOutcome? {
+        // SAFETY: never force a fan into, or during, sleep.
+        guard !sleepLatch.isAsleep else {
+            record("fan write stood down — the Mac is parked for sleep")
+            return nil
+        }
         // Exclusive for the whole sequence: `engageManual` writes a mode and a
         // target PER FAN, so a second engage slipping between those writes
         // leaves the fans split between two intents. Released before the error
@@ -703,6 +1024,14 @@ public actor DaemonCore {
                     self.record("stale fan write superseded by a newer one — standing down")
                     return nil
                 }
+                // …and so is the sleep latch, because this is the only place the
+                // ordering is airtight: `parkHardware` queues on this same lock,
+                // so whichever sequence goes second owns the hardware — and the
+                // hand-back must always be able to be that one.
+                guard !self.sleepLatch.isAsleep else {
+                    self.record("fan write stood down at the write lock — the Mac is going to sleep")
+                    return nil
+                }
                 return try await self.sequencer.engageManual(targets: targets, fans: fans)
             }
         } catch {
@@ -714,7 +1043,7 @@ public actor DaemonCore {
             // again. Unwind before returning.
             lastWriteFailure = error.localizedDescription
             record("SAFETY: fan write failed mid-sequence — reverting (\(error.localizedDescription))")
-            await revertEverything(reason: "fan write failed mid-sequence")
+            await revertUnlessParked(reason: "fan write failed mid-sequence")
             return nil
         }
         // Two conditions, covering both orderings: a revert that STARTED after
@@ -722,7 +1051,7 @@ public actor DaemonCore {
         // running when it did (whose writes may still be landing).
         guard generation == revertGeneration, revertsInFlight == 0 else {
             record("SAFETY: fan write raced a revert — reverting again")
-            await revertEverything(reason: "write raced a revert")
+            await revertUnlessParked(reason: "write raced a revert")
             return nil
         }
         return outcome
@@ -896,7 +1225,7 @@ public actor DaemonCore {
             await engage(targets: expected, fans: fans, since: generation)
         } else {
             record("SAFETY: curve control lost (read-back failed twice) — reverting to auto")
-            await revertEverything(reason: "curve read-back verification failed")
+            await revertUnlessParked(reason: "curve read-back verification failed")
         }
     }
 

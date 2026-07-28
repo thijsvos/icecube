@@ -249,6 +249,41 @@ struct FanWriteSequencerTests {
         #expect(try await firmware.readDouble("F1Tg") == 2317, "later fans still park at Mn")
     }
 
+    /// The sleep abandon hook (PLAN.md §4.3.6). On the M3/M4 `ftst` branch an
+    /// engage can legitimately run ~10 s (3 s settle + 70 × 100 ms retries),
+    /// which is longer than the whole 6 s acknowledgement budget — so a sequence
+    /// still in flight when the lid closes has to give up rather than hold the
+    /// daemon's write lock past it.
+    @Test("An engage abandons when the Mac is going to sleep")
+    func engageAbandonsForSleep() async throws {
+        let firmware = FakeFirmware(generation: .m3, fans: testFans)
+        let sequencer = FanWriteSequencer(
+            port: firmware, sleep: instantSleep, shouldAbandon: { true }
+        )
+        await #expect(throws: IceCubeError.systemAsleep) {
+            _ = try await sequencer.engageManual(targets: [0: 4000, 1: 4000], fans: testFans)
+        }
+        #expect(await !firmware.writtenKeys().contains("F0Md"), "no fan was forced on the way down")
+    }
+
+    /// The counterweight, and the more important half: the hand-back must never
+    /// give up on itself. If `revertAllAuto` could be abandoned, the one code
+    /// path that exists to release the fans would be the one the sleep
+    /// transition cancelled — which is the original bug wearing a new hat.
+    @Test("A revert is never abandoned, even while going to sleep")
+    func revertIsNeverAbandoned() async throws {
+        let firmware = FakeFirmware(generation: .m2, fans: testFans)
+        let engaging = FanWriteSequencer(port: firmware, sleep: instantSleep)
+        _ = try await engaging.engageManual(targets: [0: 4000, 1: 4000], fans: testFans)
+
+        let parking = FanWriteSequencer(
+            port: firmware, sleep: instantSleep, shouldAbandon: { true }
+        )
+        try await parking.revertAllAuto(fans: testFans)
+        #expect(try await firmware.readDouble("F0Md") == 3, "fan 0 handed back regardless")
+        #expect(try await firmware.readDouble("F1Md") == 3, "and fan 1")
+    }
+
     @Test("A machine with no mode key at all refuses manual mode")
     func noModeKey() async throws {
         // A `FakeFirmware` seeded with no fans has no `F{i}Md`/`F{i}md` key at

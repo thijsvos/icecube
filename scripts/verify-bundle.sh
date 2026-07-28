@@ -61,12 +61,37 @@ else
     fail=1
 fi
 
+# The same boundary for the power plumbing, for the same reason: the app must
+# never be able to drive fan state off a system power notification. Only
+# IceCubeHelper may register with the root power domain.
+if [ -f "$APP_BIN" ]; then
+    watchers=$(nm -a "$APP_BIN" 2>/dev/null | grep -c "SystemPowerWatcher" || true)
+    if [ "$watchers" -eq 0 ]; then
+        echo "ok: app binary contains no system-power watcher"
+    else
+        echo "FAIL: app binary references SystemPowerWatcher ($watchers symbols)" >&2
+        echo "      The pre-sleep hand-back writes fans, so its trigger belongs" >&2
+        echo "      to the helper alone. Something moved it out of IceCubeHelper." >&2
+        fail=1
+    fi
+fi
+
 # And the converse: the helper must actually have one, or fan control is dead.
 if [ -f "$HELPER_BIN" ]; then
     if [ "$(nm -a "$HELPER_BIN" 2>/dev/null | grep -c "SMCWritePort" || true)" -gt 0 ]; then
         echo "ok: helper binary contains the SMC writer"
     else
         echo "FAIL: helper binary has no SMCWritePort — fan control cannot work" >&2
+        fail=1
+    fi
+    # The sleep half of the power contract (PLAN.md §4.3.6). Without this the
+    # daemon leaves the fans forced for the whole closed-lid window — the bug
+    # protocol v20 exists to fix — and nothing else in the bundle would say so.
+    if [ "$(nm -a "$HELPER_BIN" 2>/dev/null | grep -c "SystemPowerWatcher" || true)" -gt 0 ]; then
+        echo "ok: helper binary registers for system power notifications"
+    else
+        echo "FAIL: helper binary has no SystemPowerWatcher — the fans would keep" >&2
+        echo "      spinning through sleep (PLAN.md §4.3.6)" >&2
         fail=1
     fi
 fi
