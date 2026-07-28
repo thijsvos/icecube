@@ -103,4 +103,57 @@ struct PresetHighlightTests {
             builtins, applied: FanConfig(mode: .manual, manualTargets: [0: 3000])
         ) == nil)
     }
+
+    // MARK: - isActive: the daemon outranks the app's memory
+
+    /// THE case this rule exists for. A curve the daemon resumed at boot —
+    /// before the app ever launched — leaves `lastAppliedConfig` nil, so a
+    /// memory-only check lights nothing while the fans audibly run.
+    @Test("A curve the daemon resumed at boot lights its preset with no app memory")
+    func daemonEnforcedCurveWinsWithoutAppMemory() throws {
+        let cold = try #require(builtins.first { $0.kind == .cold })
+        let status = HelperStatus(mode: .curve, activeCurve: cold.config.sharedCurve)
+        #expect(PresetHighlight.isActive(cold, enforced: status, applied: nil))
+    }
+
+    /// …and it must light the RIGHT one. The daemon naming a curve settles it
+    /// outright, so a different preset stays dark even in the same mode.
+    @Test("Only the curve the daemon names lights up")
+    func daemonNamedCurveIsExclusive() throws {
+        let cold = try #require(builtins.first { $0.kind == .cold })
+        let quiet = try #require(builtins.first { $0.kind == .quiet })
+        let status = HelperStatus(mode: .curve, activeCurve: cold.config.sharedCurve)
+        #expect(PresetHighlight.isActive(cold, enforced: status, applied: nil))
+        #expect(PresetHighlight.isActive(quiet, enforced: status, applied: nil) == false)
+    }
+
+    /// No connection means no claim. Highlighting from stale app memory while
+    /// the daemon is unreachable is how the UI ends up asserting a state the
+    /// hardware is not in.
+    @Test("No daemon status lights nothing, whatever the app remembers")
+    func noStatusLightsNothing() throws {
+        let cold = try #require(builtins.first { $0.kind == .cold })
+        #expect(PresetHighlight.isActive(cold, enforced: nil, applied: cold.config) == false)
+    }
+
+    /// A mode disagreement is decisive before any curve comparison happens —
+    /// this is what stops a curve preset lighting while the daemon is in manual.
+    @Test("A mode mismatch loses regardless of the curve")
+    func modeMismatchLoses() throws {
+        let cold = try #require(builtins.first { $0.kind == .cold })
+        let manual = HelperStatus(mode: .manual, activeCurve: cold.config.sharedCurve)
+        #expect(PresetHighlight.isActive(cold, enforced: manual, applied: cold.config) == false)
+    }
+
+    /// The fallback path: the daemon says "curve" but names none (an older
+    /// protocol, or a status sent before the curve was recorded). The app's own
+    /// memory is then the only evidence there is, so it is used.
+    @Test("Without a named curve it falls back to what the app sent")
+    func fallsBackToAppMemory() throws {
+        let cold = try #require(builtins.first { $0.kind == .cold })
+        let quiet = try #require(builtins.first { $0.kind == .quiet })
+        let unnamed = HelperStatus(mode: .curve, activeCurve: nil)
+        #expect(PresetHighlight.isActive(cold, enforced: unnamed, applied: cold.config))
+        #expect(PresetHighlight.isActive(quiet, enforced: unnamed, applied: cold.config) == false)
+    }
 }

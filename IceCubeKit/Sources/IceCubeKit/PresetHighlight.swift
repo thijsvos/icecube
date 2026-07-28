@@ -30,6 +30,38 @@ public enum PresetHighlight {
         presets.first { matches($0, applied: applied) }
     }
 
+    /// Whether `preset` is the one to light up, preferring what the daemon says
+    /// it is **enforcing** over what the app remembers **sending**.
+    ///
+    /// The precedence is the point. Consulting only the app's own memory left
+    /// every button unlit while the fans audibly ran, for anything the daemon
+    /// was running that this app had not personally sent — a curve resumed at
+    /// boot, before the app even launched. The truth about what is enforced
+    /// lives in the daemon; the app's memory is a cache of it.
+    ///
+    /// This is the **third** home for the "is this preset active" rule. The
+    /// other two are ``matches(_:applied:)`` and the copy that used to sit in
+    /// `FanControlSection` — and this type exists because those two had already
+    /// drifted, so the popover and Settings could disagree about which preset
+    /// was active. A rule that has drifted once will drift again; it gets one
+    /// home.
+    ///
+    /// - Parameters:
+    ///   - enforced: the daemon's own report (`HelperStatus`), or `nil` when
+    ///     there is no live connection.
+    ///   - applied: the last config this app sent, as a fallback.
+    public static func isActive(
+        _ preset: Preset, enforced: HelperStatus?, applied: FanConfig?
+    ) -> Bool {
+        guard let enforced, enforced.mode == preset.config.mode else { return false }
+        // In curve mode the daemon names the curve it is running, which settles
+        // it outright — including for a curve this app never sent.
+        if enforced.mode == .curve, let active = enforced.activeCurve {
+            return active == preset.config.sharedCurve
+        }
+        return matches(preset, applied: applied)
+    }
+
     /// The config the highlight should reflect. Callers set it only when it
     /// differs from the current value, so a consistent state causes no churn.
     public static func reconcile(

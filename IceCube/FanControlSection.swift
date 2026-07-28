@@ -27,7 +27,7 @@ struct FanControlSection: View {
     @State private var sliderTargets: [Int: Double] = [:]
 
     private var isManual: Bool {
-        helper.status?.mode == .manual
+        controlState == .manual
     }
 
     var body: some View {
@@ -149,75 +149,20 @@ struct FanControlSection: View {
         }
     }
 
-    /// What the panel is reporting right now, derived once.
-    ///
-    /// The label, glyph and tint used to be three independent if-ladders over
-    /// four booleans, each re-deriving the same precedence by hand and each
-    /// re-reading `helper.status?`. HelperStatus is versioned and grows (v3
-    /// added `guardianActive` itself), so a fifth state now becomes a compile
-    /// error in exactly the places that must handle it.
-    private enum ControlState {
-        case manual, curve, guardianCooling, automatic
-
-        var text: String {
-            switch self {
-            case .manual: "MANUAL fan control"
-            case .curve: "Curve active"
-            // Says who is driving. "Automatic" left people believing Ice Cube
-            // was managing cooling when it had handed the fans to macOS.
-            case .guardianCooling: "macOS · Ice Cube stepped in"
-            // No longer something anyone can pick — since the macOS preset was
-            // removed this only appears in passing (before the first config
-            // lands at launch) or after a safety revert. "Not controlling"
-            // rather than "macOS is controlling" because, per the field
-            // finding, macOS frequently does not pick the fans back up.
-            case .automatic: "Fan control is off"
-            }
-        }
-
-        var icon: String {
-            switch self {
-            case .manual: "hand.raised.fill"
-            case .curve: "chart.xyaxis.line"
-            case .guardianCooling: "wind"
-            case .automatic: "gearshape"
-            }
-        }
-
-        var style: AnyShapeStyle {
-            switch self {
-            case .manual: AnyShapeStyle(Theme.warning)
-            case .curve, .guardianCooling: AnyShapeStyle(Theme.accent)
-            case .automatic: AnyShapeStyle(.secondary)
-            }
-        }
-    }
-
-    private var controlState: ControlState {
-        guard let status = helper.status else { return .automatic }
-        switch status.mode {
-        case .manual: return .manual
-        case .curve: return .curve
-        // The daemon's guardian is driving the fans itself under Auto — the
-        // Mac got hot and macOS wasn't cooling it.
-        case .auto: return status.guardianActive ? .guardianCooling : .automatic
-        }
-    }
-
-    private var isCurve: Bool {
-        controlState == .curve
-    }
-
-    private var statusText: String {
-        controlState.text
-    }
-
-    private var statusIcon: String {
-        controlState.icon
+    /// What the panel is reporting right now, derived once from the daemon's
+    /// own report. The precedence and the wording live in ``ControlStatus`` so
+    /// they can be tested; this maps its emphasis onto SwiftUI styles, which is
+    /// the only part that needs to be here.
+    private var controlState: ControlStatus {
+        ControlStatus.of(helper.status)
     }
 
     private var statusColor: AnyShapeStyle {
-        controlState.style
+        switch controlState.emphasis {
+        case .warning: AnyShapeStyle(Theme.warning)
+        case .active: AnyShapeStyle(Theme.accent)
+        case .quiet: AnyShapeStyle(.secondary)
+        }
     }
 
     /// The preset quick-switch row (PLAN.md §1.2). Applying a curve preset
@@ -246,29 +191,13 @@ struct FanControlSection: View {
             Task { await helper.applyPreset(preset, persistCurve: persistCurve) }
         }
         .buttonStyle(.bordered)
-        .tint(isActivePreset(preset) ? Theme.accent : nil)
+        .tint(PresetHighlight.isActive(
+            preset, enforced: helper.status, applied: helper.lastAppliedConfig
+        ) ? Theme.accent : nil)
         .help(preset.kind.explanation)
     }
 
     @Environment(\.openWindow) private var openWindow
-
-    /// Which preset to light up.
-    ///
-    /// Prefers what the DAEMON says it is enforcing, falling back to the last
-    /// config this app sent. It used to consult only the app's own memory, so
-    /// anything the daemon was running that the app had not personally sent —
-    /// a curve resumed at boot before the app even launched — left every
-    /// button unlit while the fans audibly ran. The truth about what is being
-    /// enforced lives in the daemon; the app's memory is a cache of it.
-    private func isActivePreset(_ preset: Preset) -> Bool {
-        guard let status = helper.status, status.mode == preset.config.mode else {
-            return false
-        }
-        if status.mode == .curve, let active = status.activeCurve {
-            return active == preset.config.sharedCurve
-        }
-        return PresetHighlight.matches(preset, applied: helper.lastAppliedConfig)
-    }
 
     private var controls: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -279,7 +208,7 @@ struct FanControlSection: View {
             // which tells the user nothing at exactly the moment they need to
             // know. A full-width line also means the wording can be chosen for
             // clarity instead of for character count.
-            Label(statusText, systemImage: statusIcon)
+            Label(controlState.text, systemImage: controlState.icon)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(statusColor)
                 .fixedSize(horizontal: false, vertical: true)
@@ -341,10 +270,10 @@ struct FanControlSection: View {
                 .frame(width: 40, alignment: .leading)
             Slider(
                 value: Binding(
-                    get: { sliderTargets[fan.id] ?? fan.targetRPM },
+                    get: { ManualTargets.displayed(sliderTargets, for: fan) },
                     set: { sliderTargets[fan.id] = $0 }
                 ),
-                in: fan.minRPM ... max(fan.maxRPM, fan.minRPM + 1),
+                in: ManualTargets.sliderRange(for: fan),
                 onEditingChanged: { editing in
                     if !editing {
                         commitTargets()
@@ -358,8 +287,8 @@ struct FanControlSection: View {
             // announced itself as an anonymous "slider, 50%", and the number
             // arrived detached from the thing that changes it.
             .accessibilityLabel("\(fan.name) fan speed")
-            .accessibilityValue(RPM.labeled(sliderTargets[fan.id] ?? fan.targetRPM))
-            Text(RPM.text(sliderTargets[fan.id] ?? fan.targetRPM))
+            .accessibilityValue(RPM.labeled(ManualTargets.displayed(sliderTargets, for: fan)))
+            Text(RPM.text(ManualTargets.displayed(sliderTargets, for: fan)))
                 .font(.caption)
                 .monospacedDigit()
                 .frame(width: 40, alignment: .trailing)
@@ -373,16 +302,7 @@ struct FanControlSection: View {
     /// Enters manual mode holding the fans where they are now (no jump in
     /// noise), ready for the user to slide.
     private func engageManual() {
-        for fan in fans {
-            // Via the sequencer's guarded clamp, NOT `clamped(to: Mn ... Mx)`:
-            // Mn and Mx are read with independent `try?`s that each fall back
-            // to 0 ("degrade per-key rather than losing the whole fan"), so an
-            // inverted range is a modelled outcome — and building a
-            // ClosedRange from one traps. This is the same helper the daemon
-            // clamps writes with, and it returns maxRPM for a degenerate fan,
-            // exactly as the old min(max(...)) did.
-            sliderTargets[fan.id] = FanWriteSequencer.clamp(fan.actualRPM, to: fan)
-        }
+        sliderTargets = ManualTargets.engaging(fans)
         commitTargets()
     }
 
@@ -398,12 +318,7 @@ struct FanControlSection: View {
     /// skipped it. Filling from the live readings keeps the map complete.
     private func commitTargets() {
         guard !fans.isEmpty else { return }
-        let targets = Dictionary(
-            fans.map { fan in
-                (fan.id, sliderTargets[fan.id] ?? FanWriteSequencer.clamp(fan.actualRPM, to: fan))
-            },
-            uniquingKeysWith: { first, _ in first }
-        )
+        let targets = ManualTargets.committing(sliderTargets, fans: fans)
         Task { await helper.applyManual(targets: targets) }
     }
 }
