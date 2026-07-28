@@ -11,8 +11,8 @@ findings from real hardware. Additions welcome (attach a diagnostics JSON).
 | `F{i}Ac` | actual RPM | `flt` | little-endian float32 |
 | `F{i}Tg` | target RPM | `flt` | write; **never write 0** (see below) |
 | `F{i}Mn` / `F{i}Mx` | min/max RPM | `flt` | **advisory only** — firmware accepts values outside them, incl. 0. Software must clamp. |
-| `F{i}Md` / `F{i}md` | fan mode | `ui8` | 0 auto · 1 forced · 3 system (thermalmonitord). Casing varies: lowercase on M5+. |
-| `Ftst` | thermal-test unlock | `ui8` | M3/M4: mode writes fail (result 0x82) until `Ftst=1`, then retry for seconds. Absent on M5. |
+| `F{i}Md` / `F{i}md` | fan mode | `ui8` | 0 auto · 1 forced · 3 system (thermalmonitord). Casing varies: lowercase on M5+. **Survives sleep** — see below. |
+| `Ftst` | thermal-test unlock | `ui8` | M3/M4: mode writes fail (result 0x82) until `Ftst=1`, then retry for seconds. Absent on M5 — **and on Mac14,9**. |
 | `F{i}ID` | fan descriptor | `{fds` | name field at bytes 4…15; often absent on AS |
 | `#KEY` | total key count | `ui32` | powers enumeration (command 8) |
 
@@ -26,6 +26,27 @@ findings from real hardware. Additions welcome (attach a diagnostics JSON).
    on every call.
 4. Release: park `Tg` at `Mn` **first**, then mode 0, then attempt mode 3,
    then `Ftst=0` (if used), then close the SMC connection.
+
+### `F{i}Md` survives sleep (Mac14,9 — 2026-07-28)
+
+A written mode value is **not** cleared when the Mac sleeps. The SMC stays
+powered and keeps honouring `F{i}Md = 1` with whatever `F{i}Tg` was last
+commanded, so fans left forced at sleep entry keep spinning — while nothing of
+the daemon's runs to notice, because the SoC is off.
+
+Evidenced from the owner's own logs: a curve engaged at 18:16:39, `Clamshell
+Sleep` at 18:21:47, then **994 seconds** of forced fans and total daemon silence,
+released only when an unrelated 2-second Power Nap dark wake happened to run one
+tick. This is the whole reason the daemon registers for IOKit power
+notifications and hands the fans back before acknowledging sleep (PLAN.md
+§4.3.6).
+
+`Ftst` does not rescue this and never could: it is an *unlock* flag, so clearing
+it re-locks future writes rather than releasing a fan already forced. On this
+machine it is moot anyway — **`Ftst` is not among Mac14,9's 2169 keys** (dumped
+with `icecube-diag --json`; only lowercase `ft00`…`ftG1` sensor keys exist), so
+the `.ftst` unlock branch is unreachable here and cannot be exercised by the
+owner at all.
 
 ### Field findings (Mac14,9, macOS 26.4.1 — 2026-07-23)
 

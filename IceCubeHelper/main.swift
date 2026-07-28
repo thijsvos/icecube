@@ -19,6 +19,15 @@ do {
     exit(1)
 }
 
+/// The sleep half of the power contract (PLAN.md §3.4, §4.3.6). `F{i}Md = 1`
+/// survives sleep on Apple Silicon and nothing of ours runs while the machine is
+/// asleep, so without this the fans keep spinning for the whole closed-lid window
+/// — 16 min 34 s in the owner's own log on 2026-07-27. Registered here because
+/// `RunLoop.main.run()` below is the only CFRunLoop this daemon has, and BEFORE
+/// `start()` so a `systemWillSleep` arriving during boot finds a handler.
+let power = SystemPowerWatcher(core: core)
+power.start()
+
 // Revert-to-auto on start + begin the 2 s safety tick.
 Task { await core.start() }
 
