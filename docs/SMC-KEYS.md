@@ -48,6 +48,48 @@ with `icecube-diag --json`; only lowercase `ft00`…`ftG1` sensor keys exist), s
 the `.ftst` unlock branch is unreachable here and cannot be exercised by the
 owner at all.
 
+### Power keys, and why they do NOT drive the fans (Mac14,9 — 2026-07-28)
+
+Mac14,9 exposes **38 live `flt` power keys** (of 2169 total). The useful ones:
+
+| Key | Meaning | Idle | Under load |
+| --- | --- | --- | --- |
+| `PSTR` | system total power | 19.6 W | ~52 W peak |
+| `PDTR` | DC-in / adapter power | 28.9 W | — (includes charging) |
+
+Ice Cube reads `PSTR` (falling back to `PDTR`) and reports it in diagnostics and
+`icecube-diag --watch`. It is **not** an input to fan control, and this section
+exists so that stays a decision rather than an oversight.
+
+**The idea that failed.** A temperature curve is purely reactive, and
+temperature is a lagging indicator — the die is the integral of (watts in −
+heat out) — so power *should* be a leading signal, letting the curve act on heat
+that is coming. Since spin-up itself is firmware-paced and cannot be
+accelerated (the v7 breakaway push, see PROTOCOL-HISTORY.md), starting earlier
+is the only speed-up left. It is a good theory.
+
+**What the hardware said.** Two runs, sampling `PSTR` and the hottest die sensor
+at 5 Hz against one clock across a clean Release build:
+
+| Run | Baseline | Excursion | Lead (power → temperature) |
+| --- | --- | --- | --- |
+| 1 (warm, Cold preset, fans 5178 rpm) | 19.6 W / 54.1 °C | +33 W / +6.9 °C | **+8.6 s** |
+| 2 (bigger excursion)                 | 31.3 W / 59.4 °C | +28 W / +17.1 °C | **+0.6 s / +2.6 s / −2.4 s** at 20/25/33 % of rise |
+
+The lead is somewhere between −2 and +9 seconds depending on the threshold and
+what the machine was already doing. Worse, the signal is far noisier than it is
+large: a build's *sustained* rise is about +12 W, but its burst noise is ±15 W
+(21.6 → 51.1 → 23.2 W inside ten seconds). Smoothing enough to stop a single
+2-second burst spinning the fans costs ~16 s of response — more lead than exists
+to spend. Replayed against the real trace, a lead compensator produced 0.74 °C of
+offset when the watts actually rose and did not peak until **19 s after** the die
+had already started climbing. It was a lagging indicator wearing a leading
+indicator's clothes.
+
+**Conclusion:** on this hardware, power is worth *reporting* and not worth
+*acting on*. Anything reviving this needs new measurements first, not new
+control theory — and should say what changed.
+
 ### Field findings (Mac14,9, macOS 26.4.1 — 2026-07-23)
 
 - The reference release sequence ("mode 0 + Tg 0") left both fans **stopped

@@ -54,6 +54,10 @@ public actor MockSMCProvider: SMCProviding {
         Self.temperatures(at: now().timeIntervalSince1970)
     }
 
+    public func power() async throws(IceCubeError) -> Double? {
+        Self.power(at: now().timeIntervalSince1970)
+    }
+
     /// A miniature key dump mirroring what the real provider reports for the same
     /// values, so the sensors browser and diagnostics export are fully
     /// demonstrable in simulated mode.
@@ -205,6 +209,28 @@ extension MockSMCProvider {
         let elapsed = t - start
         guard elapsed > 0, elapsed < duration else { return 0 }
         return intensity * min(smoothstep(elapsed / 8), smoothstep((duration - elapsed) / 12))
+    }
+
+    // MARK: SoC power
+
+    /// Idle and peak SoC package power, in watts.
+    ///
+    /// Taken from the real machine rather than invented: `PSTR` on a Mac14,9
+    /// read **19.6 W idle and ~52 W peak under a Release build** (measured
+    /// 2026-07-28), so the simulation spans a range a reader can sanity-check
+    /// against their own hardware.
+    static let idleWatts = 19.6
+    static let peakWatts = 52.0
+
+    /// Simulated SoC package power in watts at time `t`.
+    ///
+    /// Tracks the same workload envelope the sensors do. It is deliberately NOT
+    /// given a head start over the thermal model: on real hardware the two move
+    /// within a couple of seconds of each other (docs/SMC-KEYS.md), and a
+    /// simulation that invented a lead would make any future control idea built
+    /// on it look far better in CI than it is on the owner's desk.
+    static func power(at t: TimeInterval) -> Double {
+        idleWatts + (peakWatts - idleWatts) * spikeEnvelope(at: t)
     }
 
     // MARK: Sensors

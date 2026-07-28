@@ -28,6 +28,13 @@ public actor SystemSMCProvider: SMCProviding {
     private var lastGoodTemperatures: [String: Double] = [:]
     /// All SMC key names, enumerated once (immutable for a boot).
     private var cachedKeyNames: [String]?
+    /// Which power key this Mac uses, resolved once.
+    ///
+    /// Double-optional on purpose, matching the discovery caches above: the
+    /// outer `nil` means "not resolved yet", the inner means "resolved, and
+    /// this machine has none". Without the distinction a Mac with no power key
+    /// would re-probe every candidate on every 2 s tick, forever.
+    private var resolvedPowerKey: String??
 
     /// What we remember about one fan after discovery.
     private struct FanDescriptor {
@@ -92,6 +99,42 @@ public actor SystemSMCProvider: SMCProviding {
         )
         lastGoodTemperatures = cache
         return readings
+    }
+
+    public func power() async throws(IceCubeError) -> Double? {
+        guard let key = await powerKey() else { return nil }
+        guard let watts = try? await connection.readDouble(key),
+              SMCKeyMaps.isPlausiblePower(watts)
+        else {
+            // A single implausible read is NOT cause to forget the key — one
+            // glitch would otherwise cost the reading for the rest of the boot.
+            // Callers treat nil as "no figure this time" and show nothing,
+            // which beats showing a wrong wattage.
+            return nil
+        }
+        return watts
+    }
+
+    /// The power key for this Mac, probed once against the candidate list.
+    ///
+    /// A candidate must both EXIST and read plausibly to be accepted: of the 79
+    /// `P***` keys on Mac14,9 only 38 carry a live value, so a presence check
+    /// alone would happily latch onto one that reads 0 W forever while looking
+    /// like it had worked.
+    private func powerKey() async -> String? {
+        if let resolvedPowerKey {
+            return resolvedPowerKey
+        }
+        for candidate in SMCKeyMaps.powerKeyCandidates {
+            guard await connection.hasKey(candidate),
+                  let watts = try? await connection.readDouble(candidate),
+                  SMCKeyMaps.isPlausiblePower(watts)
+            else { continue }
+            resolvedPowerKey = .some(candidate)
+            return candidate
+        }
+        resolvedPowerKey = .some(nil)
+        return nil
     }
 
     public func keyDump() async throws(IceCubeError) -> [SMCKeyDump] {

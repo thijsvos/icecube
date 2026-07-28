@@ -27,9 +27,17 @@ do {
 /// launch and an SMC open each time — about 2–3 s of resolution, which is far
 /// too coarse to see what a fan actually does when it starts from rest. One
 /// process, one connection, 5 samples a second shows the real curve.
+/// `watts` is logged beside `die_c` because the two together separate "this Mac
+/// is working hard" from "this Mac is not being cooled" — a distinction neither
+/// temperature nor RPM can make alone, and the first thing worth knowing when
+/// someone reports a hot machine.
+///
+/// It is also how the power-leads-temperature question was settled on real
+/// hardware: sample both against one clock across a workload and compare the
+/// rises. (It does not lead, usefully — see docs/SMC-KEYS.md.)
 func watch(_ provider: any SMCProviding, seconds: Double) async {
     let started = ContinuousClock.now
-    print("elapsed_s,fan0_rpm,fan0_target,fan0_mode,fan1_rpm,die_c")
+    print("elapsed_s,fan0_rpm,fan0_target,fan0_mode,fan1_rpm,die_c,watts")
     while (ContinuousClock.now - started) < .seconds(seconds) {
         if let snapshot = try? await provider.snapshot() {
             let elapsed = Double((ContinuousClock.now - started).components.seconds)
@@ -37,10 +45,14 @@ func watch(_ provider: any SMCProviding, seconds: Double) async {
             let fan0 = snapshot.fans.first
             let fan1 = snapshot.fans.dropFirst().first
             let die = snapshot.temperatures.filter(\.isDieSensor).map(\.celsius).max() ?? 0
+            // -1 for "this Mac exposes no power key", so a column is always
+            // present and a missing signal is visible rather than blank.
+            let watts = await (try? provider.power()) ?? nil
             print(String(
-                format: "%.2f,%.0f,%.0f,%@,%.0f,%.1f",
+                format: "%.2f,%.0f,%.0f,%@,%.0f,%.1f,%.2f",
                 elapsed, fan0?.actualRPM ?? -1, fan0?.targetRPM ?? -1,
-                "\(fan0.map { "\($0.mode)" } ?? "?")", fan1?.actualRPM ?? -1, die
+                "\(fan0.map { "\($0.mode)" } ?? "?")", fan1?.actualRPM ?? -1, die,
+                watts ?? -1
             ))
             fflush(stdout)
         }
