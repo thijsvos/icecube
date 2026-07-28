@@ -15,6 +15,12 @@ struct FanControlSection: View {
     let helper: HelperManager
     /// Live fan readings (for slider ranges and current values).
     let fans: [Fan]
+    /// Closes the popover. Injected rather than re-derived from
+    /// `@Environment(\.dismiss)` here, so the two-mode dismissal is defined in
+    /// exactly one place (`PopoverView.dismissPopover`) — this section is only
+    /// ever built inside the popover, and a second copy of that logic is a
+    /// second copy to keep right.
+    let dismissPopover: () -> Void
 
     /// Slider positions, per fan id. Committed to the daemon on release only
     /// — dragging must not spam the SMC with writes.
@@ -94,7 +100,9 @@ struct FanControlSection: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Button(button) {
-                WindowOpener.open(WindowOpener.ID.setup, using: openWindow)
+                WindowOpener.openFromPopover(
+                    WindowOpener.ID.setup, using: openWindow, dismissing: dismissPopover
+                )
             }
             .controlSize(.small)
             .primaryGlassButton()
@@ -277,7 +285,9 @@ struct FanControlSection: View {
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button("Curves…") {
-                    WindowOpener.open(WindowOpener.ID.curves, using: openWindow)
+                    WindowOpener.openFromPopover(
+                        WindowOpener.ID.curves, using: openWindow, dismissing: dismissPopover
+                    )
                 }
                 .controlSize(.small)
                 .help("Edit the temperature→fan curve")

@@ -72,13 +72,25 @@ final class StatusItemController: NSObject, MenuBarHosting, NSPopoverDelegate {
         flashedName = nil
         // The coordinator has already paused the popover; closing here is about
         // the window, not the flag.
-        popover?.performClose(nil)
+        closePopover()
         popover = nil
         if let item {
             NSStatusBar.system.removeStatusItem(item)
         }
         item = nil
         log.notice("menu bar: vendored status item removed")
+    }
+
+    /// Closes the popover if it is showing. Safe when it is not, and safe when
+    /// there is no popover at all — which is every moment in SwiftUI hosting,
+    /// where one is never created.
+    ///
+    /// Says nothing about `isPopoverVisible`: `popoverDidClose` reports the
+    /// close once the animation ends, and on an already-closed popover this
+    /// fires no second `popoverDidClose` at all (measured), so calling it
+    /// alongside SwiftUI's own dismissal cannot double-report.
+    func closePopover() {
+        popover?.performClose(nil)
     }
 
     // MARK: - The click
@@ -129,7 +141,7 @@ final class StatusItemController: NSObject, MenuBarHosting, NSPopoverDelegate {
 
     private func togglePopover() {
         if popover?.isShown == true {
-            popover?.performClose(nil)
+            closePopover()
         } else {
             showPopover()
         }

@@ -131,6 +131,7 @@ targets:
       - IceCube/PowerSourceMonitor.swift
       - IceCube/UpdateChecker.swift
       - IceCube/MenuBarMode.swift
+      - IceCube/WindowOpener.swift
     dependencies:
       - package: IceCubeKit
     settings:
