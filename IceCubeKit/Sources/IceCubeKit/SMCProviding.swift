@@ -22,6 +22,16 @@ public protocol SMCProviding: Sendable {
     /// All monitored temperature sensors, in degrees Celsius.
     func temperatures() async throws(IceCubeError) -> [SensorReading]
 
+    /// Total SoC package power in watts, or `nil` when this Mac exposes no
+    /// usable key (see ``SMCKeyMaps/powerKeyCandidates``).
+    ///
+    /// `nil` is a first-class answer, not a failure — a Mac without the key
+    /// simply has no wattage to show, and callers omit the figure rather than
+    /// substituting a guess. Reported for diagnostics only: power is **not** an
+    /// input to fan control, and docs/SMC-KEYS.md records the measurements
+    /// explaining why it should not become one.
+    func power() async throws(IceCubeError) -> Double?
+
     /// Every SMC key this machine exposes, with metadata and a best-effort
     /// decoded value — the raw material of the sensors browser and the
     /// diagnostics report.

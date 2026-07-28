@@ -176,6 +176,34 @@ struct MockSMCProviderTests {
         }
     }
 
+    // MARK: SoC power
+
+    /// Simulated watts must stay inside the range measured on the real machine
+    /// (19.6 W idle, ~52 W peak on a Mac14,9), rest at idle when nothing is
+    /// running, and climb with the workload — so `icecube-diag --watch` and the
+    /// diagnostics report are demonstrable with no hardware.
+    @Test("Simulated power rests at idle, rises with load, and stays in range")
+    func powerTracksTheWorkload() async throws {
+        let quiet = Self.firstQuietTime()
+        let idle = try await MockSMCProvider(now: { Date(timeIntervalSince1970: quiet) }).power()
+        #expect(try #require(idle) == MockSMCProvider.idleWatts, "a quiet machine draws idle power")
+
+        let plateau = Self.firstPlateauStart()
+        let loaded = try await MockSMCProvider(now: { Date(timeIntervalSince1970: plateau + 3) }).power()
+        #expect(try #require(loaded) > MockSMCProvider.idleWatts + 10, "a spike must be visible in watts")
+
+        // Sweep an hour: never outside the measured envelope, never nil.
+        for step in stride(from: 0.0, through: 3600, by: 7) {
+            let watts = try await MockSMCProvider(
+                now: { Date(timeIntervalSince1970: Self.epochSeconds + step) }
+            ).power()
+            let value = try #require(watts)
+            #expect(value >= MockSMCProvider.idleWatts)
+            #expect(value <= MockSMCProvider.peakWatts)
+            #expect(SMCKeyMaps.isPlausiblePower(value), "the real provider's filter must accept it too")
+        }
+    }
+
     @Test("actualRPM chases targetRPM with the documented ~10 s first-order lag")
     func actualFollowsTargetWithLag() async throws {
         let start = Self.firstPlateauStart()

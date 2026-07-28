@@ -158,4 +158,44 @@ public enum SMCKeyMaps {
     public static func isDieKey(_ key: String) -> Bool {
         classify(key).isDie
     }
+
+    // MARK: - SoC power (the feedforward signal)
+
+    /// Candidate keys for **total SoC package power in watts**, best first.
+    ///
+    /// Reported for diagnostics: when someone says "my Mac is hot", watts are
+    /// what distinguish *"you are running something heavy"* from *"cooling is
+    /// broken"*, and neither temperature nor RPM can tell those apart.
+    ///
+    /// Ordered, not merged: the first key that exists **and** reads plausibly
+    /// wins, so a Mac exposing several power rails gets the one that means
+    /// "the whole SoC" rather than a single rail that would under-report.
+    ///
+    /// - `PSTR` — system total power. Present and live on Mac14,9 (measured
+    ///   2026-07-28: 19.6 W idle, ~52 W peak under a Release build).
+    /// - `PDTR` — DC-in / adapter power. Includes charging, so it is a worse
+    ///   proxy for SoC heat, but it is a signal where `PSTR` is absent.
+    ///
+    /// Deliberately short. This list is a guess about *other people's* Macs,
+    /// and the honest fallback is `nil` — no reading — rather than a wrong key
+    /// confidently read. `icecube-diag --json` dumps every key, so a model
+    /// report can extend this from evidence rather than from hope.
+    ///
+    /// **Do not build fan control on this signal without re-reading
+    /// docs/SMC-KEYS.md first.** Driving the curve from power was tried on
+    /// 2026-07-28 and measured as unusable on this hardware; the finding and
+    /// its numbers are recorded there so the idea is not re-derived from
+    /// first principles a third time.
+    public static let powerKeyCandidates = ["PSTR", "PDTR"]
+
+    /// The sanity filter for a power reading, in watts.
+    ///
+    /// An unpopulated rail reads 0; a misdecoded key reads nonsense. A laptop
+    /// SoC that is genuinely drawing power sits between these bounds — and the
+    /// upper bound is deliberately generous (a Mac Pro pulls far more than any
+    /// laptop) because the cost of rejecting a real reading is losing the
+    /// reading, while a wrong one is only ever displayed, never acted on.
+    public static func isPlausiblePower(_ watts: Double) -> Bool {
+        watts > 0.5 && watts < 400
+    }
 }
