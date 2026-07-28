@@ -104,26 +104,56 @@ public struct SafetyMonitor: Sendable {
         // 3. Temperature ceiling — debounced trigger, hysteresis release.
         // Evaluated even in auto mode so status can surface it, but only
         // meaningful action happens while we hold the fans.
-        if let temperatures {
-            if let offender = worstOffender(in: temperatures) {
-                overCeilingTicks += 1
-                if coolingActive || overCeilingTicks >= limits.ceilingDebounceTicks {
-                    coolingActive = true
-                    return controlling ? .forceMaxCooling(offender: offender) : .ok
-                }
-            } else {
-                overCeilingTicks = 0
-                if coolingActive {
-                    if allReleased(temperatures) {
-                        coolingActive = false
-                    } else if controlling {
-                        // Still inside the hysteresis band: keep cooling.
-                        return .forceMaxCooling(offender: "cooling until −\(Int(limits.releaseDelta)) °C below ceiling")
-                    }
-                }
+        return ceilingVerdict(temperatures, controlling: controlling)
+    }
+
+    /// Evaluates ONLY the temperature ceiling, for the daemon's
+    /// parked-for-sleep path (PLAN.md §4.3.6).
+    ///
+    /// The watchdog and the sensor-health rule are deliberately NOT evaluated
+    /// while parked — the app cannot heartbeat a sleeping Mac, so both would
+    /// fire on every lid close — but the ceiling must stay armed. The ticks that
+    /// actually execute while parked are **dark wakes**, when the SoC is fully
+    /// running (the owner's `pmset -g log` shows `[CDNP]` dark wakes of 2 s and
+    /// 45 s, and the daemon logged a real guardian decision inside one at
+    /// 19:22:53) and the fans have just been handed to a `thermalmonitord` that
+    /// ``FanGuardian``'s field note says does not reliably resume.
+    ///
+    /// `controlling: true` because while parked the daemon still holds the
+    /// user's intent, and it is the only thing that will act.
+    ///
+    /// Shares `overCeilingTicks` and `coolingActive` with
+    /// ``evaluate(heartbeatAge:config:temperatures:)`` on purpose: a machine
+    /// that went over the ceiling before the lid closed must not restart its
+    /// debounce on the other side of it.
+    public mutating func evaluateCeiling(temperatures: [SensorReading]?) -> Verdict {
+        ceilingVerdict(temperatures, controlling: true)
+    }
+
+    /// The ceiling rule on its own. Behaviour is byte-for-byte what section 3
+    /// of ``evaluate(heartbeatAge:config:temperatures:)`` did before it was
+    /// extracted.
+    private mutating func ceilingVerdict(
+        _ temperatures: [SensorReading]?, controlling: Bool
+    ) -> Verdict {
+        guard let temperatures else { return .ok }
+        if let offender = worstOffender(in: temperatures) {
+            overCeilingTicks += 1
+            if coolingActive || overCeilingTicks >= limits.ceilingDebounceTicks {
+                coolingActive = true
+                return controlling ? .forceMaxCooling(offender: offender) : .ok
+            }
+            return .ok
+        }
+        overCeilingTicks = 0
+        if coolingActive {
+            if allReleased(temperatures) {
+                coolingActive = false
+            } else if controlling {
+                // Still inside the hysteresis band: keep cooling.
+                return .forceMaxCooling(offender: "cooling until −\(Int(limits.releaseDelta)) °C below ceiling")
             }
         }
-
         return .ok
     }
 
