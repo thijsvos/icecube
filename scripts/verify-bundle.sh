@@ -74,6 +74,15 @@ if [ -f "$APP_BIN" ]; then
         echo "      to the helper alone. Something moved it out of IceCubeHelper." >&2
         fail=1
     fi
+    readers=$(nm -a "$APP_BIN" 2>/dev/null | grep -c "SystemCapabilityReader" || true)
+    if [ "$readers" -eq 0 ]; then
+        echo "ok: app binary contains no power-capability reader"
+    else
+        echo "FAIL: app binary references SystemCapabilityReader ($readers symbols)" >&2
+        echo "      Raw IOKit belongs to the helper alone; the pure half the app" >&2
+        echo "      may link is PowerCapabilities in IceCubeKit." >&2
+        fail=1
+    fi
 fi
 
 # And the converse: the helper must actually have one, or fan control is dead.
@@ -92,6 +101,17 @@ if [ -f "$HELPER_BIN" ]; then
     else
         echo "FAIL: helper binary has no SystemPowerWatcher — the fans would keep" >&2
         echo "      spinning through sleep (PLAN.md §4.3.6)" >&2
+        fail=1
+    fi
+    # The dark-wake gate. Without a capability reader every unpark falls back to
+    # "cannot tell", which never proves a full wake — so the daemon would sit
+    # parked until the missed-wake failsafe, and the machine would run on
+    # firmware auto with the user's curve silently inert.
+    if [ "$(nm -a "$HELPER_BIN" 2>/dev/null | grep -c "SystemCapabilityReader" || true)" -gt 0 ]; then
+        echo "ok: helper binary can tell a dark wake from a full one"
+    else
+        echo "FAIL: helper binary has no SystemCapabilityReader — the daemon could" >&2
+        echo "      not prove a wake is real (PLAN.md §4.3.6 dark-wake gate)" >&2
         fail=1
     fi
 fi

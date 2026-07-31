@@ -59,7 +59,22 @@ public enum HelperConstants {
     ///     A park is deliberately NOT a revert: `config`, the persisted curve
     ///     and the ceiling hysteresis all survive it, so wake resumes the user's
     ///     curve instead of silently landing in auto.
-    public static let protocolVersion = "20"
+    /// v21: the dark-wake gate. The sleep latch may now drop only when a
+    ///     `PowerCapabilities` read proves a display is powered. Before this,
+    ///     the heartbeat-after-a-nap rule read a maintenance dark wake as a real
+    ///     wake and drove both fans to 6800 RPM for 69 s inside a closed laptop
+    ///     (owner's log, 2026-07-31, `[CDNPB]` rtc/Maintenance).
+    ///
+    ///     **The XPC surface is byte-identical — this bump exists purely to
+    ///     ship the daemon.** Nothing else replaces a running helper: the app
+    ///     compares this string and offers the update, so a daemon-only fix
+    ///     with an unchanged protocol installs a new app beside the old,
+    ///     buggy daemon and nothing ever says so. That is exactly what happened
+    ///     on the first attempt to deploy this fix — the app logged
+    ///     "setup: not shown", because from its point of view v20 was talking
+    ///     to v20 and all was well. Any future daemon-only safety fix must bump
+    ///     this for the same reason, protocol change or not.
+    public static let protocolVersion = "21"
     /// How often the app sends a heartbeat while connected.
     public static let heartbeatInterval: TimeInterval = 5
     /// SAFETY: no heartbeat for this long → the daemon's watchdog reverts to

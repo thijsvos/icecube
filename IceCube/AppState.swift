@@ -236,6 +236,14 @@ final class AppState: PopoverLifecycleObserving {
                 host: StatusItemController(state: self), lifecycle: self
             )
         }
+        // Once, in parallel with polling: the inventory is a property of the
+        // Mac, not of the moment. A failure is not worth reporting — the only
+        // consumer is the Sensors window's opening height, which falls back to
+        // the reporting count.
+        Task { [weak self] in
+            guard let self, let inventory = try? await provider.sensorInventory() else { return }
+            sensorInventoryCount = inventory.count
+        }
         let events = poller.events()
         pollTask = Task { [weak self] in
             for await event in events {
@@ -245,6 +253,24 @@ final class AppState: PopoverLifecycleObserving {
                 case let .snapshot(new):
                     snapshot = new
                     hottest = new.hottest(stickingTo: hottest?.key)
+                    // Assigned only on a change: see `sensorRowCount`. Writing
+                    // the same number every tick would still be a mutation, and
+                    // Observation does not care that the value matched.
+                    //
+                    // Sized from what this Mac HAS, not from what is reporting
+                    // this second — a power-gated cluster is silent for up to
+                    // ~85 s after launch, and macOS saves the window's frame
+                    // the first time it opens, so sizing to the momentary list
+                    // would persist a window too short for the list the user
+                    // sees from then on. `max` covers the unmapped-Mac path,
+                    // where the enumerated list is the inventory.
+                    let rows = SensorsWindowMetrics.rowCount(
+                        temperatures: max(sensorInventoryCount, new.temperatures.count),
+                        fans: new.fans.count
+                    )
+                    if rows != sensorRowCount {
+                        sensorRowCount = rows
+                    }
                     consecutiveFailures = 0
                     errorMessage = nil
                     alerts.evaluate(dieCelsius: hottestDie)
@@ -391,6 +417,36 @@ final class AppState: PopoverLifecycleObserving {
     var temperatures: [SensorReading] {
         snapshot?.temperatures ?? []
     }
+
+    /// How many rows the Sensors window's readable list will draw — the input
+    /// to its opening height (see ``SensorsWindowMetrics``). `nil` until the
+    /// first snapshot lands, which is not the same as zero.
+    ///
+    /// Its own property, rather than the scene reading `temperatures.count`
+    /// directly, because the App's scene body is what consumes it: observing
+    /// `snapshot` there would re-evaluate the whole scene graph — `MenuBarExtra`
+    /// label included — once a second, forever, to answer a question whose
+    /// answer changes at most once. Discovery fixes the sensor list at the first
+    /// poll and `SensorStabilizer` guarantees every discovered sensor stays in
+    /// every published reading, so this goes `nil` → *n* on that first snapshot
+    /// and then holds for the life of the process.
+    ///
+    /// It must stay an **observed** property read inside the scene body: that
+    /// registration is what makes SwiftUI re-evaluate `App.body` when the count
+    /// arrives, and re-evaluating is what refreshes the stored `.defaultSize`.
+    /// Measured — a version of this that read the same number from a plain
+    /// global opened every window at the floor instead, silently and with no
+    /// compile error.
+    private(set) var sensorRowCount: Int?
+
+    /// How many sensors this Mac **has**, as opposed to how many are reporting
+    /// — see `SMCProviding.sensorInventory()`. Fetched once, because it is a
+    /// property of the hardware.
+    ///
+    /// Not observed: only ``sensorRowCount`` is read from the scene body, and
+    /// this feeds it. 0 until the fetch lands, which the `max` at the call site
+    /// absorbs.
+    @ObservationIgnored private var sensorInventoryCount = 0
 
     /// The menu bar readout, e.g. `"62°"`; `"--°"` before the first reading.
     /// Uses the hysteresis-stabilized `hottest` so label and badge agree,

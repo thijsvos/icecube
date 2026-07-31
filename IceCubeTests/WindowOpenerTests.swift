@@ -50,3 +50,75 @@ struct WindowOpenerTests {
         #expect(recorder.calls == ["open", "activate"])
     }
 }
+
+/// The menu bar hands out one window at a time, because in an `LSUIElement` app
+/// a window that is off screen is one the user cannot find, count or reach —
+/// and so cannot close. Which windows may be retracted is a judgement about
+/// work the user would lose, so it is asserted here rather than left to
+/// whoever adds the next scene.
+///
+/// There is deliberately no test for "opening About from Settings must not
+/// close Settings". The retraction lives only in `openFromPopover`;
+/// `open(_:using:)` has no way to express it — the same signature-over-
+/// convention argument the suite above makes about popover dismissal.
+@Suite("WindowOpener — the windows the menu bar retracts")
+@MainActor
+struct MenuBarWindowRetractionTests {
+    @Test("Summoning a window closes the one the user clicked away from")
+    func retractsTheForgottenWindow() {
+        #expect(
+            WindowOpener.windowsToClose(
+                openWindowIDs: [WindowOpener.ID.settings], summoning: WindowOpener.ID.sensors
+            ) == [WindowOpener.ID.settings]
+        )
+    }
+
+    /// Closing and reopening would rebuild the scene and lose the tab the user
+    /// was on. The window is already there; this has to be a raise.
+    @Test("Asking again for the window that is already open retracts nothing")
+    func summoningTheOpenWindowRetractsNothing() {
+        #expect(
+            WindowOpener.windowsToClose(
+                openWindowIDs: [WindowOpener.ID.settings], summoning: WindowOpener.ID.settings
+            ).isEmpty
+        )
+    }
+
+    /// The curve editor holds points, sliders and a preset name that are
+    /// uncommitted until Apply Curve, and the setup flow has to survive the
+    /// user leaving for System Settings. Closing either to tidy the screen
+    /// would be a worse bug than the one being fixed.
+    @Test("Windows holding unsaved work are never retracted")
+    func neverRetractsWindowsHoldingWork() {
+        for id in [WindowOpener.ID.curves, WindowOpener.ID.setup] {
+            #expect(!WindowOpener.closableFromMenuBar.contains(id))
+            #expect(
+                WindowOpener.windowsToClose(
+                    openWindowIDs: [id], summoning: WindowOpener.ID.sensors
+                ).isEmpty
+            )
+        }
+    }
+
+    /// `NSApp.windows` is mostly not scenes — the popover, the status item —
+    /// and those carry an empty autosave name. An empty id must match nothing,
+    /// or the first summon would close the menu bar out from under itself.
+    @Test("Windows that are not scenes are never touched")
+    func ignoresNonSceneWindows() {
+        #expect(
+            WindowOpener.windowsToClose(
+                openWindowIDs: ["", "", "NSColorPanel"], summoning: WindowOpener.ID.sensors
+            ).isEmpty
+        )
+    }
+
+    @Test("Everything stale goes in one pass")
+    func retractsEveryStaleWindowAtOnce() {
+        #expect(
+            WindowOpener.windowsToClose(
+                openWindowIDs: [WindowOpener.ID.settings, WindowOpener.ID.about, WindowOpener.ID.curves, ""],
+                summoning: WindowOpener.ID.sensors
+            ) == [WindowOpener.ID.settings, WindowOpener.ID.about]
+        )
+    }
+}
