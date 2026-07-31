@@ -92,3 +92,27 @@ extension IceCubeError: LocalizedError {
         }
     }
 }
+
+public extension IceCubeError {
+    /// A stable, machine-readable name for the case, carried across XPC so the
+    /// app can recognise the error it was handed.
+    ///
+    /// Written out by hand rather than derived. The bridged `NSError.code` is
+    /// the enum's *declaration-order tag* and nothing else — measured, with
+    /// `systemAsleep` at 7 — so inserting a case above it renumbers every case
+    /// below on both sides of the wire, with no compiler diagnostic. These
+    /// strings cannot drift that way, and the switch is exhaustive, so a new
+    /// case is a compile error here rather than a wrong match at runtime.
+    var wireName: String {
+        switch self {
+        case .smcConnectionFailed: "smcConnectionFailed"
+        case .smcCallFailed: "smcCallFailed"
+        case .smcFirmwareRejected: "smcFirmwareRejected"
+        case .smcKeyNotFound: "smcKeyNotFound"
+        case .smcNotPrivileged: "smcNotPrivileged"
+        case .smcDecodingFailed: "smcDecodingFailed"
+        case .smcEncodingFailed: "smcEncodingFailed"
+        case .systemAsleep: "systemAsleep"
+        }
+    }
+}

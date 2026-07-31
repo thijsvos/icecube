@@ -35,9 +35,24 @@ struct FanControlSection: View {
             Text("Control").premiumSectionLabel()
             content
             if let error = helper.lastError {
+                // `.fixedSize` because this was the only prose `Text` in the
+                // card without it: the popover is a fixed 380 pt, so the line
+                // was clipped mid-sentence — the owner's screenshot ended at
+                // "(IceCubeKit.IceCubeError…". A message the user cannot read
+                // is not a message.
                 Text(error)
                     .font(.caption2)
                     .foregroundStyle(Theme.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let notice = helper.deferralNotice {
+                // Secondary, not `Theme.warning`: nothing has gone wrong, and
+                // there is nothing for the user to act on. Orange in this app
+                // means "you are driving the fans by hand" or "this needs your
+                // attention", and neither is true here.
+                Text(notice)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         // Same tokens as every other card in this VStack — a change to

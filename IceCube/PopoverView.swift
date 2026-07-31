@@ -364,6 +364,9 @@ struct PopoverView: View {
         Label(message, systemImage: "exclamationmark.triangle")
             .font(.caption)
             .foregroundStyle(Theme.warning)
+            // The same omission as the Control card's error line: a fixed
+            // 380 pt popover truncates any real sentence at one line.
+            .fixedSize(horizontal: false, vertical: true)
             .accessibilityLabel("Error: \(message)")
     }
 
