@@ -1,5 +1,6 @@
 // IceCubeApp.swift — the @main entry point: a menu-bar-only app showing a fan glyph + hottest temperature.
 
+import AppKit
 import IceCubeKit
 import os
 import SwiftUI
@@ -139,10 +140,26 @@ struct IceCubeApp: App {
 
         // The SMC key browser + diagnostics export. Opened from the popover
         // via WindowOpener (LSUIElement apps need the explicit activation).
+        //
+        // The height fits the list this Mac actually has, because the window
+        // will not fit it for us — see SensorsWindowMetrics for why this is
+        // arithmetic and not layout. Deliberately no `.windowResizability`
+        // here: `.automatic` is what keeps the window freely resizable, which
+        // the raw-key table needs, and a stray resizability modifier is what
+        // once let the settings window grow to fill the screen.
         Window("SMC Sensors", id: WindowOpener.ID.sensors) {
             SensorsBrowserView(state: appState)
         }
-        .defaultSize(width: 560, height: 480)
+        .defaultSize(
+            width: 560,
+            height: SensorsWindowMetrics.frameHeight(
+                rowCount: appState.sensorRowCount,
+                // No main screen (headless, or mid display change) means no
+                // screen-relative limit — fall back to the absolute cap rather
+                // than to the floor.
+                availableHeight: NSScreen.main?.visibleFrame.height ?? .infinity
+            )
+        )
 
         // The fan-curve editor (Phase 4).
         Window("Fan Curves", id: WindowOpener.ID.curves) {

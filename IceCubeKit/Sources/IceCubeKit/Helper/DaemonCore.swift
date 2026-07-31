@@ -84,6 +84,18 @@ public actor DaemonCore {
     /// ``SleepLatch``. `internal` for the same reason as ``config`` — a parked
     /// daemon is a safety state that must be assertable in tests.
     var sleepLatch = SleepLatch()
+    /// A `kIOMessageSystemHasPoweredOn` that arrived before any display was up.
+    ///
+    /// The message and the capability bits are not guaranteed to change in the
+    /// same instant, and the message is the only edge we get — a
+    /// DarkWake→FullWake promotion does not send a second one. Remembering the
+    /// edge and completing it from the tick is what makes the gate safe in both
+    /// directions: a message that races the video bit still unparks within one
+    /// tick, and a message genuinely delivered on a dark wake never unparks at
+    /// all.
+    private var pendingPowerOn = false
+    /// Throttles the "staying parked" line to one per dark wake.
+    private var darkWakeHoldRecorded = false
     /// True while a hand-back is running, so N racing engages that all discover
     /// the park produce ONE `revertAllAuto`, not N.
     private var parkInFlight = false
@@ -124,13 +136,19 @@ public actor DaemonCore {
     ///     tests pass a scripted fake firmware.
     ///   - store: persistence for the boot promise. Injected for the same reason.
     ///   - sleep: injected so tests do not actually wait out revert retries.
+    /// - Parameter capabilities: reads the live system power capability bits.
+    ///   Deliberately has NO default: a default is a value some future caller
+    ///   forgets to override, and the value it would have to be is "full wake",
+    ///   which is precisely the bug this parameter exists to prevent.
     public init(
         port: any SMCControlPort,
         store: any FanConfigStoring,
+        capabilities: @escaping @Sendable () -> PowerCapabilities?,
         sleep: @escaping @Sendable (Duration) async -> Void = { try? await Task.sleep(for: $0) }
     ) {
         self.port = port
         self.store = store
+        self.capabilities = capabilities
         self.sleep = sleep
         // The injected `sleep` reaches the sequencer for the first time here.
         // Production behaviour is identical (both defaults are `Task.sleep`); it
@@ -140,6 +158,13 @@ public actor DaemonCore {
     }
 
     private let sleep: @Sendable (Duration) async -> Void
+    /// Reads the live system power capabilities, or nil when neither source
+    /// answers. Injected for the same reason `port` is: IceCubeKit must not
+    /// import IOKit, and the rule that consumes this is the rule that has to be
+    /// exercised against the exact values the owner's machine produced —
+    /// `0x79 [CDNPB]` for the dark wake that spun the fans, `0x1F [CDNVA]` for
+    /// the lid-open wake 69 seconds later.
+    private let capabilities: @Sendable () -> PowerCapabilities?
 
     // MARK: - Lifecycle
 
@@ -147,14 +172,36 @@ public actor DaemonCore {
     /// whatever a crash or power loss left behind is wiped clean — then runs
     /// the tick forever.
     public func start() async {
+        let caps = capabilities()
+        // One line, every start: if a future macOS moves the symbol AND renames
+        // the registry property, the whole dark-wake gate degrades to "cannot
+        // tell", and that should be discoverable on day one rather than on the
+        // first night the fans stay quiet when they should not have.
+        record("power capabilities at start: \(PowerCapabilities.describe(caps))")
         if let persisted = store.load() {
             // The Phase 4 boot promise: a persisted curve is live before the
             // app ever launches. Anything else starts from clean auto.
             config = persisted
             status.mode = .curve
             status.activeCurve = persisted.sharedCurve
-            record("boot: resuming persisted curve config")
-            await runCurveTick()
+            // The promise is "the persisted curve is live before the app
+            // launches" — not "the fans move the instant launchd starts us".
+            // launchd KeepAlive, a crash restart and `softwareupdate` all start
+            // this daemon, and a maintenance dark wake is exactly when
+            // softwareupdate runs, with no willSleep/hasPoweredOn pair for this
+            // process to gate on. The intent is loaded and reported either way;
+            // only the first write waits for a display.
+            //
+            // Only a CONFIRMED dark wake holds. An unreadable capability keeps
+            // the previous behaviour on purpose: on a Mac whose display bit we
+            // cannot read, "hold until proven awake" could mean "never".
+            if WakeClassifier.classify(caps) == .darkWake {
+                sleepLatch.startParkedInDarkWake()
+                record("boot: the persisted curve is loaded, but this is a dark wake — the fans stay with the firmware")
+            } else {
+                record("boot: resuming persisted curve config")
+                await runCurveTick()
+            }
         } else {
             await revertEverything(reason: "daemon start")
         }
@@ -292,6 +339,12 @@ public actor DaemonCore {
         // abandons at its next checkpoint.
         let isNewSleep = sleepLatch.willSleep()
         abandonWrites.set(true)
+        // Cleared on EVERY will-sleep, including the repeats a dark-wake cycle
+        // fires, so a power-on edge observed during one dark wake can never be
+        // spent on the next one. Before the `parkLanded` early return below,
+        // which is the path a dark wake → sleep actually takes.
+        pendingPowerOn = false
+        darkWakeHoldRecorded = false
         if isNewSleep {
             record("the Mac is going to sleep — handing the fans back (keeping the \(config.mode.rawValue) config)")
             if coolingOverride {
@@ -312,11 +365,50 @@ public actor DaemonCore {
         await sleepLatch.noteParkLanded(parkHardware())
     }
 
-    /// `kIOMessageSystemHasPoweredOn`. See ``SystemPowerMessage`` for why this
-    /// is believed — but not documented — to be suppressed on a dark wake, and
-    /// why the design stays correct either way.
+    /// `kIOMessageSystemHasPoweredOn` — the wake EDGE, not the wake CLASS.
+    ///
+    /// See ``SystemPowerMessage/systemHasPoweredOn`` for the log evidence that
+    /// this is suppressed on a pure dark wake and delivered on a
+    /// DarkWake→FullWake promotion. The daemon no longer depends on either
+    /// fact: the capability read decides, and this only says when to ask.
     public func systemDidPowerOn() {
-        unpark(reason: "the system powered on")
+        guard sleepLatch.isAsleep else { return }
+        pendingPowerOn = true
+        unparkIfProvenAwake(reason: "the system powered on", capabilities: capabilities())
+    }
+
+    /// The one gate the whole dark-wake fix hangs on: the latch may drop only
+    /// when a display is actually powered.
+    ///
+    /// A necessary condition, never a sufficient one. Every caller still brings
+    /// its own evidence that a wake happened — the power-on edge, a heartbeat
+    /// after a measured nap, the missed-wake failsafe — because "video is up"
+    /// on its own is also true in the window between the lid closing and the
+    /// power dropping, and unparking THERE is the original 994-second bug: no
+    /// second `systemWillSleep` would arrive to park us again.
+    ///
+    /// - Returns: whether the latch actually dropped.
+    @discardableResult
+    private func unparkIfProvenAwake(reason: String, capabilities caps: PowerCapabilities?) -> Bool {
+        guard sleepLatch.isAsleep else { return false }
+        guard WakeClassifier.classify(caps) == .fullWake else {
+            recordDarkWakeHold(refused: reason, capabilities: caps)
+            return false
+        }
+        // The capability value goes in the log line so it can be lined up
+        // against `pmset -g log`'s own bracket for the same second.
+        unpark(reason: "\(reason) — \(PowerCapabilities.describe(caps))")
+        return true
+    }
+
+    /// One line per dark wake, not one per tick: a maintenance dark wake runs
+    /// for minutes, and this is the line to grep for to see the fix working.
+    private func recordDarkWakeHold(refused reason: String, capabilities caps: PowerCapabilities?) {
+        guard !darkWakeHoldRecorded else { return }
+        darkWakeHoldRecorded = true
+        record(
+            "dark wake (\(PowerCapabilities.describe(caps))) — \(reason), but no display is powered, so the fans stay with the firmware"
+        )
     }
 
     /// Hands the FANS back to the firmware without touching a single piece of
@@ -409,6 +501,8 @@ public actor DaemonCore {
         followers = [:]
         curveTargets = [:]
         verifyFailures = 0
+        pendingPowerOn = false
+        darkWakeHoldRecorded = false
         guardian.reset()
         status.guardianActive = false
         record("wake: resuming \(config.mode.rawValue) control (\(reason))")
@@ -866,24 +960,49 @@ public actor DaemonCore {
         let temperatures = try? await readTemperatures()
         if case let .forceMaxCooling(offender) = monitor.evaluateCeiling(temperatures: temperatures) {
             record("SAFETY: over the temperature ceiling while parked for sleep (\(offender)) — taking the fans back")
+            // Deliberately NOT gated on the wake class. This is the one release
+            // allowed to spin fans inside a closed laptop, because it only
+            // fires after the ceiling's debounce — a dark wake that is
+            // genuinely cooking the machine is exactly when noise is the cheap
+            // option.
             unpark(reason: "the temperature ceiling tripped")
             return true
         }
 
+        // One read per tick, shared by every rule below, so a wake landing
+        // mid-tick cannot be classified two different ways within one tick.
+        let caps = capabilities()
         let action = sleepLatch.tick(slept: slept, tickInterval: Self.tickDuration)
-        // A heartbeat can only come from the user session, which is not
-        // scheduled during a dark wake — so a fresh heartbeat AFTER an observed
-        // nap is positive evidence of a real wake, and the cheapest insurance
-        // against a `kIOMessageSystemHasPoweredOn` that never arrives.
-        //
-        // The nap is required, and it is the whole safety of this rule: a
-        // heartbeat landing in the window between the lid closing and the power
-        // dropping must NOT unpark us, because no second `systemWillSleep` would
-        // arrive to park us again. That would reproduce the original bug.
-        if sleepLatch.sawNap, let age = heartbeatAge(),
-           age <= .seconds(HelperConstants.watchdogTimeout)
+
+        // The edge arrived earlier and the display was not up yet — or the
+        // message really was delivered on a dark wake, in which case this never
+        // fires and the next `systemWillSleep` forgets it.
+        if pendingPowerOn, unparkIfProvenAwake(reason: "the system powered on", capabilities: caps) {
+            return true
+        }
+        // A daemon that started inside a dark wake has no edge to wait for and
+        // no pre-sleep window to fear: it was never told to park, so a lit
+        // display is the whole of the evidence it needs.
+        if sleepLatch.origin == .startedInDarkWake,
+           unparkIfProvenAwake(reason: "a display came up", capabilities: caps)
         {
-            unpark(reason: "the app checked in after a nap")
+            return true
+        }
+        // FIELD EVIDENCE, 2026-07-31: this is the rule that actually drove both
+        // fans to maximum inside a closed laptop for 69 seconds. The comment
+        // here used to claim "a heartbeat can only come from the user session,
+        // which is not scheduled during a dark wake". It is: the menu-bar app's
+        // 5 s timer fires inside any dark wake long enough to reach it, and did,
+        // three times in 26 hours (17:02:40 `[CDNP]`, 15:56:05 `[CDNP]`,
+        // 00:31:53 `[CDNPB]` — the incident).
+        //
+        // The nap gate is kept — it still guards the window between the lid
+        // closing and the power dropping, where no second `systemWillSleep`
+        // would arrive to park us again — but it is no longer the outer wall.
+        if sleepLatch.sawNap, let age = heartbeatAge(),
+           age <= .seconds(HelperConstants.watchdogTimeout),
+           unparkIfProvenAwake(reason: "the app checked in after a nap", capabilities: caps)
+        {
             return true
         }
 
@@ -912,8 +1031,27 @@ public actor DaemonCore {
             await sleepLatch.noteParkLanded(parkHardware())
             return false
         case .missedWake:
+            // The second route to the reported bug: a Time Machine or Spotlight
+            // dark wake that simply runs longer than the budget used to unpark
+            // and re-engage the curve on a machine in a bag. A confirmed dark
+            // wake refuses it outright.
+            //
+            // The sleep latch is held indefinitely; the boot latch is not. The
+            // difference is what we know: a `systemWillSleep` arrived for one
+            // and not the other, so a boot latch still ticking five minutes
+            // later is more likely a machine whose display bit we are
+            // misreading than a laptop in a bag. Bounded beats permanent when
+            // the evidence is thin.
+            if sleepLatch.origin == .willSleep, WakeClassifier.classify(caps) == .darkWake {
+                sleepLatch.deferMissedWake()
+                record(
+                    "still a dark wake after \(SleepLatch.Limits().missedWakeBudget) (\(PowerCapabilities.describe(caps))) — the missed-wake failsafe stands down"
+                )
+                await resetPort()
+                return false
+            }
             record(
-                "SAFETY: awake \(SleepLatch.Limits().missedWakeBudget) with no wake notification — releasing the sleep latch"
+                "SAFETY: awake \(SleepLatch.Limits().missedWakeBudget) with no wake notification (\(PowerCapabilities.describe(caps))) — releasing the sleep latch"
             )
             unpark(reason: "no wake notification arrived")
             return true

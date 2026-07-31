@@ -20,7 +20,21 @@ public protocol SMCProviding: Sendable {
     func fans() async throws(IceCubeError) -> [Fan]
 
     /// All monitored temperature sensors, in degrees Celsius.
+    ///
+    /// Only sensors that have reported at least once this process — a
+    /// power-gated cluster can be silent for up to ~85 s after launch, and no
+    /// row beats an invented one. Compare ``sensorInventory()``.
     func temperatures() async throws(IceCubeError) -> [SensorReading]
+
+    /// The sensors this machine **has**, independent of what is reporting at
+    /// this instant.
+    ///
+    /// Separate from ``temperatures()`` because the two answer different
+    /// questions, and the difference is the whole subject of
+    /// ``SensorAdmission``: membership is a property of the Mac and is stable
+    /// from the first poll, while the reporting set legitimately varies as
+    /// clusters gate on and off.
+    func sensorInventory() async throws(IceCubeError) -> [SMCKeyMaps.SensorDescriptor]
 
     /// Total SoC package power in watts, or `nil` when this Mac exposes no
     /// usable key (see ``SMCKeyMaps/powerKeyCandidates``).

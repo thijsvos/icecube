@@ -54,6 +54,14 @@ public actor MockSMCProvider: SMCProviding {
         Self.temperatures(at: now().timeIntervalSince1970)
     }
 
+    /// The simulation has no power-gated clusters, so its inventory is simply
+    /// its six sensors — every one reports on every tick. That is deliberate:
+    /// simulated mode stays a stable target for the UI regardless of the
+    /// admission rule real hardware needs.
+    public func sensorInventory() async throws(IceCubeError) -> [SMCKeyMaps.SensorDescriptor] {
+        Self.sensorSpecs.map { SMCKeyMaps.SensorDescriptor(key: $0.key, label: $0.label) }
+    }
+
     public func power() async throws(IceCubeError) -> Double? {
         Self.power(at: now().timeIntervalSince1970)
     }

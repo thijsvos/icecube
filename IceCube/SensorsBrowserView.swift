@@ -35,7 +35,12 @@ struct SensorsBrowserView: View {
                 recognizedList
             }
         }
-        .frame(minWidth: 420, minHeight: 440)
+        // The floor, not the size — the height comes from `.defaultSize` in
+        // IceCubeApp, computed from the sensor count. Derived rather than
+        // chosen because a content minimum silently overrides a smaller
+        // `.defaultSize`, so the flat 440 this replaced was quietly vetoing
+        // every attempt to open the window any shorter.
+        .frame(minWidth: 420, minHeight: SensorsWindowMetrics.minimumContentHeight)
         // Load the expensive raw dump only when the advanced view is showing.
         .task(id: showAllKeys) {
             guard showAllKeys else { return }

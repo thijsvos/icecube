@@ -11,7 +11,9 @@ do {
     // The only IOKit writer in the system stays in this target; DaemonCore
     // itself lives in IceCubeKit behind `SMCControlPort` so its safety logic
     // is unit-testable against a scripted fake firmware.
-    core = try DaemonCore(port: SMCWritePort(), store: ConfigStore())
+    core = try DaemonCore(
+        port: SMCWritePort(), store: ConfigStore(), capabilities: { SystemCapabilityReader.current() }
+    )
 } catch {
     // No SMC — nothing a fan daemon can do. Exit cleanly (never fatalError);
     // launchd owns our lifecycle and may retry later.

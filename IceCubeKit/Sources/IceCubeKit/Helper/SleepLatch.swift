@@ -30,8 +30,17 @@ public struct SleepLatch: Sendable, Equatable {
         /// `kIOMessageSystemHasPoweredOn`. Sized against the owner's real
         /// `pmset -g log`, which contains 2 s SleepService dark wakes AND a 45 s
         /// `wifibt` Maintenance dark wake; a Time Machine dark wake runs longer
-        /// still, and a false release there costs one audible spin-up that the
-        /// next `systemWillSleep` undoes.
+        /// still.
+        ///
+        /// This budget used to be priced as "a false release costs one audible
+        /// spin-up that the next `systemWillSleep` undoes". That pricing was
+        /// wrong in exactly the way ``SystemPowerMessage``'s was: on a flat
+        /// max-fraction curve, one spin-up is BOTH fans at maximum RPM inside a
+        /// closed laptop until the machine sleeps again — 69 seconds of it on
+        /// 2026-07-31. ``DaemonCore`` therefore refuses this release outright
+        /// inside a confirmed dark wake and calls ``deferMissedWake()``; it only
+        /// releases when a display is powered, or when the capability read
+        /// itself is unavailable and holding forever would be the worse failure.
         public var missedWakeBudget: Duration = .seconds(300)
         public init() {}
     }
@@ -50,7 +59,23 @@ public struct SleepLatch: Sendable, Equatable {
         case missedWake
     }
 
+    /// Why the latch is set. The two are held to different standards, because
+    /// we know different things about them.
+    public enum Origin: Sendable, Equatable {
+        /// `kIOMessageSystemWillSleep` arrived: the machine told us it is going
+        /// down, and there is a window between that message and the power
+        /// actually dropping in which a release would be unrecoverable — no
+        /// second `systemWillSleep` would come to park us again.
+        case willSleep
+        /// The daemon started while the capability read said dark wake. Nothing
+        /// told us to park; we simply refuse to be the process that spins the
+        /// fans inside somebody's bag because launchd restarted us during a
+        /// `softwareupdate` maintenance window.
+        case startedInDarkWake
+    }
+
     private struct State: Sendable, Equatable {
+        var origin: Origin = .willSleep
         var parkLanded = false
         /// True once a tick has measured a real nap since the lid closed.
         var sawNap = false
@@ -83,6 +108,11 @@ public struct SleepLatch: Sendable, Equatable {
         state?.sawNap ?? false
     }
 
+    /// Why this latch is set, or nil when it is not.
+    public var origin: Origin? {
+        state?.origin
+    }
+
     /// - Returns: true when this is a NEW sleep and the fans must be parked now;
     ///   false when already latched (dark wake → sleep again fires
     ///   `systemWillSleep` repeatedly, and re-running a hand-back that already
@@ -93,8 +123,34 @@ public struct SleepLatch: Sendable, Equatable {
         return true
     }
 
+    /// Parks without a `systemWillSleep`, for a daemon that came up inside a
+    /// dark wake — launchd `KeepAlive`, a crash restart, or `softwareupdate`,
+    /// which is exactly what a maintenance dark wake exists to run.
+    ///
+    /// `parkLanded` is true because the hardware is already in firmware auto:
+    /// this process has never written to it.
+    ///
+    /// - Returns: true when this actually latched (false if already latched).
+    @discardableResult
+    public mutating func startParkedInDarkWake() -> Bool {
+        guard state == nil else { return false }
+        state = State(origin: .startedInDarkWake, parkLanded: true)
+        return true
+    }
+
     public mutating func noteParkLanded(_ landed: Bool) {
         state?.parkLanded = landed
+    }
+
+    /// Re-arms the missed-wake budget after ``DaemonCore`` refuses the release.
+    ///
+    /// Without it, a Time Machine dark wake that outruns the budget would
+    /// return `.missedWake` on every tick for the rest of the backup — a
+    /// refusal every 2 s in a log whose entire job is to stay readable — and,
+    /// worse, would starve `.retryPark`, which is the one thing that still
+    /// needs to happen on a dark wake when the pre-sleep hand-back never landed.
+    public mutating func deferMissedWake() {
+        state?.awakeSoFar = .zero
     }
 
     /// - Parameters:

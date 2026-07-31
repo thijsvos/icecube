@@ -83,9 +83,19 @@ do {
             let rpm = "\(Int(fan.actualRPM)) RPM (target \(Int(fan.targetRPM)), range \(Int(fan.minRPM))–\(Int(fan.maxRPM)))"
             print("  [\(fan.id)] \(fan.name): \(rpm), mode \(fan.mode)")
         }
-        print("Sensors:    \(report.temperatures.count)")
+        // Two numbers, not one. A curated key that is silent right now is
+        // almost always a power-gated CPU/GPU cluster rather than a sensor this
+        // Mac lacks, and telling those apart is the most useful thing a model
+        // report can say. "discovered" is the number that must not move between
+        // runs; "reporting" legitimately does.
+        let inventory = try await provider.sensorInventory()
+        let reporting = Set(report.temperatures.map(\.key))
+        print("Sensors:    \(report.temperatures.count) reporting of \(inventory.count) discovered")
         for reading in report.temperatures.sorted(by: { $0.celsius > $1.celsius }) {
             print("  \(reading.key)  \(String(format: "%5.1f", reading.celsius)) °C  \(reading.label)")
+        }
+        for sensor in inventory where !reporting.contains(sensor.key) {
+            print("  \(sensor.key)      —  °C  \(sensor.label) (silent — cluster idle?)")
         }
         print("\nFull report: swift run icecube-diag --json > diagnostics.json")
     }

@@ -1,0 +1,150 @@
+// SensorsWindowMetricsTests.swift — the Sensors window fits its list on every Mac without running off the screen.
+
+import CoreGraphics
+import Foundation
+import Testing
+
+/// The window height is arithmetic precisely because the platform would not do
+/// it for us, and arithmetic nobody checks is how a Mac Studio ends up with a
+/// window taller than its display. These pin the three things that matter: the
+/// height follows the sensor count, it never escapes the screen, and the view's
+/// own minimum can never veto the smallest window we promise to open.
+@MainActor
+@Suite("SensorsWindowMetrics — how tall the Sensors window opens")
+struct SensorsWindowMetricsTests {
+    /// Taller than any real display, so the content arithmetic can be asserted
+    /// without the screen clamp in the way.
+    private func height(_ rows: Int?, screen: CGFloat = .infinity) -> CGFloat {
+        SensorsWindowMetrics.frameHeight(rowCount: rows, availableHeight: screen)
+    }
+
+    /// The measured row pitch, restated here so the expectations below can say
+    /// "one row" in `CGFloat`.
+    ///
+    /// Typed deliberately. `#expect(aCGFloat == 16 * 24)` does not compare
+    /// numbers: with nothing to constrain it the right-hand side infers as
+    /// `Int`, swift-testing's binary-operation check unifies the two through
+    /// `AnyHashable`, and 384.0 ≠ 384 — a green-looking assertion that fails
+    /// for a reason having nothing to do with the code under test. This suite
+    /// caught it on itself.
+    private let oneRow: CGFloat = 24
+
+    // MARK: Counting rows
+
+    /// Neither section is ever truly empty on screen: "No named temperature
+    /// sensors on this model yet…" and "No fans reported (fanless Mac)." each
+    /// occupy a row, so a Mac that reports nothing still needs room for two.
+    @Test("An empty section still costs a row")
+    func emptySectionsCountAsOneRow() {
+        #expect(SensorsWindowMetrics.rowCount(temperatures: 0, fans: 0) == 2)
+        #expect(SensorsWindowMetrics.rowCount(temperatures: 6, fans: 0) == 7)
+        #expect(SensorsWindowMetrics.rowCount(temperatures: 6, fans: 2) == 8)
+        #expect(SensorsWindowMetrics.rowCount(temperatures: 22, fans: 2) == 24)
+    }
+
+    // MARK: Fitting the content
+
+    /// The whole point of the change, stated as the two machines it was made
+    /// for: the six-sensor simulated list must open smaller than the fixed
+    /// 480 pt it used to get, and a sensor-rich Mac must open bigger.
+    ///
+    /// The owner's Mac14,9 has 23 curated sensors but does not report a fixed
+    /// number of them — `SystemSMCProvider` admits a sensor only if its very
+    /// first read passes the plausibility gate, so consecutive `icecube-diag`
+    /// runs on an idle machine returned 16, 20, 16, 20. That is why the
+    /// interesting case is expressed in rows rather than as "an M2 Pro".
+    @Test("A sensor-rich Mac opens taller than a six-sensor one, and the small one shrank")
+    func heightFollowsTheSensorCount() {
+        let simulated = height(SensorsWindowMetrics.rowCount(temperatures: 6, fans: 2))
+        let sensorRich = height(SensorsWindowMetrics.rowCount(temperatures: 20, fans: 2))
+        #expect(simulated == 377, "185 pt of chrome and slack, plus eight 24 pt rows")
+        #expect(sensorRich == 713, "the same chrome, plus twenty-two rows")
+        #expect(simulated < 480, "the simulated list used to open at a fixed 480 pt")
+        #expect(sensorRich > 480, "and twenty-two rows never fitted in 480 pt")
+        #expect(sensorRich - simulated == 14 * oneRow, "fourteen extra sensors, fourteen extra rows")
+    }
+
+    /// Before the first poll the count is unknown, and unknown must not be read
+    /// as "this Mac has no sensors" — macOS saves a window's frame the first
+    /// time it opens, so one unlucky open inside that gap would pin the floor
+    /// permanently. The fallback is deliberately close to the fixed 480 pt this
+    /// whole type replaced: no worse than what came before.
+    @Test("An unknown sensor count opens near the old fixed height, not at the floor")
+    func theUnmeasuredCaseIsNotTheEmptyCase() {
+        #expect(height(nil) == 473)
+        #expect(height(nil) > SensorsWindowMetrics.minimumFrameHeight)
+        #expect(height(nil) == height(SensorsWindowMetrics.unmeasuredRowCount))
+        #expect(height(nil) > height(SensorsWindowMetrics.rowCount(temperatures: 0, fans: 0)))
+    }
+
+    /// One sensor is one row of window. Below six rows the floor takes over,
+    /// hence the starting index.
+    @Test("Each extra sensor adds exactly one row of height")
+    func heightGrowsOneRowAtATime() {
+        for rows in 6 ..< 24 {
+            #expect(height(rows + 1) - height(rows) == oneRow)
+        }
+    }
+
+    @Test("Height never shrinks as the list grows")
+    func monotonic() {
+        for rows in 0 ..< 200 {
+            #expect(height(rows + 1, screen: 900) >= height(rows, screen: 900))
+        }
+    }
+
+    // MARK: The clamps
+
+    @Test("A fanless Mac with no recognized sensors still opens a usable window")
+    func theFloorHolds() {
+        let rows = SensorsWindowMetrics.rowCount(temperatures: 0, fans: 0)
+        #expect(height(rows) == SensorsWindowMetrics.minimumFrameHeight)
+    }
+
+    /// A content minimum overrides `.defaultSize` upward and there is no
+    /// warning when it does — the old 440 pt floor turned a requested 365 pt
+    /// window into 472. `SensorsBrowserView` therefore takes its floor from
+    /// this type instead of choosing one, and this is the assertion that keeps
+    /// the derivation honest if either number is ever edited.
+    @Test("The view's minimum never vetoes the smallest window we open")
+    func contentFloorFitsInsideTheWindowFloor() {
+        #expect(
+            SensorsWindowMetrics.minimumContentHeight + SensorsWindowMetrics.titleBarHeight
+                <= height(0)
+        )
+    }
+
+    /// A Mac whose sensors are enumerated rather than curated wants a window
+    /// several times taller than the display it is on.
+    @Test("A 50-sensor Mac caps out instead of running off the screen")
+    func theScreenCapHolds() {
+        let rows = SensorsWindowMetrics.rowCount(temperatures: 50, fans: 4)
+        #expect(height(rows, screen: 900) < 900)
+        #expect(height(rows, screen: .infinity) == SensorsWindowMetrics.maximumFrameHeight)
+    }
+
+    /// The inverted-range trap: clamp a value to `[floor, ceiling]` where the
+    /// screen has pushed the ceiling below the floor and the result is a window
+    /// smaller than the minimum that was just promised. Cheap to write, and the
+    /// only way to hit it in the field is on hardware nobody here owns.
+    @Test("An absurdly small screen still yields a usable window")
+    func aTinyScreenCannotInvertTheClamp() {
+        for screen in [CGFloat.zero, 100, 200, 400] {
+            #expect(height(40, screen: screen) >= SensorsWindowMetrics.minimumFrameHeight)
+        }
+    }
+
+    /// A NaN screen height must not collapse the window to the floor — and the
+    /// only thing standing between it and that outcome is the argument order
+    /// inside `min`, since `min(x, y)` is `y < x ? y : x` and therefore returns
+    /// `x` for a NaN `y` but NaN for a NaN `x`. Nothing about swapping two
+    /// arguments looks like a behaviour change, which is exactly why this is a
+    /// test and not a comment.
+    @Test("A nonsense screen height falls back to the cap, not to the floor")
+    func nanCannotPoisonTheClamp() {
+        for screen in [CGFloat.nan, .signalingNaN, .infinity] {
+            #expect(height(40, screen: screen) == SensorsWindowMetrics.maximumFrameHeight)
+        }
+        #expect(height(nil, screen: .nan) == 473, "and it leaves smaller windows alone")
+    }
+}

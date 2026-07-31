@@ -113,7 +113,9 @@ public actor ChartStore {
     private var fanActual: [Int: RingBuffer<ChartSample>] = [:]
     private var fanTarget: [Int: RingBuffer<ChartSample>] = [:]
 
-    /// Fixed after the first ingest — the anti-jump row contract.
+    /// The anti-jump row contract. `fanMeta` is fixed after the first ingest;
+    /// `hasCPU`/`hasGPU` latch **on** and never off, so a row can appear once
+    /// and then never disappears.
     private var hasCPU = false
     private var hasGPU = false
     private var fanMeta: [(id: Int, name: String, maxRPM: Double)] = []
@@ -137,9 +139,16 @@ public actor ChartStore {
         let cpuValues = snapshot.temperatures.filter { $0.sensorClass == .cpu }.map(\.celsius)
         let gpuValues = snapshot.temperatures.filter { $0.sensorClass == .gpu }.map(\.celsius)
 
+        // Row discovery is MONOTONE for sensors, not a one-shot latch. The
+        // published sensor list grows when a power-gated cluster first reports
+        // (see `SensorAdmission`), so a launch that begins with the GPU block
+        // asleep would otherwise have no GPU row for the life of the process —
+        // no crash, no log line, just a chart silently missing a series.
+        hasCPU = hasCPU || !cpuValues.isEmpty
+        hasGPU = hasGPU || !gpuValues.isEmpty
+        // Fans still latch: `FNum` is answered on the first poll and a fan
+        // never turns up late.
         if !didDiscoverRows {
-            hasCPU = !cpuValues.isEmpty
-            hasGPU = !gpuValues.isEmpty
             fanMeta = snapshot.fans.map { ($0.id, $0.name, $0.maxRPM) }
             didDiscoverRows = true
         }

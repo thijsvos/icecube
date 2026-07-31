@@ -334,3 +334,82 @@ struct StickyHottestTests {
         #expect(snapshot([]).hottest(stickingTo: "Tp01") == nil)
     }
 }
+
+/// Which sensors a Mac *has* must not depend on which millisecond the app
+/// launched in. This is the rule that decides it, and it has been wrong once:
+/// admitting a key only when its first reading looked plausible turned a
+/// power-gated CPU cluster — which reports a frozen 6.70/4.63 °C sentinel — into
+/// "this Mac has no P-cores", permanently, for that process. Five consecutive
+/// `icecube-diag` runs on one idle Mac14,9 resolved 20, 16, 20, 16, 20 of the
+/// same 20 keys.
+@Suite("SensorAdmission — membership comes from existence, never from a value")
+struct SensorAdmissionTests {
+    private static let candidates = [
+        SMCKeyMaps.SensorDescriptor(key: "Tp01", label: "CPU P-core 1"),
+        SMCKeyMaps.SensorDescriptor(key: "Tp05", label: "CPU P-core 2"),
+        SMCKeyMaps.SensorDescriptor(key: "Tg0f", label: "GPU 1"),
+        SMCKeyMaps.SensorDescriptor(key: "TB2T", label: "Battery 2"),
+    ]
+
+    private func admit(_ probes: [String: SensorAdmission.Probe]) -> [String] {
+        SensorAdmission.admit(candidates: Self.candidates, probes: probes).map(\.key)
+    }
+
+    /// The whole point: a gated cluster still reads, it just reads nonsense.
+    /// The admission rule never sees a value, so it cannot be fooled by one.
+    @Test("A key the firmware knows is admitted whatever it would read")
+    func existenceIsEnough() {
+        #expect(
+            admit([
+                "Tp01": .present(type: "flt "), "Tp05": .present(type: "flt "),
+                "Tg0f": .present(type: "flt "), "TB2T": .present(type: "flt "),
+            ]) == ["Tp01", "Tp05", "Tg0f", "TB2T"]
+        )
+    }
+
+    /// An absent key throws on probe — measured, 13 of 13 absent candidates on
+    /// every attempt — which is what makes existence safe to trust. Mac14,9
+    /// carries curated keys for a second battery and extra GPU dies that only
+    /// an M2 Max populates; those must stay out.
+    @Test("A key this model does not have is refused")
+    func absentKeysAreRefused() {
+        #expect(admit(["Tp01": .present(type: "flt "), "TB2T": .absent]) == ["Tp01"])
+    }
+
+    /// A candidate nobody probed is not a candidate we may admit. Silently
+    /// treating a missing probe as present would let a transport failure
+    /// fabricate sensors.
+    @Test("A candidate with no probe result at all is refused")
+    func unprobedKeysAreRefused() {
+        #expect(admit([:]).isEmpty)
+    }
+
+    /// `flag` and `{fds` exist and answer, but carry no temperature. Admitting
+    /// one would put a permanent junk row in the list — the failure the old
+    /// value-based rule was reaching for, kept without the lottery.
+    @Test("A key whose wire type cannot carry a temperature is refused")
+    func undecodableTypesAreRefused() {
+        #expect(admit(["Tp01": .present(type: "flag"), "Tp05": .present(type: "{fds")]).isEmpty)
+        #expect(admit(["Tp01": .present(type: "ui16"), "Tp05": .present(type: "fpe2")]).count == 2)
+    }
+
+    /// A type string the codec has never heard of is refused rather than
+    /// guessed at: we would have no way to decode its bytes.
+    @Test("An unrecognized wire type is refused")
+    func unknownTypesAreRefused() {
+        #expect(admit(["Tp01": .present(type: "zzzz")]).isEmpty)
+    }
+
+    /// The popover, the charts and the Sensors window all render this order.
+    /// Deriving it from the probe dictionary would swap one per-launch lottery
+    /// for another, since dictionary iteration order is not stable.
+    @Test("Admitted sensors keep the candidate list's order, not the dictionary's")
+    func orderFollowsTheCandidateList() {
+        let probes = Dictionary(
+            uniqueKeysWithValues: Self.candidates.map { ($0.key, SensorAdmission.Probe.present(type: "flt ")) }
+        )
+        for _ in 0 ..< 50 {
+            #expect(admit(probes) == Self.candidates.map(\.key))
+        }
+    }
+}

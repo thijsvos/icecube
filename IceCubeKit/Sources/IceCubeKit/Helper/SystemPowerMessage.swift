@@ -29,14 +29,24 @@ public enum SystemPowerMessage {
     public static let systemWillNotSleep: UInt32 = 0xE000_0290
     /// Fully awake. Must NOT be acknowledged.
     ///
-    /// The design ASSUMES this is not delivered on a dark wake, but neither
-    /// `<IOKit/IOMessage.h>` nor `<IOKit/pwr_mgt/IOPMLib.h>` says so — they are
-    /// silent on Dark Wake for every one of these messages. The owner's
-    /// `pmset -g log` does distinguish them (`DarkWake … [CDNP]` versus
-    /// `Wake … [CDNVA]`), which is suggestive, not documentation. ``SleepLatch``
-    /// is therefore written to stay correct if it DOES fire on a dark wake:
-    /// each spurious unpark costs one re-engage and is undone by the next
-    /// `systemWillSleep`.
+    /// SETTLED BY FIELD EVIDENCE, 2026-07-31. Neither `<IOKit/IOMessage.h>` nor
+    /// `<IOKit/pwr_mgt/IOPMLib.h>` says whether this arrives on a dark wake;
+    /// the owner's log now does. Across every wake the daemon logged, all five
+    /// `wake: resuming … (the system powered on)` lines line up with a
+    /// `[CDNVA]`/`[CDNVAP]` full wake — including three `DarkWake to FullWake`
+    /// promotions, so the message tracks the *promotion*, not the dark wake
+    /// underneath it — and no pure `DarkWake … [CDNP]` ever produced one. The
+    /// assumption held.
+    ///
+    /// What did NOT hold was the sibling assumption in `DaemonCore.parkedTick`,
+    /// that an app heartbeat cannot arrive during a dark wake: three did, and
+    /// one of them (00:31:53, inside a `[CDNPB]` rtc/Maintenance dark wake with
+    /// the lid shut) unparked the daemon and drove both fans to 6800 RPM for
+    /// 69 seconds. The daemon therefore no longer trusts ANY message or
+    /// heartbeat as proof of a real wake: ``DaemonCore`` requires a positive
+    /// ``PowerCapabilities`` read showing a powered display before the sleep
+    /// latch may drop. This message is now only the *edge* — "a wake began" —
+    /// and stays useful precisely because it is no longer the whole answer.
     public static let systemHasPoweredOn: UInt32 = 0xE000_0300
     /// Wake is starting; disks and network may not answer. Must NOT be acked.
     public static let systemWillPowerOn: UInt32 = 0xE000_0320

@@ -11,9 +11,10 @@ import Foundation
 ///   mode-key casing (`F{i}Md` vs `F{i}md` — it varies by SoC generation).
 ///   `FNum == 0` is a fanless Mac (MacBook Air): monitoring still works.
 /// - **Sensors**: the curated per-generation map (``SMCKeyMaps``) intersected
-///   with the keys that exist on this machine; if that yields fewer than 3
-///   sensors the provider falls back to enumerating every `T***` key of type
-///   `flt` whose value passes the plausibility filter, labeled by key.
+///   with the keys this machine actually has — an **existence** test, never a
+///   value test (see ``SensorAdmission``); if that yields fewer than 3 sensors
+///   the provider falls back to enumerating every `T***` key of type `flt`
+///   whose value passes the plausibility filter, labeled by key.
 public actor SystemSMCProvider: SMCProviding {
     private let connection: SMCConnection
 
@@ -25,6 +26,11 @@ public actor SystemSMCProvider: SMCProviding {
     private var sensorDiscovery: Task<[SMCKeyMaps.SensorDescriptor], any Error>?
     /// Last plausible value per sensor key — what a glitched read falls back
     /// to so the sensor list never shrinks (see `SensorStabilizer`).
+    ///
+    /// Empty until the first poll: discovery now admits sensors without reading
+    /// them, so a sensor whose cluster is power-gated at launch is admitted
+    /// with no value and publishes no row until it first reports. That is the
+    /// published list's one growth phase.
     private var lastGoodTemperatures: [String: Double] = [:]
     /// All SMC key names, enumerated once (immutable for a boot).
     private var cachedKeyNames: [String]?
@@ -82,11 +88,28 @@ public actor SystemSMCProvider: SMCProviding {
         return result
     }
 
+    /// What this Mac **has**, as opposed to what is reporting right now.
+    ///
+    /// Stable from the first poll, because admission is by key existence. The
+    /// difference between the two numbers is the whole subject of
+    /// ``SensorAdmission``, and `icecube-diag` prints both so the stability
+    /// claim is checkable on hardware rather than asserted in a comment.
+    public func sensorInventory() async throws(IceCubeError) -> [SMCKeyMaps.SensorDescriptor] {
+        try await sensorDescriptors()
+    }
+
     public func temperatures() async throws(IceCubeError) -> [SensorReading] {
-        // The list is STATIC after discovery: every discovered sensor appears
-        // every tick, in the same order. A read that fails or comes back
-        // implausible holds the sensor's last good value instead of dropping
-        // the row — vanishing rows made the popover resize every second.
+        // Every sensor that has ever reported appears every tick, in the same
+        // order. A read that fails or comes back implausible holds the sensor's
+        // last good value instead of dropping the row — vanishing rows made the
+        // popover resize every second.
+        //
+        // MONOTONE rather than fixed-at-discovery: membership is decided by key
+        // existence, and a power-gated cluster reports only a sentinel for up
+        // to ~85 s after launch (measured on Mac14,9), so those rows join late
+        // and then never leave. Admitted-but-silent keys are simply re-read
+        // every tick — there is nothing to re-probe, which is what makes the
+        // daemon's re-probe loop impossible here.
         let sensors = try await sensorDescriptors()
         var fresh: [String: Double] = [:]
         for sensor in sensors {
@@ -275,17 +298,41 @@ public actor SystemSMCProvider: SMCProviding {
     private func performSensorDiscovery() async throws(IceCubeError) -> [SMCKeyMaps.SensorDescriptor] {
         var resolved: [SMCKeyMaps.SensorDescriptor] = []
         if let curated = SMCKeyMaps.curatedSensors(forModel: HostInfo.modelIdentifier()) {
-            // Admission requires a plausible first READ, not mere existence:
-            // a key that exists but reads 0 (dead/unpopulated sensor) would
-            // otherwise become a permanent junk row. The read also seeds the
-            // hold-last-good cache, so membership never changes afterwards.
+            // Membership comes from key EXISTENCE, never from a first reading.
+            // Admitting on a plausible read made the sensor list a per-launch
+            // lottery — five consecutive `icecube-diag` runs on an idle Mac14,9
+            // resolved 20, 16, 20, 16, 20 of the same 20 keys — because a
+            // power-gated CPU cluster reports a frozen 6.70/4.63 °C sentinel
+            // that the plausibility floor rejects. `SensorAdmission` carries
+            // the measurements, and the remedies they ruled out.
+            //
+            // One `keyInfo` call answers both questions, and `SMCConnection`
+            // caches it for the rest of the process — less SMC traffic than the
+            // value probe it replaces, and it still runs exactly once.
+            var probes: [String: SensorAdmission.Probe] = [:]
+            probes.reserveCapacity(curated.count)
             for sensor in curated {
-                guard let value = try? await connection.readDouble(sensor.key),
-                      SMCKeyMaps.isPlausibleTemperature(value) else { continue }
-                lastGoodTemperatures[sensor.key] = value
-                resolved.append(sensor)
+                do {
+                    let info = try await connection.keyInfo(for: sensor.key)
+                    probes[sensor.key] = .present(type: info.type)
+                } catch {
+                    // "No such key" is an ANSWER, and a stable one — it is a
+                    // property of the model. Anything else (transport failure,
+                    // a connection that went away on wake) is not an answer, so
+                    // it propagates: `sensorDescriptors()` must never cache a
+                    // truncated list for the life of the process, and the next
+                    // poll retries. This is the daemon's "an EMPTY probe is
+                    // unresolved, not 'this Mac has no sensors'" lesson.
+                    guard case .smcKeyNotFound = error else { throw error }
+                    probes[sensor.key] = .absent
+                }
             }
+            resolved = SensorAdmission.admit(candidates: curated, probes: probes)
         }
+        // Fewer than three curated keys means the map does not describe this
+        // machine — not that the moment was unlucky. Under existence-based
+        // admission this no longer fires on a badly-timed probe, which is what
+        // used to drop a perfectly mapped Mac to raw-key labels.
         if resolved.count < 3 {
             resolved = try await enumeratedTemperatureSensors()
         }

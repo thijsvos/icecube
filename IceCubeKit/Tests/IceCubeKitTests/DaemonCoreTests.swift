@@ -201,11 +201,23 @@ private final class MemoryConfigStore: FanConfigStoring, @unchecked Sendable {
 
 private let instantSleep: @Sendable (Duration) async -> Void = { _ in }
 
+extension PowerCapabilities {
+    /// What the owner's Mac reports with the lid open — `0x1F [CDNVA]`. Every
+    /// test that is not *about* the dark-wake gate models an awake machine, so
+    /// this is the default here. It is deliberately NOT a default on
+    /// `DaemonCore.init`: in production, "assume awake" is the bug.
+    static let fullWakeCapabilities = PowerCapabilities([.cpu, .video, .audio, .network, .diskOrAOT])
+    /// The rtc/Maintenance dark wake that drove both fans to 6800 RPM inside a
+    /// closed laptop on 2026-07-31 — `0x79 [CDNPB]`, verbatim.
+    static let darkWakeCapabilities = PowerCapabilities([.cpu, .diskOrAOT, .network, .pushServiceTask, .backgroundTask])
+}
+
 private func makeCore(
     smc: FakeSMC,
-    store: MemoryConfigStore = MemoryConfigStore()
+    store: MemoryConfigStore = MemoryConfigStore(),
+    capabilities: @escaping @Sendable () -> PowerCapabilities? = { .fullWakeCapabilities }
 ) -> DaemonCore {
-    DaemonCore(port: smc, store: store, sleep: instantSleep)
+    DaemonCore(port: smc, store: store, capabilities: capabilities, sleep: instantSleep)
 }
 
 private func manualConfig(_ rpm: Double = 4000) -> FanConfig {
@@ -706,7 +718,7 @@ struct DaemonCoreRevertTests {
     func shutdownKeepsBootPromise() async throws {
         let smc = FakeSMC()
         let store = MemoryConfigStore()
-        let core = DaemonCore(port: smc, store: store, sleep: instantSleep)
+        let core = DaemonCore(port: smc, store: store, capabilities: { .fullWakeCapabilities }, sleep: instantSleep)
         await core.heartbeat()
         try await core.apply(curveConfig(persists: true))
         #expect(store.load() != nil, "a persisting curve is saved when applied")
@@ -725,7 +737,7 @@ struct DaemonCoreRevertTests {
     func statusReportsActiveCurve() async {
         let smc = FakeSMC(temperature: 80)
         let store = MemoryConfigStore(seeded: curveConfig(persists: true))
-        let core = DaemonCore(port: smc, store: store, sleep: instantSleep)
+        let core = DaemonCore(port: smc, store: store, capabilities: { .fullWakeCapabilities }, sleep: instantSleep)
         await core.start()
         let status = await core.currentStatus()
         #expect(status.mode == .curve)
@@ -753,7 +765,7 @@ struct DaemonCoreRevertTests {
     func explicitRevertClearsPersistence() async throws {
         let smc = FakeSMC()
         let store = MemoryConfigStore()
-        let core = DaemonCore(port: smc, store: store, sleep: instantSleep)
+        let core = DaemonCore(port: smc, store: store, capabilities: { .fullWakeCapabilities }, sleep: instantSleep)
         await core.heartbeat()
         try await core.apply(curveConfig(persists: true))
         #expect(store.load() != nil)
@@ -850,7 +862,7 @@ struct DaemonCoreTickTests {
     func startResumesPersistedCurve() async {
         let smc = FakeSMC(temperature: 80) // hot enough for the curve to drive
         let store = MemoryConfigStore(seeded: curveConfig(persists: true))
-        let core = DaemonCore(port: smc, store: store, sleep: instantSleep)
+        let core = DaemonCore(port: smc, store: store, capabilities: { .fullWakeCapabilities }, sleep: instantSleep)
         await core.start()
         #expect(await core.config.mode == .curve, "the boot promise")
         await core.shutdown()
@@ -861,7 +873,7 @@ struct DaemonCoreTickTests {
     func manualNeverPersists() async throws {
         let smc = FakeSMC()
         let store = MemoryConfigStore()
-        let core = DaemonCore(port: smc, store: store, sleep: instantSleep)
+        let core = DaemonCore(port: smc, store: store, capabilities: { .fullWakeCapabilities }, sleep: instantSleep)
         await core.heartbeat()
         var manual = manualConfig()
         manual.persistsWithoutApp = true // even when the user asks for it
@@ -1160,7 +1172,7 @@ struct DaemonCoreSleepTests {
     func parkKeepsTheIntent() async throws {
         let smc = FakeSMC(temperature: 75)
         let store = MemoryConfigStore()
-        let core = DaemonCore(port: smc, store: store, sleep: instantSleep)
+        let core = DaemonCore(port: smc, store: store, capabilities: { .fullWakeCapabilities }, sleep: instantSleep)
         await core.heartbeat()
         try await core.apply(curveConfig(persists: true))
         #expect(store.load() != nil, "the boot promise is armed")
@@ -1326,7 +1338,7 @@ struct DaemonCoreSleepTests {
     func watchdogDeferredWhileParked() async throws {
         let smc = FakeSMC(temperature: 75)
         let store = MemoryConfigStore()
-        let core = DaemonCore(port: smc, store: store, sleep: instantSleep)
+        let core = DaemonCore(port: smc, store: store, capabilities: { .fullWakeCapabilities }, sleep: instantSleep)
         // No `heartbeat()`: on real hardware `heartbeatAge()` is measured on a
         // ContinuousClock that keeps counting through sleep, so after a nap the
         // age is genuinely stale. In a test the clock never moves, so any
@@ -1523,7 +1535,7 @@ struct DaemonCoreSleepTests {
     func setAllAutoWorksWhileParked() async throws {
         let smc = FakeSMC(temperature: 75)
         let store = MemoryConfigStore()
-        let core = DaemonCore(port: smc, store: store, sleep: instantSleep)
+        let core = DaemonCore(port: smc, store: store, capabilities: { .fullWakeCapabilities }, sleep: instantSleep)
         await core.heartbeat()
         try await core.apply(curveConfig(persists: true))
         await core.prepareForSleep()
@@ -1541,7 +1553,7 @@ struct DaemonCoreSleepTests {
     func failedWriteWhileParkedKeepsTheConfig() async throws {
         let smc = FakeSMC(temperature: 75)
         let store = MemoryConfigStore()
-        let core = DaemonCore(port: smc, store: store, sleep: instantSleep)
+        let core = DaemonCore(port: smc, store: store, capabilities: { .fullWakeCapabilities }, sleep: instantSleep)
         await core.heartbeat()
         try await core.apply(curveConfig(persists: true))
         await core.prepareForSleep()
@@ -1553,5 +1565,251 @@ struct DaemonCoreSleepTests {
 
         #expect(await core.config.mode == .curve, "the intent survives")
         #expect(store.load() != nil, "and so does the boot promise")
+    }
+}
+
+/// A capability reading a test can change mid-flight, so one test can walk a
+/// machine from dark wake to full wake exactly the way opening the lid does.
+private final class CapabilityBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: PowerCapabilities?
+
+    init(_ value: PowerCapabilities?) {
+        self.value = value
+    }
+
+    var current: PowerCapabilities? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return value
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            value = newValue
+        }
+    }
+
+    var read: @Sendable () -> PowerCapabilities? {
+        { self.current }
+    }
+}
+
+/// THE 2026-07-31 REGRESSION. A scheduled rtc/Maintenance dark wake fired with
+/// the lid shut; the daemon's heartbeat-after-a-nap rule read it as a real wake,
+/// unparked, and drove both fans to 6800 RPM for 69 seconds inside a closed
+/// laptop. Nothing in the suite could have caught it, because nothing modelled
+/// the difference between a dark wake and a full one.
+///
+/// The rule for all of these: while parked, a write to the fans requires a
+/// powered display — with exactly one exception, the temperature ceiling, which
+/// is the one release allowed to make noise in a bag because by then the
+/// alternative is heat.
+@Suite("DaemonCore — the fans stay quiet on a dark wake")
+struct DarkWakeTests {
+    @Test("A heartbeat during a dark wake does NOT unpark — the reported bug")
+    func heartbeatInADarkWakeStaysParked() async throws {
+        let smc = FakeSMC(temperature: 75)
+        let core = makeCore(smc: smc, capabilities: { .darkWakeCapabilities })
+        try await core.apply(curveConfig(persists: true))
+        await core.prepareForSleep()
+        await core.tick(sleptFor: .seconds(900)) // the nap, as on the night
+        await smc.clearWrites()
+
+        // Exactly the sequence that spun the fans: the app's 5 s timer fires
+        // inside the dark wake and checks in.
+        await core.heartbeat()
+        await core.tick(sleptFor: .zero)
+
+        #expect(await core.sleepLatch.isAsleep, "a dark wake is not a wake")
+        #expect(await smc.modeWrites(fan: 0).isEmpty, "and above all: no write to fan 0")
+        #expect(await smc.modeWrites(fan: 1).isEmpty, "or fan 1")
+        #expect(await smc.targetWrites(fan: 0).isEmpty)
+        let events = await core.currentStatus().recentEvents
+        #expect(events.contains { $0.contains("no display is powered") }, "and it says why")
+    }
+
+    /// The same machine 69 seconds later, when the owner opened the lid. The
+    /// gate must not be a trap: a real wake still resumes within one tick.
+    @Test("Opening the lid promotes the dark wake and control resumes")
+    func promotionToFullWakeUnparks() async throws {
+        let smc = FakeSMC(temperature: 75)
+        let capabilities = CapabilityBox(.darkWakeCapabilities)
+        let core = makeCore(smc: smc, capabilities: capabilities.read)
+        try await core.apply(curveConfig(persists: true))
+        await core.prepareForSleep()
+        await core.tick(sleptFor: .seconds(900))
+        await core.heartbeat()
+        await core.tick(sleptFor: .zero)
+        #expect(await core.sleepLatch.isAsleep, "still parked while dark")
+
+        capabilities.current = .fullWakeCapabilities // the lid opens
+        await core.heartbeat()
+        await core.tick(sleptFor: .zero)
+        #expect(await !core.sleepLatch.isAsleep, "a lit display is a real wake")
+    }
+
+    /// A `kIOMessageSystemHasPoweredOn` delivered while no display is up must be
+    /// remembered, not spent — a DarkWake→FullWake promotion sends no second
+    /// message, so forgetting the edge would strand the daemon parked.
+    @Test("A power-on edge during a dark wake is held, then completes on promotion")
+    func powerOnEdgeIsHeldNotSpent() async throws {
+        let smc = FakeSMC(temperature: 75)
+        let capabilities = CapabilityBox(.darkWakeCapabilities)
+        let core = makeCore(smc: smc, capabilities: capabilities.read)
+        try await core.apply(manualConfig())
+        await core.prepareForSleep()
+        await smc.clearWrites()
+
+        await core.systemDidPowerOn()
+        #expect(await core.sleepLatch.isAsleep, "the message alone proves nothing")
+        #expect(await smc.modeWrites(fan: 0).isEmpty)
+
+        capabilities.current = .fullWakeCapabilities
+        await core.tick(sleptFor: .zero)
+        #expect(await !core.sleepLatch.isAsleep, "the held edge completes without a second message")
+    }
+
+    /// INVARIANT 3 is kept, not narrowed. This is the one release that is
+    /// deliberately NOT gated: a machine genuinely over the die ceiling should
+    /// spin its fans even in a bag, because by then noise is the cheap option.
+    @Test("The temperature ceiling still takes the fans back during a dark wake")
+    func ceilingIsNotGatedByTheWakeClass() async throws {
+        let smc = FakeSMC(temperature: 75)
+        let core = makeCore(smc: smc, capabilities: { .darkWakeCapabilities })
+        await core.heartbeat()
+        try await core.apply(curveConfig(persists: true))
+        await core.prepareForSleep()
+        await smc.clearWrites()
+
+        await smc.setTemperature(110)
+        for _ in 0 ..< 4 {
+            await core.heartbeat()
+            await core.tick(sleptFor: .zero)
+        }
+        #expect(await !core.sleepLatch.isAsleep, "the ceiling outranks the dark-wake hold")
+        #expect(await smc.targetWrites(fan: 0).contains(6800), "and drives them at maximum")
+    }
+
+    /// The second route to the same bug: a Time Machine or Spotlight dark wake
+    /// that simply outruns the missed-wake budget used to release the latch and
+    /// re-engage the curve on a machine in a bag.
+    @Test("The missed-wake failsafe stands down inside a confirmed dark wake")
+    func missedWakeRefusesInADarkWake() async throws {
+        let smc = FakeSMC(temperature: 75)
+        let core = makeCore(smc: smc, capabilities: { .darkWakeCapabilities })
+        try await core.apply(curveConfig(persists: true))
+        await core.prepareForSleep()
+        await core.tick(sleptFor: .seconds(900))
+        await smc.clearWrites()
+
+        // Well past the 300 s budget at a 2 s tick, twice over, to prove the
+        // refusal re-arms instead of firing once and then releasing.
+        for _ in 0 ..< 400 {
+            await core.tick(sleptFor: .zero)
+        }
+        #expect(await core.sleepLatch.isAsleep, "still parked after 800 s of dark wake")
+        #expect(await smc.modeWrites(fan: 0).isEmpty, "and it never touched the fans")
+        let events = await core.currentStatus().recentEvents
+        #expect(events.contains { $0.contains("failsafe stands down") })
+    }
+
+    /// launchd `KeepAlive`, a crash restart and `softwareupdate` all start this
+    /// daemon, and a maintenance dark wake is exactly when softwareupdate runs.
+    /// The boot promise is "the persisted curve is live before the app
+    /// launches", not "the fans move the instant launchd starts us".
+    @Test("Starting inside a dark wake loads the curve without touching the fans")
+    func bootInsideADarkWakeIsSilent() async {
+        let smc = FakeSMC(temperature: 75)
+        let store = MemoryConfigStore(seeded: curveConfig(persists: true))
+        let core = DaemonCore(
+            port: smc, store: store, capabilities: { .darkWakeCapabilities }, sleep: instantSleep
+        )
+        await core.start()
+
+        #expect(await core.currentStatus().mode == .curve, "the boot promise is still kept")
+        #expect(await core.currentStatus().activeCurve == FanCurve.balanced, "and reported")
+        #expect(await smc.modeWrites(fan: 0).isEmpty, "but nothing was written")
+        #expect(await core.sleepLatch.isAsleep, "held, pending a display")
+        await core.shutdown()
+    }
+
+    /// Unlike the sleep latch, the boot latch is bounded: no `systemWillSleep`
+    /// ever arrived for it, so a machine whose display bit we are misreading is
+    /// the likelier explanation than a laptop in a bag.
+    @Test("A boot-time hold releases once a display comes up")
+    func bootHoldReleasesOnFullWake() async {
+        let smc = FakeSMC(temperature: 75)
+        let store = MemoryConfigStore(seeded: curveConfig(persists: true))
+        let capabilities = CapabilityBox(.darkWakeCapabilities)
+        let core = DaemonCore(
+            port: smc, store: store, capabilities: capabilities.read, sleep: instantSleep
+        )
+        await core.start()
+        #expect(await core.sleepLatch.isAsleep)
+
+        capabilities.current = .fullWakeCapabilities
+        await core.heartbeat()
+        await core.tick(sleptFor: .zero)
+        #expect(await !core.sleepLatch.isAsleep, "a display came up")
+        await core.shutdown()
+    }
+
+    /// An unreadable capability must never be mistaken for a wake — but it must
+    /// also not park a desktop forever, so `start()` only holds on a CONFIRMED
+    /// dark wake.
+    @Test("An unreadable capability never counts as a wake")
+    func unknownIsNeverAFullWake() async throws {
+        let smc = FakeSMC(temperature: 75)
+        let core = makeCore(smc: smc, capabilities: { nil })
+        try await core.apply(curveConfig(persists: true))
+        await core.prepareForSleep()
+        await core.tick(sleptFor: .seconds(900))
+        await smc.clearWrites()
+
+        await core.heartbeat()
+        await core.tick(sleptFor: .zero)
+        #expect(await core.sleepLatch.isAsleep, "no evidence is not evidence of a wake")
+    }
+}
+
+/// The bit test the whole gate reduces to. These constants are restated from a
+/// C enum Swift cannot see, so a typo here is a fan blasting in a closed bag.
+@Suite("PowerCapabilities — telling a dark wake from a full one")
+struct PowerCapabilityTests {
+    @Test("Video plus CPU is a full wake; CPU alone is a dark wake")
+    func theVideoBitDecides() {
+        #expect(WakeClassifier.classify(.fullWakeCapabilities) == .fullWake)
+        #expect(WakeClassifier.classify(.darkWakeCapabilities) == .darkWake)
+        #expect(WakeClassifier.classify(PowerCapabilities([.cpu])) == .darkWake)
+        #expect(WakeClassifier.classify(PowerCapabilities([.cpu, .video])) == .fullWake)
+    }
+
+    /// A docked MacBook driving an external panel with the lid shut reports the
+    /// video bit exactly like an open lid does. Keying the gate on lid state
+    /// instead would leave that machine parked under full load with only the
+    /// 104 °C ceiling between it and a thermal problem.
+    @Test("Clamshell with an external display is a full wake")
+    func clamshellWithAnExternalDisplayIsAFullWake() {
+        #expect(WakeClassifier.classify(PowerCapabilities(rawValue: 0x0F)) == .fullWake)
+    }
+
+    /// Stricter than IOKit's own `IOPMIsAUserWake`, which is literally
+    /// `caps & 0x02` and so calls the physically impossible 0x02 a user wake.
+    @Test("Nonsense readings are never a full wake")
+    func garbageIsNeverAFullWake() {
+        #expect(WakeClassifier.classify(nil) == .unknown)
+        #expect(WakeClassifier.classify(PowerCapabilities(rawValue: 0)) == .asleep)
+        #expect(WakeClassifier.classify(PowerCapabilities([.video])) == .asleep, "video without CPU is impossible")
+    }
+
+    /// The log line has to line up against `pmset -g log`'s own bracket for the
+    /// same second — that correlation is how this bug was found.
+    @Test("The description matches pmset's notation")
+    func descriptionMatchesPmset() {
+        #expect(PowerCapabilities.describe(.darkWakeCapabilities) == "0x79 [CDNPB]")
+        #expect(PowerCapabilities.describe(nil) == "capabilities unreadable")
+        #expect(PowerCapabilities.describe(PowerCapabilities([.cpu])) == "0x01 [C]")
     }
 }
