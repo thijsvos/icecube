@@ -1944,11 +1944,19 @@ struct SensorAdmissionCharacterizationTests {
     /// The existing `deadSensorsDoNotCauseReprobeLoop` does not pin this: it
     /// asserts only that dead keys cause no re-probe loop, which stays true when
     /// they are admitted, because an implausible reading is not counted missing.
-    @Test("A key that exists but never reads plausibly is refused admission")
-    func implausibleCandidateIsNotAdmitted() async throws {
+    /// THE RULE THE MIGRATION REPLACED, kept as a test so the new behaviour is
+    /// written down rather than merely true. A key reading the 6.70 °C sentinel
+    /// is now ADMITTED: whether the Mac has a sensor is a property of the
+    /// hardware, and a power-gated cluster answering with a frozen constant is
+    /// not evidence about the hardware at all. Plausibility keeps its job on
+    /// the VALUE path, where a sentinel still cannot reach a curve, a chart or
+    /// the ceiling — asserted below rather than assumed.
+    @Test("A key reading the gated sentinel is admitted, and its value still goes nowhere")
+    func gatedSentinelIsAdmittedButNeverUsed() async throws {
         let smc = FakeSMC()
-        // Present in the curated map, populated only on bigger dies — the shape
-        // that made 8 of 20 curated keys unusable on the owner's Mac14,9.
+        // Present in the curated map and gated at probe time — the shape that
+        // left the owner's daemon on 8 of 20 keys, its only silicon input the
+        // two GPU dies.
         for key in ["Tp05", "Tp09", "Tp0D"] {
             await smc.setTemperature(6.70, key: key)
         }
@@ -1958,9 +1966,19 @@ struct SensorAdmissionCharacterizationTests {
 
         await core.tick(sleptFor: .zero)
 
+        let events = await core.currentStatus().recentEvents
         #expect(
-            await resolvedCounts(core.currentStatus().recentEvents) == [2],
-            "only Tp01 and Tg0f read like real sensors"
+            await resolvedCounts(events) == [5],
+            "membership is existence: all five keys exist, so all five are admitted"
+        )
+        // The other half of the bargain, and the reason admitting them is safe.
+        #expect(
+            !events.contains { $0.contains("unreadable") },
+            "a sentinel is skipped for the tick, not counted as a missing sensor"
+        )
+        #expect(
+            await !smc.targetWrites(fan: 0).contains(6800),
+            "and 6.70 °C never reaches the ceiling or the curve"
         )
     }
 
@@ -2210,6 +2228,41 @@ struct SensorAdmissionCharacterizationTests {
         #expect(
             events.contains { $0.contains("sensor reads failed") },
             "and the reason is the sensors, not the watchdog: \(events)"
+        )
+    }
+}
+
+/// THE DEFECT, in one test. A die sensor that happened to be power-gated at
+/// probe time was disowned for the life of the daemon — so when that same core
+/// later ran past the ceiling, nothing was watching it.
+///
+/// Measured shape, from the owner's Mac14,9: the P-cluster answers a frozen
+/// 6.70 °C while gated, and the daemon logged `resolved 8 temperature sensors`
+/// out of 20, its only silicon input the two GPU dies. That matters more than
+/// a short list in the popover, because the 104 °C die ceiling is the one
+/// release allowed to spin the fans inside a closed lid.
+@Suite("DaemonCore — a sensor that was asleep when we looked")
+struct GatedSensorAdmissionTests {
+    @Test("A die sensor gated at probe time still protects the Mac when it heats up")
+    func gatedDieSensorStillReachesTheCeiling() async throws {
+        let smc = FakeSMC()
+        // Gated at probe time: present, answering the sentinel, useless-looking.
+        await smc.setTemperature(6.70, key: "Tp05")
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(curveConfig(persists: true))
+        await core.tick(sleptFor: .zero) // discovery runs here
+
+        // The cluster wakes and that same core runs away.
+        await smc.setTemperature(110, key: "Tp05")
+        for _ in 0 ..< 4 { // past the ceiling debounce
+            await core.heartbeat()
+            await core.tick(sleptFor: .zero)
+        }
+
+        #expect(
+            await smc.targetWrites(fan: 0).contains(6800),
+            "the ceiling has to see a core it could not read at launch"
         )
     }
 }
