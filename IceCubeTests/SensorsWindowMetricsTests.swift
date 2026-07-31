@@ -148,3 +148,75 @@ struct SensorsWindowMetricsTests {
         #expect(height(nil, screen: .nan) == 473, "and it leaves smaller windows alone")
     }
 }
+
+/// The popover has no height discipline of its own, and neither hosting mode
+/// degrades usefully when the list outgrows the screen. Measured on macOS 26.4
+/// at 193 sensors: SwiftUI's `MenuBarExtra` did not clamp at all — a 380×3113
+/// window whose bottom edge sat 1985 pt below a 1130 pt display, taking the
+/// footer with it. Ice Cube has no Dock icon, so that footer holds the only
+/// Quit; in the default configuration it leaves the screen at 29 sensors, and
+/// this Mac reports 20.
+@MainActor
+@Suite("SensorListMetrics — the popover's sensor list stays inside the screen")
+struct SensorListMetricsTests {
+    private func layout(_ count: Int, screen: CGFloat = 1130) -> SensorListMetrics.Layout {
+        SensorListMetrics.layout(sensorCount: count, availableHeight: screen)
+    }
+
+    /// A curated Mac shows its whole list, exactly, with no scroller and no
+    /// "N total" chip — the common case must look untouched.
+    @Test("A curated Mac's list fits and does not scroll")
+    func curatedListFitsExactly() {
+        let twenty = layout(20)
+        #expect(!twenty.scrolls)
+        #expect(twenty.height == SensorListMetrics.contentHeight(sensorCount: 20))
+    }
+
+    /// The case that took the Quit button off screen.
+    @Test("A Mac that enumerates its sensors scrolls instead of growing")
+    func enumeratedListScrolls() {
+        let many = layout(193)
+        #expect(many.scrolls)
+        #expect(many.height <= SensorListMetrics.maximumListHeight)
+        #expect(
+            many.height + SensorListMetrics.popoverChrome <= 1130,
+            "the whole popover has to fit the screen it hangs on"
+        )
+    }
+
+    /// `SensorStabilizer` makes the list monotone: it grows 8 → 20 rows over
+    /// ~85 s as power-gated clusters wake. Reserving from the inventory is what
+    /// stops that growth resizing the popover under the user's cursor — the
+    /// exact jump `SensorStabilizer` exists to prevent.
+    @Test("Height is reserved from the inventory, so late sensors do not resize the popover")
+    func lateSensorsDoNotResize() {
+        #expect(layout(20).height == layout(20).height)
+        let atLaunch = layout(20) // inventory known, only 8 reporting
+        let laterOn = layout(20) // all 20 reporting
+        #expect(atLaunch == laterOn, "the same inventory must give the same height throughout")
+    }
+
+    @Test("A tiny screen still yields a usable list, and a NaN one never collapses it")
+    func clampsCannotInvertOrBePoisoned() {
+        for screen in [CGFloat.zero, 100, 400, 700] {
+            #expect(layout(20, screen: screen).height >= SensorListMetrics.minimumListHeight)
+        }
+        for screen in [CGFloat.nan, .signalingNaN, .infinity] {
+            #expect(layout(50, screen: screen).height == SensorListMetrics.maximumListHeight)
+        }
+    }
+
+    /// Simulated mode is the project's demonstrable baseline, so it must look
+    /// identical before and after this change.
+    @Test("Simulated mode's six sensors are unchanged")
+    func simulatedModeIsUntouched() {
+        let six = layout(6)
+        #expect(!six.scrolls)
+        #expect(six.height == SensorListMetrics.minimumListHeight)
+    }
+
+    @Test("No sensors reserves nothing rather than a floor of blank space")
+    func emptyListReservesNothing() {
+        #expect(SensorListMetrics.contentHeight(sensorCount: 0) == 0)
+    }
+}
