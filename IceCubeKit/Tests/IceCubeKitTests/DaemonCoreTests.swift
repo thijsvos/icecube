@@ -31,6 +31,9 @@ private actor FakeSMC: SMCControlPort {
     private var gateKey: String?
     private var gateWaiters: [CheckedContinuation<Void, Never>] = []
     private var gateIsOpen = false
+    /// Per-key scripted read results, consumed one per read and then falling
+    /// back to `values`. `nil` throws a transport failure.
+    private var scripted: [String: [Double?]] = [:]
 
     /// - Parameter deadSensors: keys that EXIST but never return a plausible
     ///   value — the shape a real Mac has, because a curated map is
@@ -64,6 +67,16 @@ private actor FakeSMC: SMCControlPort {
     func readDouble(_ key: String) async throws -> Double {
         if unreadable.contains(key) {
             throw IceCubeError.smcCallFailed(key: key, kernReturn: -1)
+        }
+        // A scripted result outranks the steady-state value, once each. This is
+        // the only way to express the thing admission-by-read has to survive:
+        // "this read misses, the NEXT one is fine". `nil` throws a transport
+        // failure; a number is returned as-is, plausible or not.
+        if var queue = scripted[key], !queue.isEmpty {
+            let next = queue.removeFirst()
+            scripted[key] = queue
+            guard let next else { throw IceCubeError.smcCallFailed(key: key, kernReturn: -1) }
+            return next
         }
         guard let value = values[key] else { throw IceCubeError.smcKeyNotFound(key: key) }
         return value
@@ -149,6 +162,16 @@ private actor FakeSMC: SMCControlPort {
 
     func setTemperature(_ celsius: Double, key: String = "Tp01") {
         values[key] = celsius
+    }
+
+    /// Scripts the next reads of `key`: each entry is consumed by one read,
+    /// then the steady-state value takes over again. `nil` means that read
+    /// throws a transport failure (NOT `keyNotFound` — the key still exists).
+    ///
+    /// Needed because admission-by-read is a rule about *sequences* of reads,
+    /// and a fake that answers every read identically cannot express one.
+    func scriptReads(_ key: String, _ results: [Double?]) {
+        scripted[key] = results
     }
 
     func modeWrites(fan: Int) -> [Double] {
@@ -1811,5 +1834,382 @@ struct PowerCapabilityTests {
         #expect(PowerCapabilities.describe(.darkWakeCapabilities) == "0x79 [CDNPB]")
         #expect(PowerCapabilities.describe(nil) == "capabilities unreadable")
         #expect(PowerCapabilities.describe(PowerCapabilities([.cpu])) == "0x01 [C]")
+    }
+}
+
+// MARK: - Sensor admission (characterization)
+
+/// The resolved-set sizes the daemon announced, oldest first.
+///
+/// `record("resolved N temperature sensors (model …)")` is the daemon's only
+/// public statement about which sensors it decided it has, so it is the natural
+/// probe for every admission rule: how many were admitted, and how many times
+/// the question was asked. Parsed rather than matched as a literal so a test
+/// failure reports the actual number.
+private func resolvedCounts(_ events: [String]) -> [Int] {
+    events.compactMap { event in
+        guard event.hasPrefix("resolved ") else { return nil }
+        return Int(event.dropFirst("resolved ".count).prefix { $0.isNumber })
+    }
+}
+
+/// CHARACTERIZATION, not specification. These tests pin what
+/// `DaemonCore.readTemperatures()` does **today**, so that migrating admission
+/// from a read to `hasKey` existence (the fix already shipped app-side as
+/// `SensorAdmission`) is a change with a visible blast radius instead of a
+/// silent one.
+///
+/// Why they exist: a mutation run over these rules found that only TWO of them
+/// — the empty probe and the die requirement — were pinned by anything. The
+/// second-chance read, the plausibility gate at admission, the 120 °C clamp,
+/// implausible-is-not-missing, the partial-failure re-probe and the
+/// empty-readings throw could each be deleted outright with the whole suite
+/// still green. A green `swift test` was therefore not evidence that admission
+/// behaved the same before and after. Every test below has been re-run against
+/// a deliberately broken `DaemonCore` and observed to FAIL, on the assertion
+/// named in the migration notes; the rule each one pins is in its doc comment.
+///
+/// The numbers in these tests are field measurements, not invention: on a
+/// Mac14,9 a power-gated CPU cluster returns a frozen firmware sentinel —
+/// exactly 6.70 °C and 4.63 °C, a whole cluster at a time, with the P-cluster
+/// gated at ~67 % of idle instants — and an absent key throws instead. That
+/// asymmetry is the entire reason existence is a safer admission signal than a
+/// value, and it is why the sentinel appears here as a literal.
+@Suite("DaemonCore — the sensor admission rules (characterization)")
+struct SensorAdmissionCharacterizationTests {
+    // MARK: RULE 1 — a candidate gets a second chance before being written off
+
+    /// RULE 1 (`DaemonCore.swift:1550-1553`), transport half. A candidate whose
+    /// FIRST probe read throws must be re-read once before being disowned.
+    ///
+    /// Without it, discovery resolves whatever the SMC happened to feel like
+    /// answering in that millisecond — field-observed as the same Mac resolving
+    /// 20, then 16, then 12, then 2 sensors — and the loser is disowned for the
+    /// life of the daemon, because the set is cached.
+    @Test("A candidate whose first probe read throws is still admitted on the retry")
+    func transientMissAtAdmissionGetsASecondChance() async throws {
+        let smc = FakeSMC() // Tp01 55 °C, Tg0f 50 °C — both real, both die-class
+        await smc.scriptReads("Tg0f", [nil]) // one missed read, then normal
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(manualConfig())
+
+        await core.tick(sleptFor: .zero)
+
+        #expect(
+            await resolvedCounts(core.currentStatus().recentEvents) == [2],
+            "one unlucky read must not cost a working sensor for the whole session"
+        )
+    }
+
+    /// RULE 1, value half (`DaemonCore.swift:1551`). The measured case: a
+    /// power-gated cluster answers with the frozen 6.70 °C sentinel rather than
+    /// failing, so the retry is reached through the plausibility test, not
+    /// through the `nil`. Deleting only `|| !isPlausibleTemperature(...)` leaves
+    /// the test above green and this one red.
+    ///
+    /// This is also the test that documents WHY the migration is worth doing:
+    /// the retry is what the field data says does not work (an immediate
+    /// re-read recovered 0 of 18 misses, and so did +5 ms and +50 ms, because a
+    /// gated key does not refresh at all). It is pinned so that replacing it
+    /// with existence is a deliberate act.
+    @Test("A candidate returning the power-gate sentinel on its first probe read is still admitted on the retry")
+    func gatedSentinelAtAdmissionGetsASecondChance() async throws {
+        let smc = FakeSMC()
+        await smc.scriptReads("Tg0f", [6.70]) // the frozen sentinel, then 50 °C
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(manualConfig())
+
+        await core.tick(sleptFor: .zero)
+
+        #expect(
+            await resolvedCounts(core.currentStatus().recentEvents) == [2],
+            "a sentinel on the first read is a gated cluster, not a dead sensor"
+        )
+    }
+
+    // MARK: RULE 2 — admission requires a plausible reading, not mere existence
+
+    /// RULE 2 (`DaemonCore.swift:1554`). A key that exists but never reads
+    /// plausibly is refused admission — permanently, because the set is cached.
+    ///
+    /// This is the rule the migration REPLACES, so its current behaviour has to
+    /// be written down before it changes. Today an M2 Pro's unpopulated P-core
+    /// keys (they exist; an M2 Max would populate them) are kept out of the set
+    /// entirely. After the migration they will be admitted and simply read
+    /// nothing useful, which is the point — plausibility keeps its job on the
+    /// VALUE path (rules 5 and 6), where a sentinel still cannot reach a curve.
+    ///
+    /// The existing `deadSensorsDoNotCauseReprobeLoop` does not pin this: it
+    /// asserts only that dead keys cause no re-probe loop, which stays true when
+    /// they are admitted, because an implausible reading is not counted missing.
+    @Test("A key that exists but never reads plausibly is refused admission")
+    func implausibleCandidateIsNotAdmitted() async throws {
+        let smc = FakeSMC()
+        // Present in the curated map, populated only on bigger dies — the shape
+        // that made 8 of 20 curated keys unusable on the owner's Mac14,9.
+        for key in ["Tp05", "Tp09", "Tp0D"] {
+            await smc.setTemperature(6.70, key: key)
+        }
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(manualConfig())
+
+        await core.tick(sleptFor: .zero)
+
+        #expect(
+            await resolvedCounts(core.currentStatus().recentEvents) == [2],
+            "only Tp01 and Tg0f read like real sensors"
+        )
+    }
+
+    // MARK: RULE 3 — an empty probe is UNRESOLVED, never cached as an answer
+
+    /// RULE 3 (`DaemonCore.swift:1575-1581`). Caching `[]` is non-nil, so it is
+    /// never retried: one failed lazy reopen — and the first probe runs right
+    /// after `start()`'s `port.reset()` closed the connection — used to blind
+    /// the daemon for its entire lifetime, silently, on supported hardware.
+    ///
+    /// Note `!present.isEmpty` in that guard is *redundant against `hasDie`*
+    /// (a die key implies a non-empty set), so the rule cannot be mutated by
+    /// deleting that clause. The mutation that expresses it is
+    /// `guard present.isEmpty || hasDie else { throw }` — i.e. let an empty
+    /// probe through to the cache while leaving rule 4 intact.
+    @Test("An empty sensor probe is refused and re-probed, never cached as an answer")
+    func emptyProbeIsRefusedAndRetried() async throws {
+        let smc = FakeSMC()
+        await smc.breakRead("Tp01")
+        await smc.breakRead("Tg0f")
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(manualConfig())
+
+        await core.tick(sleptFor: .zero)
+        let whileBlind = await core.currentStatus().recentEvents
+        #expect(
+            whileBlind.contains { $0.contains("sensor probe unusable (0 found") },
+            "an empty probe is refused out loud: \(whileBlind)"
+        )
+        #expect(resolvedCounts(whileBlind).isEmpty, "and nothing at all was cached")
+
+        // The connection comes back. The very next probe must see the sensors,
+        // which only happens if the empty result was left unresolved.
+        await smc.fixRead("Tp01")
+        await smc.fixRead("Tg0f")
+        await core.heartbeat()
+        await core.tick(sleptFor: .zero)
+
+        #expect(
+            await resolvedCounts(core.currentStatus().recentEvents) == [2],
+            "the daemon re-probed once the SMC answered again"
+        )
+    }
+
+    // MARK: RULE 4 — a set with no die sensor is unresolved
+
+    /// RULE 4 (`DaemonCore.swift:1574`). The safety-relevant half.
+    /// `hottestDieCelsius` is what BOTH the curve and the guardian run on, so a
+    /// set of battery and airflow sensors leaves the daemon unable to control or
+    /// protect anything while looking perfectly healthy. Observed for real: one
+    /// probe resolved 2 sensors on a machine that normally reports 12.
+    ///
+    /// This is the rule that keeps the migration honest — the daemon is never
+    /// fully blind, because a die-less probe is re-run rather than believed.
+    @Test("A probe that finds sensors but no die sensor is refused, and re-probed until one answers")
+    func dielessProbeIsRefusedAndRetried() async throws {
+        let smc = FakeSMC()
+        await smc.breakRead("Tp01") // both die sensors are out…
+        await smc.breakRead("Tg0f")
+        await smc.setTemperature(35, key: "TB1T") // …but the battery reads fine
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(manualConfig())
+
+        await core.tick(sleptFor: .zero)
+        let dieless = await core.currentStatus().recentEvents
+        #expect(
+            dieless.contains { $0.contains("sensor probe unusable (1 found, die: false") },
+            "a die-less set is not an answer: \(dieless)"
+        )
+        #expect(resolvedCounts(dieless).isEmpty, "and it was not cached")
+
+        await smc.fixRead("Tp01")
+        await smc.fixRead("Tg0f")
+        await core.heartbeat()
+        await core.tick(sleptFor: .zero)
+
+        #expect(
+            await resolvedCounts(core.currentStatus().recentEvents) == [3],
+            "with a die sensor answering, the whole set resolves"
+        )
+    }
+
+    // MARK: RULE 5 — on the value path, over-range is CLAMPED, never discarded
+
+    /// RULE 5a (`DaemonCore.swift:1603-1606`). The plausibility filter caps at
+    /// 120 °C, so before the clamp a sensor reporting 121 °C vanished from the
+    /// array entirely — the single hottest point in the machine silently stopped
+    /// counting toward the ceiling at exactly the moment it mattered most.
+    ///
+    /// Pinned through the ceiling rather than through the reading, because the
+    /// reading does not cross XPC (`HelperStatus` carries no temperatures) and
+    /// the ceiling is the consequence anyone would care about: this is the ONE
+    /// ungated release allowed to spin fans inside a closed laptop, which the
+    /// dark-wake gate leans on.
+    ///
+    /// `ceilingForcesMaxCooling` uses 110 °C — plausible — so it never touches
+    /// this branch, which is why deleting the clamp left the suite green.
+    @Test("A sensor reading past the plausibility ceiling is clamped to 120 °C, never dropped")
+    func overRangeReadingIsClampedNotDiscarded() async throws {
+        let smc = FakeSMC() // Tp01 55 °C, Tg0f 50 °C
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(manualConfig(2500)) // the user wants quiet
+        await core.tick(sleptFor: .zero) // admits both while they read sanely
+        #expect(await resolvedCounts(core.currentStatus().recentEvents) == [2])
+        await smc.clearWrites()
+
+        // Now the die runs off the top of the scale. Tg0f stays at 50 °C, so if
+        // Tp01 is DISCARDED rather than clamped the daemon sees a cool machine.
+        await smc.setTemperature(130)
+        for _ in 0 ..< 4 { // ceilingDebounceTicks is 3
+            await core.heartbeat()
+            await core.tick(sleptFor: .zero)
+        }
+
+        #expect(
+            await smc.targetWrites(fan: 0).contains(6800),
+            "the hottest point in the machine must still reach the ceiling"
+        )
+    }
+
+    /// RULE 5b (`DaemonCore.swift:1593-1612`). An admitted member that reads
+    /// implausibly has GLITCHED for this tick, not gone away: it stays in the
+    /// set, is skipped for this evaluation, and is NOT counted toward the
+    /// partial-failure threshold. Counting it would re-probe the whole map every
+    /// couple of ticks on a machine whose clusters gate 67 % of the time.
+    ///
+    /// Uses the real shape: four sensors admitted while awake, then a whole
+    /// cluster freezes at the sentinel. `deadSensorsDoNotCauseReprobeLoop` looks
+    /// similar but cannot pin this — its dead keys are refused at admission by
+    /// rule 2, so they are never in the set and can never be counted missing.
+    @Test("An admitted sensor that reads implausibly is skipped for the tick, not counted as missing")
+    func implausibleReadingIsNotAMissingSensor() async throws {
+        let smc = FakeSMC()
+        await smc.setTemperature(55, key: "Tp05")
+        await smc.setTemperature(55, key: "Tp09")
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(manualConfig())
+        await core.tick(sleptFor: .zero)
+        #expect(
+            await resolvedCounts(core.currentStatus().recentEvents) == [4],
+            "all four read plausibly at probe time"
+        )
+
+        // The P-cluster gates: two of the four freeze at the firmware sentinel.
+        await smc.setTemperature(6.70, key: "Tp05")
+        await smc.setTemperature(4.63, key: "Tp09")
+        for _ in 0 ..< 3 {
+            await core.heartbeat()
+            await core.tick(sleptFor: .zero)
+        }
+
+        let events = await core.currentStatus().recentEvents
+        #expect(
+            events.contains { $0.contains("unreadable") } == false,
+            "a gated cluster is not a read failure: \(events)"
+        )
+        #expect(
+            resolvedCounts(events) == [4],
+            "and the set is never re-probed, so it never shrinks: \(events)"
+        )
+    }
+
+    // MARK: RULE 6 — the counterweight: genuine partial blindness DOES re-probe
+
+    /// RULE 6 (`DaemonCore.swift:1626-1629`), and the reason rule 5b is a
+    /// distinction rather than a blanket "never re-probe". Losing more than a
+    /// third of the admitted set to genuine READ FAILURES is a health event:
+    /// `readTemperatures` used to throw only when EVERY sensor failed, so losing
+    /// just the hottest one left the ceiling evaluating a set that no longer
+    /// contained it, with no counter, no log line and no change in
+    /// `HelperStatus`.
+    ///
+    /// Found while reading, not in the brief's list of five: rule 5b and this
+    /// one are two halves of the same `if`, so a migration that touches either
+    /// can silently disable the other. `deadSensorsDoNotCauseReprobeLoop`
+    /// asserts this event is ABSENT, so deleting the re-probe keeps it green.
+    @Test("Losing more than a third of the admitted set to read failures re-probes it")
+    func partialSensorLossIsAHealthEvent() async throws {
+        let smc = FakeSMC()
+        await smc.setTemperature(55, key: "Tp05")
+        await smc.setTemperature(55, key: "Tp09")
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(manualConfig())
+        await core.tick(sleptFor: .zero)
+        #expect(await resolvedCounts(core.currentStatus().recentEvents) == [4])
+
+        // Two of four stop answering ENTIRELY — a transport fault, not a glitch.
+        await smc.breakRead("Tp05")
+        await smc.breakRead("Tp09")
+        await core.heartbeat()
+        await core.tick(sleptFor: .zero) // notices the loss
+        await core.heartbeat()
+        await core.tick(sleptFor: .zero) // and re-resolves
+
+        let events = await core.currentStatus().recentEvents
+        #expect(
+            events.contains { $0.contains("sensors unreadable — re-probing") },
+            "partial blindness has to be said out loud: \(events)"
+        )
+        #expect(
+            resolvedCounts(events) == [4, 2],
+            "and the set is re-probed, resolving to the two that still answer: \(events)"
+        )
+    }
+
+    // MARK: RULE 7 — a tick with no usable reading is BLINDNESS, not "no sensors"
+
+    /// RULE 7 (`DaemonCore.swift:1614-1616`). When every admitted sensor reads
+    /// implausibly the tick has no temperature at all, and `readTemperatures`
+    /// THROWS rather than returning `[]`.
+    ///
+    /// The difference is a safety invariant, not a style choice:
+    /// `SafetyMonitor.evaluate` counts `temperatures == nil` as a failed read
+    /// and reverts after `sensorFailureLimit` consecutive ticks ("flying blind
+    /// while controlling is forbidden"), while `[]` RESETS that counter. So a
+    /// daemon that returned an empty array would hold manual control for ever on
+    /// a machine it cannot see — with the ceiling permanently inert, since an
+    /// empty set is never over any limit.
+    ///
+    /// Also found while reading. It sits between rules 5 and 6 in the same
+    /// function and is exactly the kind of thing a migration to existence-based
+    /// admission invites someone to "simplify".
+    @Test("A tick where every admitted sensor reads implausibly counts as blindness, not as an empty set")
+    func aTickWithNoUsableReadingIsBlindness() async throws {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(manualConfig())
+        await core.tick(sleptFor: .zero) // admitted while healthy
+        #expect(await core.config.mode == .manual)
+
+        // Both clusters gate at once: the set is intact, every member is junk.
+        await smc.setTemperature(6.70, key: "Tp01")
+        await smc.setTemperature(4.63, key: "Tg0f")
+        for _ in 0 ..< 5 { // sensorFailureLimit is 3
+            await core.heartbeat() // the app is alive: only blindness can revert
+            await core.tick(sleptFor: .zero)
+        }
+
+        #expect(await core.config.mode == .auto, "manual control must not survive going blind")
+        let events = await core.currentStatus().recentEvents
+        #expect(
+            events.contains { $0.contains("sensor reads failed") },
+            "and the reason is the sensors, not the watchdog: \(events)"
+        )
     }
 }
