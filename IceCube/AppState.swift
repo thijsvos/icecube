@@ -446,7 +446,12 @@ final class AppState: PopoverLifecycleObserving {
     /// Not observed: only ``sensorRowCount`` is read from the scene body, and
     /// this feeds it. 0 until the fetch lands, which the `max` at the call site
     /// absorbs.
-    @ObservationIgnored private var sensorInventoryCount = 0
+    /// Observed, because the popover reserves its sensor list's height from it
+    /// (``SensorListMetrics``). The warning on ``sensorRowCount`` does not apply
+    /// here: nothing reads this from `App.body`, and the popover's body already
+    /// re-renders every tick from `temperatures`, so the one invalidation this
+    /// adds per launch costs nothing.
+    private(set) var sensorInventoryCount = 0
 
     /// The menu bar readout, e.g. `"62°"`; `"--°"` before the first reading.
     /// Uses the hysteresis-stabilized `hottest` so label and badge agree,

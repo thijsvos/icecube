@@ -165,12 +165,46 @@ struct PopoverView: View {
     }
 
     /// The full per-sensor list, grouped as a titled card.
+    /// The full per-sensor list, grouped as a titled card.
+    ///
+    /// The height is **reserved**, not measured: see ``SensorListMetrics``. On
+    /// a curated Mac it is exactly the list; on a Mac whose sensors are
+    /// enumerated rather than curated it is the cap, and the region scrolls
+    /// instead of pushing the footer — and the app's only Quit — off screen.
     private var temperatureListCard: some View {
-        VStack(alignment: .leading, spacing: Theme.Metrics.cardContentSpacing) {
-            Text("Sensors").premiumSectionLabel()
+        // The inventory is what this Mac HAS; the published rows are what is
+        // reporting this second. `max` covers the moment before the inventory
+        // lands, and the enumerating path where the two are the same thing.
+        let count = max(state.sensorInventoryCount, state.temperatures.count)
+        let layout = SensorListMetrics.layout(sensorCount: count, availableHeight: availableHeight)
+        return VStack(alignment: .leading, spacing: Theme.Metrics.cardContentSpacing) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Sensors").premiumSectionLabel()
+                Spacer()
+                // Only when the region cannot hold them all: the count is the
+                // one fact that explains why you are scrolling, and the
+                // footer's Sensors… button is already the see-everything
+                // affordance. Derived from the inventory, so it is decided once
+                // per launch and cannot blink in and out.
+                if layout.scrolls {
+                    Text("\(count) total").premiumSectionLabel()
+                }
+            }
             temperatureListSection
+                .frame(height: layout.height, alignment: .top)
         }
         .popoverCard()
+    }
+
+    /// The height the popover has to live in. `visibleFrame` has already
+    /// excluded the menu bar and the Dock.
+    ///
+    /// Read per render rather than captured once — it is a cheap lookup and the
+    /// display can change under an open popover. No screen at all (headless, or
+    /// mid display change) falls back to the absolute cap rather than the
+    /// floor, the same choice `IceCubeApp` makes for the Sensors window.
+    private var availableHeight: CGFloat {
+        NSScreen.main?.visibleFrame.height ?? .infinity
     }
 
     // MARK: - Header
@@ -326,26 +360,37 @@ struct PopoverView: View {
 
     /// The full per-sensor list — opt-in for people who want every reading in
     /// the menu (the Sensors window always has the exhaustive view).
+    ///
+    /// Scrolls inside a height its caller reserves. The rows themselves are
+    /// unchanged: discovery order, never sorted by temperature, the hottest
+    /// emphasized in place — sorting is what made the whole list reshuffle
+    /// every second.
     private var temperatureListSection: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            ForEach(state.temperatures) { reading in
-                let isHottest = reading.id == state.hottest?.id
-                HStack {
-                    Text(reading.label)
-                        .font(.caption.weight(isHottest ? .medium : .regular))
-                        .foregroundStyle(isHottest ? HierarchicalShapeStyle.primary : .secondary)
-                    Spacer()
-                    // Each value tinted by its own heat — the list reads as a
-                    // subtle thermal map instead of flat gray with one orange row.
-                    Text(state.temperatureUnit.text(reading.celsius))
-                        .font(.caption.weight(.medium))
-                        .monospacedDigit()
-                        .foregroundStyle(Theme.temperatureColor(reading.celsius))
-                        .contentTransition(.numericText())
-                        .animation(readingAnimation, value: state.temperatureUnit.text(reading.celsius))
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: SensorListMetrics.rowSpacing) {
+                ForEach(state.temperatures) { reading in
+                    let isHottest = reading.id == state.hottest?.id
+                    HStack {
+                        Text(reading.label)
+                            .font(.caption.weight(isHottest ? .medium : .regular))
+                            .foregroundStyle(isHottest ? HierarchicalShapeStyle.primary : .secondary)
+                        Spacer()
+                        // Each value tinted by its own heat — the list reads as a
+                        // subtle thermal map instead of flat gray with one orange row.
+                        Text(state.temperatureUnit.text(reading.celsius))
+                            .font(.caption.weight(.medium))
+                            .monospacedDigit()
+                            .foregroundStyle(Theme.temperatureColor(reading.celsius))
+                            .contentTransition(.numericText())
+                            .animation(readingAnimation, value: state.temperatureUnit.text(reading.celsius))
+                    }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        // Without this, a list shorter than its reserved height rubber-bands on
+        // a trackpad flick — motion in the one card meant to be still.
+        .scrollBounceBehavior(.basedOnSize)
     }
 
     // MARK: - Waiting / error states

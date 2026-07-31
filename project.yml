@@ -134,6 +134,7 @@ targets:
       - IceCube/WindowOpener.swift
       - IceCube/FanControlStatus.swift
       - IceCube/SensorsWindowMetrics.swift
+      - IceCube/SensorListMetrics.swift
     dependencies:
       - package: IceCubeKit
     settings:

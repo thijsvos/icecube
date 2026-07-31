@@ -67,6 +67,28 @@ enum SensorAdmission {
         }
     }
 
+    /// The daemon's variant of the same rule, against the only probe
+    /// ``SMCControlPort`` can perform.
+    ///
+    /// `DaemonCore` has no key-info call — `SMCWritePort` is a deliberately
+    /// minimal write surface and must not grow one — so it establishes
+    /// existence from `readDouble`'s ERROR (`smcKeyNotFound` = this model has
+    /// no such key; `smcDecodingFailed` = the key exists but its type carries
+    /// no temperature) and discards the number. A value that decoded at all is
+    /// proof of what ``carriesTemperature`` checks on the app side.
+    ///
+    /// It exists so both sides state membership in ONE place and, above all, in
+    /// ONE order: the candidate list's. The daemon's caller holds a `Set`, and
+    /// Swift's set iteration order is per-process randomized — deriving the
+    /// sensor order from it would trade the old per-launch lottery for a new
+    /// one, in the log line and in `hottestDieCelsius`'s tie-breaking alike.
+    static func admit(
+        candidates: [SMCKeyMaps.SensorDescriptor],
+        presentKeys: Set<String>
+    ) -> [SMCKeyMaps.SensorDescriptor] {
+        candidates.filter { presentKeys.contains($0.key) }
+    }
+
     /// Whether a key of this wire type can carry a temperature we can decode.
     ///
     /// Exhaustive on purpose: when `SMCDataType` grows a case — an Intel port

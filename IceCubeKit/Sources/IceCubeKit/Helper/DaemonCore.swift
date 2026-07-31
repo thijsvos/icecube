@@ -1464,6 +1464,47 @@ public actor DaemonCore {
     /// the connection and the first read after it is the one most likely to
     /// miss — the same hazard `hottestDieRetrying()` already exists to absorb
     /// for temperatures, which the fan path never got.
+    /// Whether this Mac HAS `key` — the daemon's half of ``SensorAdmission``.
+    ///
+    /// Deliberately NOT `port.hasKey`: that is `(try? keyInfo) != nil`, which
+    /// collapses "the firmware says there is no such key" into the same `false`
+    /// as "the call failed", and the empty-probe rule below exists precisely
+    /// because those two are different facts — one is a property of the model,
+    /// the other is a connection that `start()`'s `port.reset()` just closed.
+    /// `hasKey` also reports no wire type, so it cannot refuse a key that
+    /// exists but decodes to nothing; such a key would throw on every tick,
+    /// count as missing on every tick, and re-trip the partial-failure re-probe
+    /// forever. That is where the old dead-key loop hazard would have moved.
+    ///
+    /// One read answers both, in its error. **The value is discarded.** Looking
+    /// at it is what made discovery a lottery.
+    private func probeExists(_ key: String, retryBudget: inout Int) async -> Bool {
+        while true {
+            do {
+                _ = try await port.readDouble(key)
+                return true // it answered with a number; that is all we asked
+            } catch IceCubeError.smcKeyNotFound {
+                return false // a stable property of this model
+            } catch IceCubeError.smcDecodingFailed {
+                return false // exists, but carries no temperature we can decode
+            } catch {
+                // Transport failure: not an answer about the hardware. Retry —
+                // the one thing a retry was ever good for here — and once the
+                // budget is gone leave the key out and let the empty-probe and
+                // die-sensor rules judge the truncated set. The next probe
+                // reconsiders it.
+                guard retryBudget > 0 else { return false }
+                retryBudget -= 1
+                await sleep(.milliseconds(60))
+            }
+        }
+    }
+
+    /// Transport retries shared by one whole discovery pass. Three, matching
+    /// ``readRetries``; bounded so probing the fallback superset on a dead
+    /// connection costs milliseconds rather than most of a tick.
+    private static let probeRetryBudget = 3
+
     private func readOptional(_ key: String) async throws -> Double? {
         for attempt in 0 ..< Self.readRetries {
             do {
@@ -1526,34 +1567,37 @@ public actor DaemonCore {
             let model = HostInfo.modelIdentifier()
             let candidates = SMCKeyMaps.curatedSensors(forModel: model)
                 ?? SMCKeyMaps.fallbackCandidateSensors
-            // Admission requires a plausible first READ, not mere existence —
-            // the same rule SystemSMCProvider.sensorDescriptors() uses, and for
-            // the same reason. A curated map is per *generation*, but a given
-            // machine populates only part of it (an M2 Pro has fewer P-cores
-            // than an M2 Max, most laptops have one battery). Those keys exist,
-            // so `hasKey` admits them, but they never return a real temperature.
+            // Membership comes from key EXISTENCE, never from a reading — the
+            // same rule the app side uses (`SensorAdmission`), for the same
+            // measured reason. On Apple Silicon a power-gated CPU cluster
+            // returns a frozen firmware sentinel (Mac14,9: exactly 6.70 °C and
+            // 4.63 °C, a whole cluster at a time, P-cluster gated at 66.9 % of
+            // idle instants), so admitting on a plausible read disowned every
+            // P-core for the life of the daemon. The owner's daemon logged
+            // `resolved 8 temperature sensors` — 8 of 20, its only silicon
+            // input the two GPU dies, while the 104 °C die ceiling is the one
+            // release allowed to spin fans inside a closed lid. Retrying cannot
+            // fix it: an immediate retry recovered 0 of 18 misses, and so did
+            // +5 ms and +50 ms, because the key is not failing — it is
+            // answering with a lie. Gate episodes last 1.1–84.8 s; a 2 s tick
+            // cannot wait one out.
             //
-            // Admitting them was harmless while nothing counted them. Once the
-            // partial-failure check below started treating an unreadable member
-            // as a health signal, 8 of 20 permanently-dead keys tripped it on
-            // every tick: re-probe, re-admit the same dead keys, trip again —
-            // a loop that re-ran discovery ~40 SMC calls a tick, forever.
-            // Each candidate gets a SECOND chance before being written off.
-            // Admission-by-read makes the resolved set depend on *when* the
-            // probe runs, and it often runs at the worst moment — right after
-            // `port.reset()` closes the connection, or on wake. Observed in the
-            // field: probes resolving 20, then 16, then 12, then 2 sensors on
-            // the same Mac. A transient miss must not permanently disown a
-            // working sensor.
-            var present: [String] = []
-            for sensor in candidates {
-                var value = try? await port.readDouble(sensor.key)
-                if value == nil || !SMCKeyMaps.isPlausibleTemperature(value ?? 0) {
-                    value = try? await port.readDouble(sensor.key)
-                }
-                guard let value, SMCKeyMaps.isPlausibleTemperature(value) else { continue }
-                present.append(sensor.key)
+            // The probe is a READ WHOSE VALUE IS DISCARDED. `SMCControlPort`
+            // has no key-info call and must not grow one, but `readDouble`
+            // already answers the only two questions membership turns on, in
+            // its error rather than its result — see `probeExists`.
+            var existing: Set<String> = []
+            existing.reserveCapacity(candidates.count)
+            // ONE retry budget for the whole probe, not one per candidate: a
+            // reopen after `port.reset()` is retried once, not forty times, and
+            // a dead connection cannot spend the whole 2 s tick sleeping.
+            var retryBudget = Self.probeRetryBudget
+            for sensor in candidates where await probeExists(sensor.key, retryBudget: &retryBudget) {
+                existing.insert(sensor.key)
             }
+            let present = SensorAdmission
+                .admit(candidates: candidates, presentKeys: existing)
+                .map(\.key)
             // SAFETY: an EMPTY probe is "unresolved", not "this Mac has no
             // sensors". Caching [] is non-nil, so the old code never retried —
             // and the very first probe runs right after `start()`'s
