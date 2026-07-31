@@ -47,6 +47,51 @@ final class HelperManager {
     private(set) var status: HelperStatus?
     private(set) var lastError: String?
 
+    /// A config the daemon declined because the Mac is parked for sleep, held
+    /// until it can be re-sent. In memory only: it dies with the app, is never
+    /// persisted, and never reaches `StartupPolicy`.
+    private(set) var deferredConfig: FanConfig?
+    /// When the deferral began, not when it was last retried, so the expiry
+    /// below measures the age of the user's request.
+    @ObservationIgnored private var deferredSince: ContinuousClock.Instant?
+    /// Throttles the deferral log to one line per spell. The daemon now stays
+    /// parked across dark wakes rather than unparking on the first heartbeat —
+    /// eight minutes in the owner's log where it used to be seconds — so this
+    /// 5 s loop can meet the refusal ~96 times in one closed lid where it used
+    /// to meet it once. That change is also why this path became visible at
+    /// all; it was always here, and always silent.
+    @ObservationIgnored private var hasLoggedDeferral = false
+
+    /// What to tell someone looking at the popover while a config waits for the
+    /// Mac to finish waking up.
+    ///
+    /// Deliberately not ``lastError``: nothing has failed, there is nothing for
+    /// the user to do, and `SetupModel` turns any non-empty `lastError` into
+    /// "fan control is blocked".
+    var deferralNotice: String? {
+        deferredConfig == nil ? nil : Self.wakeNotice
+    }
+
+    /// One sentence, in the register the rest of the app uses — no mode names,
+    /// no XPC, no "daemon".
+    static let wakeNotice = "Waking up — your fan settings will take effect in a moment."
+
+    /// How long fixed-RPM targets stay worth re-sending.
+    ///
+    /// Curves have no expiry: bringing a curve back whenever the Mac comes back
+    /// is the point of the app. Manual is the watchdogged mode, and
+    /// resurrecting a fan speed the user set before an overnight sleep is the
+    /// app deciding for them — the spirit of "manual is never the persisted
+    /// default", even though nothing here is persisted.
+    static let manualDeferralWindow = Duration.seconds(60)
+
+    /// Whether a config that has been waiting `waiting` is still worth sending.
+    ///
+    /// Pure and static so the rule is testable without a 60-second sleep.
+    static func shouldResend(_ config: FanConfig, waiting: Duration) -> Bool {
+        config.mode != .manual || waiting <= manualDeferralWindow
+    }
+
     /// Clears a failure the user has acknowledged, so a retry starts from a
     /// clean slate rather than re-showing the previous attempt's message.
     func clearError() {
@@ -244,6 +289,10 @@ final class HelperManager {
             await run { try await self.client.setAllAuto() }
         }
         lastAppliedConfig = nil
+        // Turning fan control off must also drop anything queued for the next
+        // wake, or the app would resurrect a config the user just switched off.
+        deferredConfig = nil
+        deferredSince = nil
         defaults.removeObject(forKey: Self.lastCurveKey)
         // Turning the feature off is a clean slate, not a pause. Leaving a
         // preference behind would mean re-enabling later silently resurrects a
@@ -342,27 +391,70 @@ final class HelperManager {
     /// Guards the once-per-session auto-resume of the last curve on launch.
     @ObservationIgnored private var didAutoResume = false
 
-    func apply(_ config: FanConfig) async {
-        let applied = await run {
+    @discardableResult
+    func apply(_ config: FanConfig) async -> CommandOutcome {
+        let outcome = await run {
             try await self.client.apply(config)
             self.lastAppliedConfig = config
+        }
+        switch outcome {
+        case .deferredUntilWake:
+            // Held, not dropped. Nothing else in the app re-sends a config
+            // after wake — `autoResumeIfNeeded` latches once per session, and
+            // `reconcileHighlight` moves the app's label to match the daemon
+            // rather than the other way round — so without this queue a curve
+            // refused during a park is simply never applied again until the
+            // user happens to click a preset.
+            if deferredConfig != config { // assigned only on change: no view churn
+                deferredConfig = config
+                deferredSince = ContinuousClock.now
+            }
+            return outcome
+        case .failed:
+            // A real rejection retires the queue: the user has been told, and
+            // re-sending something the daemon refused on its merits would loop.
+            deferredConfig = nil
+            deferredSince = nil
+            return outcome
+        case .ok:
+            deferredConfig = nil
+            deferredSince = nil
         }
         // Remember a curve profile so a later launch can resume it; a
         // deliberate Auto forgets it (the user wants macOS in control).
         //
-        // Only on SUCCESS. This write used to run unconditionally, outside the
-        // error handling above — so a curve the daemon REJECTED (bad config, or
-        // the connection dropping mid-call) was still stored, and
-        // `autoResumeIfNeeded()` silently applied it on the next launch. The
-        // user would get fan control they never successfully engaged, resumed
-        // without any interaction, after being shown an error saying it failed.
-        guard applied else { return }
+        // Only on SUCCESS, and a deferral is not success. This write used to
+        // run unconditionally, outside the error handling above — so a curve
+        // the daemon REJECTED (bad config, or the connection dropping mid-call)
+        // was still stored, and `autoResumeIfNeeded()` silently applied it on
+        // the next launch. The user would get fan control they never
+        // successfully engaged, resumed without any interaction, after being
+        // shown an error saying it failed.
         rememberPreference(for: config)
         if config.mode == .curve, let data = try? JSONEncoder().encode(config) {
             defaults.set(data, forKey: Self.lastCurveKey)
         } else if config.mode == .auto {
             defaults.removeObject(forKey: Self.lastCurveKey)
         }
+        return .ok
+    }
+
+    /// Re-sends a config the daemon declined while the Mac was parked.
+    ///
+    /// Cheap by construction: `DaemonCore.apply` refuses at its first guard
+    /// while parked, writing nothing and touching no SMC, so retrying every
+    /// 5 s through a long park costs one XPC round trip per pass.
+    private func retryDeferredApply() async {
+        guard let config = deferredConfig, let since = deferredSince else { return }
+        guard Self.shouldResend(config, waiting: ContinuousClock.now - since) else {
+            log.notice("deferred \(config.mode.rawValue, privacy: .public) config expired before the Mac woke")
+            deferredConfig = nil
+            deferredSince = nil
+            return
+        }
+        // `apply` re-queues it if the Mac is still parked and clears it when it
+        // lands, so this needs no state of its own.
+        await apply(config)
     }
 
     func applyManual(targets: [Int: Double]) async {
@@ -685,19 +777,42 @@ final class HelperManager {
         }
     }
 
-    /// Runs `operation`, funnelling any throw into `lastError`.
-    /// - Returns: whether it succeeded, so callers can avoid acting on a
-    ///   command the daemon actually rejected.
+    /// What happened to a command the app sent the daemon.
+    ///
+    /// Three outcomes rather than a Bool, because the daemon has a third
+    /// answer: it can decline a write it would be wrong to make — the Mac is
+    /// parked for sleep — without anything being broken. Collapsing that into
+    /// `false` is what put a raw NSError in the popover after a lid close.
+    enum CommandOutcome: Equatable {
+        case ok
+        /// Declined for now. Try again; say nothing alarming.
+        case deferredUntilWake
+        case failed
+    }
+
+    /// Runs `operation`, sorting a throw into "tell the user" and "try later".
     @discardableResult
-    private func run(_ operation: () async throws -> Void) async -> Bool {
+    private func run(_ operation: () async throws -> Void) async -> CommandOutcome {
         do {
             try await operation()
             lastError = nil
+            hasLoggedDeferral = false
             await refreshStatus()
-            return true
+            return .ok
+        } catch let error where WireError.isDeferredUntilWake(error) {
+            // Logged once per spell, not once per 5 s pass — the same rule the
+            // daemon's own wake logging follows, and for the same reason.
+            if !hasLoggedDeferral {
+                hasLoggedDeferral = true
+                log.notice("command deferred — the Mac is asleep; it will be re-sent on wake")
+            }
+            return .deferredUntilWake
         } catch {
+            // Now readable, because `HelperService` wires the description into
+            // userInfo before the reply. Before that it was always the
+            // "(IceCubeKit.IceCubeError error N.)" fallback.
             lastError = error.localizedDescription
-            return false
+            return .failed
         }
     }
 
@@ -742,6 +857,9 @@ final class HelperManager {
         hasSelfHealed = false
         client.heartbeat()
         await refreshStatus()
+        // Before the startup decision: what the user (or a power rule) actually
+        // asked for outranks what `StartupPolicy` would infer for them.
+        await retryDeferredApply()
         await autoResumeIfNeeded()
         await powerSourceChanged(to: powerSource.current)
         await selfTestAfterOSChangeIfNeeded()

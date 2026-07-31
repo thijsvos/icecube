@@ -74,7 +74,20 @@ public enum HelperConstants {
     ///     "setup: not shown", because from its point of view v20 was talking
     ///     to v20 and all was well. Any future daemon-only safety fix must bump
     ///     this for the same reason, protocol change or not.
-    public static let protocolVersion = "21"
+    /// v22: errors the daemon replies with now carry their own message. Every
+    ///     `IceCubeError` crossed XPC stripped of `errorDescription` — Swift
+    ///     installs that through a lazy userInfo value provider, which is not
+    ///     part of the encoded dictionary — so the app rendered "The operation
+    ///     couldn't be completed. (IceCubeKit.IceCubeError error 7.)" for all
+    ///     eight cases. `HelperService` now wires them through `WireError`,
+    ///     which also carries a stable case name so the app can tell the
+    ///     parked-for-sleep refusal from a real failure and hold the config
+    ///     until the Mac wakes instead of showing a scare. **The XPC surface is
+    ///     byte-identical**; the bump is here because the app's new
+    ///     classification only works against a daemon that sends the name, and
+    ///     a new app beside a v21 daemon would silently be the old bug — the
+    ///     rule v21 above sets out.
+    public static let protocolVersion = "22"
     /// How often the app sends a heartbeat while connected.
     public static let heartbeatInterval: TimeInterval = 5
     /// SAFETY: no heartbeat for this long → the daemon's watchdog reverts to

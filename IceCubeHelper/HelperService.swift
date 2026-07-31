@@ -79,7 +79,10 @@ final class HelperService: NSObject, NSXPCListenerDelegate, HelperProtocol, Send
                 try await core.apply(config)
                 reply(nil)
             } catch {
-                reply(error as NSError)
+                // Never `error as NSError`: that bridge carries no userInfo, so
+                // the message dies at the encode and the app renders the domain
+                // instead — "(IceCubeKit.IceCubeError error 7.)". See WireError.
+                reply(WireError.wire(error))
             }
         }
     }

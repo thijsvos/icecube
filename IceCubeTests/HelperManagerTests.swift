@@ -43,9 +43,14 @@ private final class FakeChannel: HelperChanneling {
         return reportedVersion
     }
 
+    /// Thrown by `apply` only: the daemon refusing a write while every other
+    /// call still answers, which is exactly what a parked daemon looks like.
+    /// `failure` throws from every method and cannot express that shape.
+    var applyFailure: Error?
+
     func apply(_ config: FanConfig) async throws {
-        if let failure {
-            throw failure
+        if let error = applyFailure ?? failure {
+            throw error
         }
         appliedConfigs.append(config)
     }
@@ -912,5 +917,141 @@ struct HelperManagerTests {
         )
         manager.openApprovalSettings()
         #expect(registrar.openedSettings == 1)
+    }
+}
+
+/// The daemon has a third answer besides yes and no: it can decline a write it
+/// would be wrong to make, because the Mac is parked for sleep. Collapsing that
+/// into a failure is what put `The operation couldn't be completed.
+/// (IceCubeKit.IceCubeError error 7.)` in the popover after a lid close, in
+/// orange, permanently, until an unrelated success happened to clear it.
+///
+/// Two things had to be true for that to be the whole bug, and both are pinned
+/// here: the user must not be alarmed, and the config must not be lost.
+@MainActor
+@Suite("HelperManager — a config the Mac was too asleep to take")
+struct DeferredApplyTests {
+    /// Copies of the factories in `HelperManagerTests`, which are private to
+    /// that suite. Duplicated rather than hoisted so the existing suite stays
+    /// byte-identical.
+    private func makeDefaults() -> UserDefaults {
+        let suite = "io.github.thijsvos.icecube.tests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        return defaults
+    }
+
+    private func makeManager(
+        registrar: FakeRegistrar, channel: FakeChannel, defaults: UserDefaults
+    ) -> HelperManager {
+        HelperManager(
+            service: RegistrarProxy(inner: registrar),
+            client: channel,
+            defaults: defaults,
+            blocker: { nil },
+            powerSource: FakePowerSource()
+        )
+    }
+
+    private func asleep() -> Error {
+        WireError.wire(IceCubeError.systemAsleep)
+    }
+
+    private func coldCurve() -> FanConfig {
+        FanConfig(mode: .curve, persistsWithoutApp: false, sharedCurve: .cold)
+    }
+
+    @Test("A config refused because the Mac is asleep is not shown as an error")
+    func sleepRefusalIsNotAnError() async {
+        let registrar = FakeRegistrar()
+        registrar.status = .enabled
+        let channel = FakeChannel()
+        channel.applyFailure = asleep()
+        let defaults = makeDefaults()
+        let manager = makeManager(registrar: registrar, channel: channel, defaults: defaults)
+
+        await manager.apply(coldCurve())
+
+        #expect(manager.lastError == nil, "nothing has gone wrong")
+        #expect(manager.deferralNotice != nil, "but the user is told something is pending")
+        #expect(manager.lastAppliedConfig == nil, "we did not apply it")
+        #expect(defaults.data(forKey: "lastCurveConfig") == nil, "and must not remember it as applied")
+    }
+
+    /// The functional half. Nothing else in the app re-sends a config after a
+    /// wake, so without the queue a curve refused during a park is simply never
+    /// applied — the fans keep running whatever they were on.
+    @Test("The refused config is re-sent once the Mac is awake")
+    func deferredConfigIsResentOnWake() async {
+        let registrar = FakeRegistrar()
+        registrar.status = .enabled
+        let channel = FakeChannel()
+        channel.applyFailure = asleep()
+        let manager = makeManager(registrar: registrar, channel: channel, defaults: makeDefaults())
+
+        await manager.apply(coldCurve())
+        #expect(channel.appliedConfigs.isEmpty)
+
+        channel.applyFailure = nil // the Mac wakes
+        await manager.maintainOnce()
+
+        #expect(channel.appliedConfigs.last?.sharedCurve == FanCurve.cold, "re-sent without being asked")
+        #expect(manager.deferralNotice == nil, "and the notice clears itself")
+        #expect(manager.lastAppliedConfig != nil)
+    }
+
+    @Test("A genuine failure is still reported, and never re-sent behind the user's back")
+    func realFailuresAreNotDeferred() async {
+        let registrar = FakeRegistrar()
+        registrar.status = .enabled
+        let channel = FakeChannel()
+        channel.applyFailure = WireError.wire(IceCubeError.smcKeyNotFound(key: "F0Md"))
+        let manager = makeManager(registrar: registrar, channel: channel, defaults: makeDefaults())
+
+        await manager.apply(coldCurve())
+
+        #expect(manager.lastError != nil, "a real rejection is the user's business")
+        #expect(manager.deferralNotice == nil, "and is not queued for a retry loop")
+        #expect(manager.deferredConfig == nil)
+    }
+
+    /// Now that the message survives the wire, this is what the user actually
+    /// reads — so it must not name a key, a mode, or a module.
+    @Test("A reported failure reads as a sentence, not as a type name")
+    func reportedFailuresAreReadable() async {
+        let registrar = FakeRegistrar()
+        registrar.status = .enabled
+        let channel = FakeChannel()
+        channel.applyFailure = WireError.wire(IceCubeError.smcKeyNotFound(key: "F0Md"))
+        let manager = makeManager(registrar: registrar, channel: channel, defaults: makeDefaults())
+
+        await manager.apply(coldCurve())
+
+        let message = manager.lastError ?? ""
+        #expect(message == IceCubeError.smcKeyNotFound(key: "F0Md").errorDescription)
+        #expect(!message.contains("IceCubeKit"), "the exact leak from the owner's screenshot")
+        #expect(!message.contains("couldn’t be completed"))
+    }
+
+    /// Curves come back whenever the Mac does — that is the app. A fixed RPM
+    /// set before an overnight sleep is a decision that has expired, and
+    /// resurrecting it is the app choosing manual control on the user's behalf.
+    @Test("A deferred config is re-sent, unless it is stale manual control")
+    func manualDeferralsExpire() {
+        let curve = FanConfig(mode: .curve, persistsWithoutApp: false, sharedCurve: .cold)
+        let manual = FanConfig(mode: .manual, manualTargets: [0: 4000])
+        #expect(HelperManager.shouldResend(curve, waiting: .seconds(60)))
+        #expect(HelperManager.shouldResend(curve, waiting: .seconds(21600)), "a curve never expires")
+        #expect(HelperManager.shouldResend(manual, waiting: .seconds(10)))
+        #expect(!HelperManager.shouldResend(manual, waiting: .seconds(120)), "an old fixed RPM does")
+    }
+
+    @Test("The wake notice says what is happening without naming a mechanism")
+    func theNoticeSpeaksEnglish() {
+        let notice = HelperManager.wakeNotice
+        #expect(!notice.isEmpty)
+        for jargon in ["daemon", "XPC", "SMC", "curve", "config", "helper", "error"] {
+            #expect(!notice.lowercased().contains(jargon.lowercased()), "'\(jargon)' is our word, not theirs")
+        }
     }
 }
