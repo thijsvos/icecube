@@ -6,7 +6,7 @@ Fixed filenames — `README.md` links to these paths, so keep the names.
 | --- | --- | --- |
 | `popover.png` | Hero, under the intro | Click the menu-bar icon. Capture with ⌘⇧4 then **Space**, then click the popover. |
 | `curve-editor.png` | End of Features | Popover → **Curves…** |
-| `sensors.png` | Supporting a new Mac model | Popover → **Sensors…** |
+| `sensors.png` | Supporting a new Mac model | Popover → **Sensors…** — **due a retake**: the current shot predates content-sized sizing and shows the old fixed 560×480 window with its list scrolled. Grab it at the window's natural height. |
 | `first-run.png` | Install → First run | Only visible while fan control is **off** (Settings → Turn Off Fan Control). The popover then shows "Fan control is off" with the setup button. |
 
 Not currently linked from `README.md`:

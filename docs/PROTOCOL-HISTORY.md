@@ -6,6 +6,15 @@ live on the constant itself in
 [`HelperProtocol.swift`](../IceCubeKit/Sources/IceCubeKit/Helper/HelperProtocol.swift)
 — read that first.
 
+One case is worth restating here, because it is the one people talk themselves
+out of: the bump is required even when the XPC surface is **byte-identical**.
+v21 and v22 both were. This string is the only thing in the system that replaces
+a running daemon — replacing the app does not restart it, launchd keeps the old
+one — so a daemon-only safety fix that skips the bump installs a new app beside
+the old, buggy helper and nothing anywhere says so. That is not hypothetical: it
+is what happened on the first attempt to deploy the dark-wake gate, and the app
+logged "setup: not shown" while it happened.
+
 This file holds the older entries. The most recent few stay in the doc comment,
 where someone about to bump the constant will actually see them; moving *all* of
 it here would put the discipline one click further away than the decision it
@@ -96,3 +105,25 @@ v15: `setAllAuto` (the "Turn Off Fan Control" path) is pinned by test as
     preset gone it is a user's only way to release them, so the warm-
     machine floor hold must not fire there. No behaviour change; the
     bump is so a daemon predating the guarantee cannot be talked to.
+v16: the daemon's unified-log subsystem is redirected under test, so
+    scripted 110 °C and firmware-rejection scenarios stop appearing in
+    `log show` as things that happened to this Mac. No runtime change —
+    bumped only so the installed daemon matches source, which is the
+    mistake this whole list exists to prevent.
+v17: adds `selfTestWritePath` — the write-path self-test PLAN.md §4.3.6
+    called for and §7 lists as the mitigation for "Apple changes SMC
+    behaviour in a point update". Until now nothing could tell "fan
+    control works on your Mac" from "fan control silently does nothing",
+    and the diagnostics a new-model report asks for described only reads.
+v18: the self-test restores the config it interrupted. v17 ended in
+    `.auto` on the assumption the app would re-apply — it does not
+    (`autoResumeIfNeeded` latches once per session), so on hardware the
+    very first run swapped a live Balanced curve for the guardian's
+    floor hold and left it there. A diagnostic must not change settings.
+v19: log honesty on wake. The wake re-assert now runs behind the safety
+    verdict instead of in front of it — the app's heartbeat cannot tick
+    while the machine sleeps, so a non-persisting curve is always about
+    to be reverted on waking, and announcing "re-asserting curve
+    control" first described the opposite of what happened. Blind
+    temperature ticks are also reported once per spell rather than once
+    each: one wake produced six identical lines for a single reconnect.

@@ -66,7 +66,19 @@ which is which rather than implying broader support than exists.
 
 **Monitoring is the safe bet everywhere.** Unmapped models fall back to probing
 every plausible `T***` sensor key, so temperatures and fan readings generally
-work out of the box — you may just see rawer labels than the curated M2 set.
+work out of the box — you may just see rawer labels than the curated M2 set,
+and a good many more of them.
+
+**Expect the sensor list to fill in rather than arrive complete.** Apple Silicon
+powers idle CPU clusters down, and a gated cluster's sensors return a frozen
+placeholder instead of a temperature — for up to ~85 s at a stretch on the Mac
+this was measured on. On a Mac with a curated map, which sensors you *have* is
+decided from whether the firmware knows the key rather than from a first
+reading, so the list is identical on every launch and never reorders: a sensor
+with nothing real to say yet simply has no row until it reports one. A list that
+reads 12 rows just after launch and 20 a minute later is that, and is expected.
+(On an unmapped model the fallback probe still judges by value, so there the
+count can differ between launches.)
 
 **Fan control is the part that varies by generation.** The write sequence differs
 across SoCs: M3/M4 need an `Ftst` unlock to make `thermalmonitord` yield, and M5
@@ -119,6 +131,23 @@ enforced **in the root daemon**, where the UI (or a bug in it) cannot reach:
 - Manual mode is always watchdogged: if the app stops heartbeating for 15 s,
   fans revert to automatic. Only curve mode may run app-less, and only when
   you opt in.
+- **Nothing spins on a dark wake.** Before the Mac sleeps every fan goes back to
+  the firmware, and the daemon writes nothing at all until a display is powered
+  again. A laptop wakes dozens of times a night without waking *you* — Time
+  Machine, `softwareupdate`, a push notification — and a fan controller that
+  reads one of those as morning runs the fans inside a closed bag. Ice Cube did
+  exactly that for 69 seconds during development, which is why the proof of a
+  real wake is now a lit display and nothing else. Keying on the display rather
+  than on the lid gets both cases right: a clamshell Mac driving an external
+  monitor keeps full fan control, a shut one in a bag gets none. The temperature
+  ceiling is the single exception and stays armed the whole time — a Mac
+  genuinely cooking in that bag is allowed to make noise. A preset or curve that
+  arrives while it is parked is held rather than refused, and applied the moment
+  it is properly awake.
+
+  Verified on hardware: a deliberately reproduced `rtc/Maintenance` dark wake
+  with the lid shut took **zero** fan writes across 9 min 40 s, and control came
+  back 900 ms after the lid opened.
 - Every write is verified by read-back and audit-logged (`log stream
   --predicate 'subsystem == "io.github.thijsvos.icecube"'`).
 - **The guardian**: we found during development that macOS 26 does not
@@ -140,7 +169,7 @@ enforced **in the root daemon**, where the UI (or a bug in it) cannot reach:
 Writing fan speeds on Apple Silicon requires root — that's firmware-enforced,
 not a choice. Ice Cube keeps that surface tiny: a single daemon (registered via
 `SMAppService`, approved once by you in System Settings) that speaks a
-five-method XPC protocol, pinned to the app's code signature in both
+six-method XPC protocol, pinned to the app's code signature in both
 directions. The app itself contains **no fan-write code at all**.
 
 ## Install
@@ -232,6 +261,16 @@ Settings → General → Login Items & Extensions. That's an Apple rule, not an
 Ice Cube one — the setup flow just makes it a single button instead of a
 scavenger hunt.
 
+### Updating
+
+The fan-control and safety fixes live in the **background service**, and
+replacing `Ice Cube.app` does not replace it — launchd keeps the running copy,
+which will happily go on talking to the new app. The two are versioned together
+for exactly that reason: when a build expects a newer service than the one
+installed, Ice Cube opens **Finish updating Ice Cube** by itself, and the one
+**Update Now** click is what actually ships the fix. `scripts/install.sh` prints
+the same reminder at the end of a source build.
+
 ## Uninstall
 
 1. Ice Cube popover → Settings… → Fan Control Setup → **Turn Off Fan Control**
@@ -246,10 +285,10 @@ scavenger hunt.
 Two separate things vary by generation, and a report can help with either.
 
 **Sensor labels.** Temperature-key names change with every Apple SoC, and only
-the M2 family has a curated map so far. If your Mac shows few or oddly-labeled
-sensors, that is the fallback probe doing its best — popover → **Sensors…** →
-**Export Diagnostics…** and open a report. The JSON is exactly what a curated
-mapping is written from.
+the M2 family has a curated map so far. Sensors listed by raw key — `Tp09`
+rather than "CPU P-core 3" — mean the fallback probe is doing its best on a
+model nobody has mapped yet: popover → **Sensors…** → **Export Diagnostics…**
+and open a report. The JSON is exactly what a curated mapping is written from.
 
 **The fan-control write path.** See [Compatibility](#compatibility) — Settings →
 **Check Fan Control** answers this in a few milliseconds, and the result rides
