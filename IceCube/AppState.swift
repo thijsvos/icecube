@@ -357,20 +357,10 @@ final class AppState: PopoverLifecycleObserving {
     // MARK: - Menu bar text
 
     /// The text beside the menu bar icon, per the user's display setting;
-    /// `nil` for icon-only.
+    /// `nil` for icon-only. Formatting lives in ``MenuBarLabel`` so it can be
+    /// tested without standing up an `AppState`.
     var menuBarText: String? {
-        switch menuBarDisplay {
-        case .iconOnly: nil
-        case .temperature: hottestText
-        case .fanSpeed: fanRPMText
-        case .both: "\(hottestText) \(fanRPMText)"
-        }
-    }
-
-    /// The fastest fan's speed, compact: `"5.0k"` above 1000 RPM.
-    private var fanRPMText: String {
-        guard let top = fans.map(\.actualRPM).max() else { return "--" }
-        return top >= 1000 ? String(format: "%.1fk", top / 1000) : String(Int(top.rounded()))
+        MenuBarLabel.text(display: menuBarDisplay, hottest: hottestText, fans: fans)
     }
 
     // MARK: - Sensors browser & diagnostics

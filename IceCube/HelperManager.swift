@@ -7,26 +7,6 @@ import Observation
 import os
 import ServiceManagement
 
-/// The slice of `UserDefaults` ``HelperManager`` actually uses.
-///
-/// A protocol so tests can hand it an in-memory store instead of a real
-/// preferences suite. They used to inject `UserDefaults(suiteName: <uuid>)`
-/// per test, which writes a plist into ~/Library/Preferences that outlives the
-/// process — **1,097 of them, 4.3 MB**, had piled up before anyone counted.
-/// Cleaning up in the test's own `deinit` does not work, measured: cfprefsd
-/// owns the file and flushes the domain back to disk at process exit, after
-/// any in-process delete. The only reliable fix is not to touch the
-/// preferences system at all.
-protocol KeyValueStore: AnyObject {
-    func set(_ value: Any?, forKey defaultName: String)
-    func removeObject(forKey defaultName: String)
-    func string(forKey defaultName: String) -> String?
-    func data(forKey defaultName: String) -> Data?
-    func bool(forKey defaultName: String) -> Bool
-}
-
-extension UserDefaults: KeyValueStore {}
-
 /// Everything the UI needs to know and do about the helper daemon:
 /// registration with launchd (SMAppService), the pinned XPC connection with
 /// its version handshake, the 5 s heartbeat that feeds the daemon watchdog,
