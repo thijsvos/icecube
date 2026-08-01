@@ -7,6 +7,42 @@ import Testing
 
 // MARK: - Fakes
 
+/// An in-memory `KeyValueStore`, so a test never touches the preferences
+/// system.
+///
+/// This replaces `UserDefaults(suiteName: <uuid>)`, which was isolated per test
+/// but wrote a real plist into ~/Library/Preferences that outlived the process.
+/// 1,097 of them — 4.3 MB of empty `{}` files — had accumulated since the day
+/// this suite was written. Cleaning up in `deinit` does not work: cfprefsd owns
+/// the file and flushes the domain back at process exit, after any in-process
+/// delete. Not touching it at all does.
+@MainActor
+final class MemoryDefaults: KeyValueStore {
+    private var values: [String: Any] = [:]
+
+    nonisolated init() {}
+
+    func set(_ value: Any?, forKey defaultName: String) {
+        values[defaultName] = value
+    }
+
+    func removeObject(forKey defaultName: String) {
+        values.removeValue(forKey: defaultName)
+    }
+
+    func string(forKey defaultName: String) -> String? {
+        values[defaultName] as? String
+    }
+
+    func data(forKey defaultName: String) -> Data? {
+        values[defaultName] as? Data
+    }
+
+    func bool(forKey defaultName: String) -> Bool {
+        values[defaultName] as? Bool ?? false
+    }
+}
+
 /// A scripted XPC channel. Records what the manager asked for, so a test can
 /// assert on the conversation rather than only on the end state.
 @MainActor
@@ -173,19 +209,16 @@ private struct RegistrarProxy: DaemonRegistering {
 @Suite("HelperManager — registration, handshake and the clean slate")
 @MainActor
 struct HelperManagerTests {
-    /// An isolated defaults suite per test, so nothing touches the developer's
-    /// real preferences and no test can see another's leftovers.
-    private func makeDefaults() -> UserDefaults {
-        let suite = "io.github.thijsvos.icecube.tests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
-        return defaults
+    /// A store per test, in memory, so nothing touches the developer's real
+    /// preferences and nothing is left on disk afterwards.
+    private func makeDefaults() -> MemoryDefaults {
+        MemoryDefaults()
     }
 
     private func makeManager(
         registrar: FakeRegistrar,
         channel: FakeChannel,
-        defaults: UserDefaults,
+        defaults: MemoryDefaults,
         blocker: String? = nil,
         power: FakePowerSource = FakePowerSource()
     ) -> HelperManager {
@@ -932,17 +965,13 @@ struct HelperManagerTests {
 @Suite("HelperManager — a config the Mac was too asleep to take")
 struct DeferredApplyTests {
     /// Copies of the factories in `HelperManagerTests`, which are private to
-    /// that suite. Duplicated rather than hoisted so the existing suite stays
-    /// byte-identical.
-    private func makeDefaults() -> UserDefaults {
-        let suite = "io.github.thijsvos.icecube.tests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
-        return defaults
+    /// that suite.
+    private func makeDefaults() -> MemoryDefaults {
+        MemoryDefaults()
     }
 
     private func makeManager(
-        registrar: FakeRegistrar, channel: FakeChannel, defaults: UserDefaults
+        registrar: FakeRegistrar, channel: FakeChannel, defaults: MemoryDefaults
     ) -> HelperManager {
         HelperManager(
             service: RegistrarProxy(inner: registrar),
