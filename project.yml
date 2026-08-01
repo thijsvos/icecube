@@ -66,8 +66,8 @@ targets:
       properties:
         LSUIElement: true
         CFBundleDisplayName: Ice Cube
-        CFBundleShortVersionString: "0.1.5"
-        CFBundleVersion: "6"
+        CFBundleShortVersionString: "0.1.6"
+        CFBundleVersion: "7"
         NSHumanReadableCopyright: "MIT — github.com/thijsvos"
         # AppIcon.icns has always shipped in Resources but was never DECLARED,
         # so macOS fell back to the generic application icon everywhere the app
