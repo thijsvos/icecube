@@ -31,15 +31,24 @@ what the committed config assumes rather than discovering it by breakage:
       can only be taken while fan control is **off** (with it on there is no
       setup entry point at all), so the free moment is a clean-machine install
       test — not unregistering a working daemon to stage a photo.
+- [ ] *Stale since 2026-08-01:* `sensors.png` and `popover.png` were taken on
+      2026-07-26 and show UI that no longer ships. The Sensors window now sizes
+      itself to the sensor inventory rather than to a hardcoded 560×480, and the
+      popover's sensor list now has a bounded scroll region sized from the
+      inventory instead of an unclamped `ForEach`. Retake both from a machine
+      that has been under load long enough to report all its sensors — an idle
+      launch used to photograph as few as 8 of Mac14,9's 20.
 
 ## Version bump checklist
 
 1. `project.yml` → `CFBundleShortVersionString` (and `CFBundleVersion`).
    The workflow **refuses to build** if the tag and this value disagree, so a
    build can never be labelled one version while reporting another.
-2. If the XPC surface or `FanConfig` semantics changed:
-   `HelperConstants.protocolVersion` — users must re-register the helper, and
-   the app's version-handshake UI walks them through it.
+2. `HelperConstants.protocolVersion` — bump it whenever the **daemon's
+   behaviour** changed, not only when the XPC surface did. Users must then
+   re-register the helper, and the app's version-handshake UI walks them
+   through it. Getting this wrong ships a fix that never reaches anyone's fans;
+   see below.
 3. `xcodegen generate`, then a full test + lint pass locally.
 4. Tag and push:
 
@@ -53,6 +62,31 @@ what the committed config assumes rather than discovering it by breakage:
 The notes are generated from commit subjects since the previous tag (`chore:`
 and `ci:` commits filtered out), with a safety summary and — in unsigned mode —
 the Gatekeeper caveat prepended.
+
+### A daemon-only fix still needs a protocol bump
+
+Installing a new app does not restart the running daemon. launchd keeps the old
+one, and the version string is the only thing that tells the app to offer a
+re-registration — so a behaviour-only fix shipped without a bump installs a new
+app beside the old, unfixed daemon, and nothing anywhere says so. The app logs
+`setup: not shown` and looks perfectly healthy, because from its side the
+versions match.
+
+This is not hypothetical. It is how the dark-wake safety fix was first
+"deployed": the fans went on being driven by the daemon it was written to stop.
+v21 and v22 were both bumped with a byte-identical interface for exactly this
+reason. **If the daemon binary would behave differently, bump it — protocol
+change or not.**
+
+The rule and the recent changelog live on the constant itself in
+[`HelperProtocol.swift`](../IceCubeKit/Sources/IceCubeKit/Helper/HelperProtocol.swift);
+older entries are in [PROTOCOL-HISTORY.md](PROTOCOL-HISTORY.md). Read the last
+few before adding one — the rule sitting above them was written after this went
+wrong.
+
+The workflow notices a bump between tags and prepends an "Upgrading from …"
+section to the notes, pointing users at **Update Now**. It reports what you did.
+It cannot tell you what you should have done.
 
 ## Today: unsigned releases (free Apple ID)
 

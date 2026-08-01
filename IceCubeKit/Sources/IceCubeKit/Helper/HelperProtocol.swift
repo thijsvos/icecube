@@ -19,33 +19,11 @@ public enum HelperConstants {
     /// while verifying the safety fixes below, each time silently testing the
     /// previous build. A mismatch is cheap: the setup flow offers one button.
     ///
-    /// Older entries (v2–v15) are in [docs/PROTOCOL-HISTORY.md]. They are kept
+    /// Older entries (v2–v19) are in [docs/PROTOCOL-HISTORY.md]. They are kept
     /// because each one records a real hardware finding, and moved because a
     /// changelog that grows without bound eventually buries the rule above it —
     /// which is the part that has to be read before a bump, not after.
     ///
-    /// v16: the daemon's unified-log subsystem is redirected under test, so
-    ///     scripted 110 °C and firmware-rejection scenarios stop appearing in
-    ///     `log show` as things that happened to this Mac. No runtime change —
-    ///     bumped only so the installed daemon matches source, which is the
-    ///     mistake this whole list exists to prevent.
-    /// v17: adds `selfTestWritePath` — the write-path self-test PLAN.md §4.3.6
-    ///     called for and §7 lists as the mitigation for "Apple changes SMC
-    ///     behaviour in a point update". Until now nothing could tell "fan
-    ///     control works on your Mac" from "fan control silently does nothing",
-    ///     and the diagnostics a new-model report asks for described only reads.
-    /// v18: the self-test restores the config it interrupted. v17 ended in
-    ///     `.auto` on the assumption the app would re-apply — it does not
-    ///     (`autoResumeIfNeeded` latches once per session), so on hardware the
-    ///     very first run swapped a live Balanced curve for the guardian's
-    ///     floor hold and left it there. A diagnostic must not change settings.
-    /// v19: log honesty on wake. The wake re-assert now runs behind the safety
-    ///     verdict instead of in front of it — the app's heartbeat cannot tick
-    ///     while the machine sleeps, so a non-persisting curve is always about
-    ///     to be reverted on waking, and announcing "re-asserting curve
-    ///     control" first described the opposite of what happened. Blind
-    ///     temperature ticks are also reported once per spell rather than once
-    ///     each: one wake produced six identical lines for a single reconnect.
     /// v20: the sleep half of the sleep/wake contract. The daemon now registers
     ///     for IOKit power notifications and hands every fan back to the
     ///     firmware on `kIOMessageSystemWillSleep`, then writes no fan at all

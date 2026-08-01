@@ -106,7 +106,9 @@ control theory — and should say what changed.
 ## Temperature keys
 
 Die-class prefixes (higher legit temps): `Tp` (CPU), `Tg` (GPU), `Te`, `Tf`,
-`Tc`. Plausibility filter: 10 < °C < 120.
+`Tc`. Plausibility filter: 10 < °C < 120 — for **values**, never for membership.
+Deciding which sensors a Mac has from a reading is a trap on Apple Silicon; see
+below.
 
 ### M2 generation (Mac14,x — curated, verified on Mac14,9)
 
@@ -116,7 +118,60 @@ battery `TB1T TB2T` · wireless `TW0P`.
 
 Sources disagree on some M2 P-core labels (Stats vs smctemp) — which is why
 the diagnostics pipeline exists. Unknown models fall back to enumerating all
-`T***` keys of type `flt` with plausible values, labeled by key.
+`T***` keys of type `flt` with plausible values, labeled by key. That fallback is
+the one place a *reading* still decides membership: with no candidate list there
+is nothing to probe for existence. So on an unmapped Apple Silicon Mac it
+inherits the gating lottery below, and the fix is a curated map — send a
+diagnostics JSON — not a cleverer filter.
+
+### A power-gated cluster answers; it does not fail (Mac14,9 — 2026-07-30)
+
+A power-gated CPU cluster does **not** return an error, and it does not return
+zero. It returns a frozen firmware sentinel — on this machine exactly
+**6.70 °C** for the P-cluster and **4.63 °C** for the E-cluster, applied to a
+whole cluster at once — and that read is indistinguishable from a real one
+except by being implausible.
+
+Idle, the P-cluster is gated at **66.9 %** of sampled instants and the E-cluster
+at **21.8 %**; a single gate episode runs **1.1–84.8 s**. So a probe run at
+launch gets a different answer every launch: ten `icecube-diag` runs on the same
+idle Mac resolved 8, 12, 16 or 20 of the same 20 keys.
+
+Retrying does not rescue it, because nothing is failing:
+
+| Remedy | Misses recovered |
+| --- | --- |
+| immediate re-read | 0 of 18 |
+| retry at +5 ms | 0 of 18 |
+| retry at +50 ms | 0 of 18 |
+
+A gated key does not refresh at all — 24 consecutive 1-second samples of one
+returned a single distinct value.
+
+**Consequence for anyone reading SMC temperatures: decide which sensors a
+machine has from key EXISTENCE, never from a reading.** The two populations
+separate cleanly, which is what makes existence safe to trust. All 20 curated M2
+keys exist on this Mac and failed **none** of 11,300 read attempts; the 13
+probed candidates the model does not carry threw on **every** attempt, 13 of 13.
+A `keyInfo` call answers it directly, and where the API has no key-info call the
+error from a read whose value you discard answers it just as well — "no such
+key" and "the key decodes to nothing" are different errors, and both are stable
+properties of the model rather than of the moment.
+
+Plausibility keeps its old job on the *value* path: a 6.70 °C sentinel must
+still never reach a display, a chart, or a control loop.
+
+### Sensor discovery depends on CPU load (Mac14,9 — 2026-07-30)
+
+The same gating makes load an input to discovery. Under `yes ×6`, all 20 curated
+sensors report on the first tick. Idle, the list sits at **12 of 20 for 95 s and
+longer** — the eight P-core keys exist and answer, but none of them produces a
+real number until something wakes the cluster.
+
+A tool that probes once at launch on an idle machine therefore under-samples in
+silence and reports a Mac as having fewer sensors than it has. Since membership
+comes from existence, the reporting list is **monotone**: rows join as clusters
+wake, and never leave or reorder.
 
 ### Other generations (per references, uncurated)
 
