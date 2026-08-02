@@ -42,7 +42,19 @@ public struct CurveFollower: Sendable, Equatable {
         rampDownPerTick: Double = 0.05,
         smoothingAlpha: Double = 0.2
     ) {
-        self.hysteresisCelsius = max(0, hysteresisCelsius)
+        // Bounded at both ends, not just below. A deadband wider than the
+        // range a die actually moves through makes this follower inert:
+        // `effectiveTemp` never updates, so the output stays wherever the first
+        // tick put it while the die climbs. That is the one tuning value here
+        // that can silently disable a curve — the ramp and alpha floors fail
+        // loudly by comparison.
+        //
+        // 20 is deliberately far above anything the app can produce (the curve
+        // editor's slider is 0...8), so this cannot quietly alter a legitimate
+        // config. It exists for the values the UI never sees: a hand-edited
+        // presets file, or a `FanConfig` decoded from XPC, where
+        // `decodeIfPresent ?? 4` applies no bound at all.
+        self.hysteresisCelsius = hysteresisCelsius.clamped(to: 0 ... 20)
         self.rampUpPerTick = rampUpPerTick.clamped(to: 0.01 ... 1)
         self.rampDownPerTick = rampDownPerTick.clamped(to: 0.01 ... 1)
         self.smoothingAlpha = smoothingAlpha.clamped(to: 0.01 ... 1)
