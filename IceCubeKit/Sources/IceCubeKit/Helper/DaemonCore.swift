@@ -27,6 +27,8 @@ public actor DaemonCore {
     private let port: any SMCControlPort
     private let store: any FanConfigStoring
     private let sequencer: FanWriteSequencer
+    /// Every hardware read, and the admitted sensor set. See ``SensorReader``.
+    private let sensors: SensorReader
     private var monitor = SafetyMonitor()
     /// `HelperConstants.logSubsystem`, not the literal: under test this becomes
     /// a separate subsystem so scripted 110 °C and firmware-rejection scenarios
@@ -48,7 +50,6 @@ public actor DaemonCore {
     /// Read-back mismatches since the last good verification.
     private var verifyFailures = 0
     /// Resolved sensor keys for safety monitoring (curated ∩ present).
-    private var sensorKeys: [String]?
     /// True while the SafetyMonitor is forcing maximum cooling.
     private var coolingOverride = false
     /// Bumped by every revert. See ``engage(targets:fans:since:)``.
@@ -146,6 +147,7 @@ public actor DaemonCore {
         // exists so a future ftst-branch `DaemonCoreTests` case is instant.
         let flag = abandonWrites
         sequencer = FanWriteSequencer(port: port, sleep: sleep, shouldAbandon: { flag.isSet })
+        sensors = SensorReader(port: port, sleep: sleep)
     }
 
     private let sleep: @Sendable (Duration) async -> Void
@@ -292,7 +294,7 @@ public actor DaemonCore {
             record("\(reason): could not read the fans — leaving them to macOS")
             return
         }
-        guard let die = await (try? readTemperatures())?.hottestDieCelsius else {
+        guard let die = await readTemperatures()?.hottestDieCelsius else {
             record("\(reason): could not read a die sensor — leaving the fans to macOS")
             return
         }
@@ -897,7 +899,7 @@ public actor DaemonCore {
         let wokeUp = pendingWake || slept > Self.tickDuration
         pendingWake = false
 
-        let temps = try? await readTemperatures()
+        let temps = await readTemperatures()
         let verdict = monitor.evaluate(
             heartbeatAge: heartbeatAge(), config: config, temperatures: temps
         )
@@ -945,7 +947,7 @@ public actor DaemonCore {
         // here are dark wakes and any missed-wake window — precisely when the
         // SoC is live and the fans are in the hands of a thermalmonitord that
         // ``FanGuardian`` documents does not reliably resume.
-        let temperatures = try? await readTemperatures()
+        let temperatures = await readTemperatures()
         if case let .forceMaxCooling(offender) = monitor.evaluateCeiling(temperatures: temperatures) {
             record("SAFETY: over the temperature ceiling while parked for sleep (\(offender)) — taking the fans back")
             // Deliberately NOT gated on the wake class. This is the one release
@@ -1386,7 +1388,7 @@ public actor DaemonCore {
         // 0 °C on the next blind tick, took the release branch, and handed a hot
         // Mac back to a thermalmonitord that (per FanGuardian's own field note)
         // does not reliably resume. Skipping the tick holds the last decision.
-        guard let dieHot = await (try? readTemperatures())?.hottestDieCelsius else {
+        guard let dieHot = await readTemperatures()?.hottestDieCelsius else {
             // Reported once per blind SPELL, not once per blind tick. These
             // failures come in runs — `resetPort()` closes the connection on
             // every hand-back and on wake, and everything that reads then
@@ -1447,238 +1449,29 @@ public actor DaemonCore {
 
     // MARK: - Hardware reads (the daemon trusts only its own readings)
 
-    /// Reads a key that this Mac may or may not have, retrying transient
-    /// failures — the distinction the fan reads used to collapse.
+    /// One tick's temperatures, with the reader's notices drained into the
+    /// event log.
     ///
-    /// Returns nil ONLY when the firmware itself says the key does not exist
-    /// (`SMCResult.keyNotFound`), which is a real per-machine difference worth
-    /// tolerating. Every other failure is transport-level and gets retried, and
-    /// if it still fails it is THROWN rather than turned into a number.
+    /// A single call site on purpose. `SensorReader` runs on its own actor and
+    /// cannot touch `status.recentEvents`, so it returns what it wanted to say;
+    /// draining it here — and only here — means no caller can forget to, and
+    /// the log keeps exactly the order it had when the reads and the logging
+    /// shared an actor.
     ///
-    /// That last part is the whole point. `readFans` used to swallow every
-    /// failure with `(try? …) ?? 0`, so a fan whose mode read missed came back
-    /// as `.system` with `targetRPM` 0 — which is bit-for-bit what "macOS took
-    /// the fans off us" looks like. `verifyCurveHeld` believed it, logged a
-    /// read-back mismatch and re-asserted; twice in a row and it would have
-    /// reverted a perfectly healthy curve to auto and told the user it had lost
-    /// control. Observed on a normal app restart, because `resetPort()` closes
-    /// the connection and the first read after it is the one most likely to
-    /// miss — the same hazard `hottestDieRetrying()` already exists to absorb
-    /// for temperatures, which the fan path never got.
-    /// Whether this Mac HAS `key` — the daemon's half of ``SensorAdmission``.
-    ///
-    /// Deliberately NOT `port.hasKey`: that is `(try? keyInfo) != nil`, which
-    /// collapses "the firmware says there is no such key" into the same `false`
-    /// as "the call failed", and the empty-probe rule below exists precisely
-    /// because those two are different facts — one is a property of the model,
-    /// the other is a connection that `start()`'s `port.reset()` just closed.
-    /// `hasKey` also reports no wire type, so it cannot refuse a key that
-    /// exists but decodes to nothing; such a key would throw on every tick,
-    /// count as missing on every tick, and re-trip the partial-failure re-probe
-    /// forever. That is where the old dead-key loop hazard would have moved.
-    ///
-    /// One read answers both, in its error. **The value is discarded.** Looking
-    /// at it is what made discovery a lottery.
-    private func probeExists(_ key: String, retryBudget: inout Int) async -> Bool {
-        while true {
-            do {
-                _ = try await port.readDouble(key)
-                return true // it answered with a number; that is all we asked
-            } catch IceCubeError.smcKeyNotFound {
-                return false // a stable property of this model
-            } catch IceCubeError.smcDecodingFailed {
-                return false // exists, but carries no temperature we can decode
-            } catch {
-                // Transport failure: not an answer about the hardware. Retry —
-                // the one thing a retry was ever good for here — and once the
-                // budget is gone leave the key out and let the empty-probe and
-                // die-sensor rules judge the truncated set. The next probe
-                // reconsiders it.
-                guard retryBudget > 0 else { return false }
-                retryBudget -= 1
-                await sleep(.milliseconds(60))
-            }
+    /// `nil` is the old `throw`: blindness, which `SafetyMonitor` counts toward
+    /// a revert. It is never `[]` — see ``SensorReader``.
+    private func readTemperatures() async -> [SensorReading]? {
+        let read = await sensors.readTemperatures()
+        for notice in read.notices {
+            record(notice)
         }
+        return read.readings
     }
 
-    /// Transport retries shared by one whole discovery pass. Three, matching
-    /// ``readRetries``; bounded so probing the fallback superset on a dead
-    /// connection costs milliseconds rather than most of a tick.
-    private static let probeRetryBudget = 3
-
-    private func readOptional(_ key: String) async throws -> Double? {
-        for attempt in 0 ..< Self.readRetries {
-            do {
-                return try await port.readDouble(key)
-            } catch IceCubeError.smcKeyNotFound {
-                return nil // genuinely absent on this Mac — not a failure
-            } catch {
-                guard attempt < Self.readRetries - 1 else { throw error }
-                await sleep(.milliseconds(60))
-            }
-        }
-        return nil
-    }
-
-    /// Matches `hottestDieRetrying()`: enough to ride out a connection reopen,
-    /// short enough that a genuinely dead SMC still fails within one tick.
-    private static let readRetries = 3
-
+    /// Still throwing, and still the same `IceCubeError` cases: `apply()`
+    /// propagates the failure over XPC where `WireError` renders it.
     private func readFans() async throws -> [Fan] {
-        // `Int(someDouble)` traps on NaN/±inf and on anything past Int.max;
-        // a garbage fan count must yield no fans, not a dead daemon.
-        let rawCount = try await port.readDouble("FNum")
-        let count = Int(exactly: rawCount.rounded(.towardZero)) ?? 0
-        guard (0 ... 64).contains(count) else {
-            throw IceCubeError.smcDecodingFailed(
-                key: "FNum", type: "fan count", bytes: []
-            )
-        }
-        var fans: [Fan] = []
-        for i in 0 ..< count {
-            // Only an ABSENT mode key means `.system`. A mode key that exists
-            // but would not read now throws, so the caller skips this tick
-            // rather than concluding we have lost the fans.
-            let mode: FanMode = if let raw = try await readOptional("F\(i)Md") {
-                FanMode(smcValue: raw)
-            } else if let raw = try await readOptional("F\(i)md") {
-                FanMode(smcValue: raw)
-            } else {
-                .system
-            }
-            try await fans.append(Fan(
-                id: i,
-                name: "Fan \(i)",
-                mode: mode,
-                actualRPM: readOptional("F\(i)Ac") ?? 0,
-                targetRPM: readOptional("F\(i)Tg") ?? 0,
-                minRPM: readOptional("F\(i)Mn") ?? 0,
-                maxRPM: readOptional("F\(i)Mx") ?? 0
-            ))
-        }
-        return fans
-    }
-
-    private func readTemperatures() async throws -> [SensorReading] {
-        if sensorKeys == nil {
-            // Unmapped models fall back to probing the candidate superset
-            // instead of resolving to nothing — an unknown Mac used to leave
-            // the daemon permanently blind, which disables the ceiling and the
-            // guardian while the app's UI still shows correct temperatures.
-            let model = HostInfo.modelIdentifier()
-            let candidates = SMCKeyMaps.curatedSensors(forModel: model)
-                ?? SMCKeyMaps.fallbackCandidateSensors
-            // Membership comes from key EXISTENCE, never from a reading — the
-            // same rule the app side uses (`SensorAdmission`), for the same
-            // measured reason. On Apple Silicon a power-gated CPU cluster
-            // returns a frozen firmware sentinel (Mac14,9: exactly 6.70 °C and
-            // 4.63 °C, a whole cluster at a time, P-cluster gated at 66.9 % of
-            // idle instants), so admitting on a plausible read disowned every
-            // P-core for the life of the daemon. The owner's daemon logged
-            // `resolved 8 temperature sensors` — 8 of 20, its only silicon
-            // input the two GPU dies, while the 104 °C die ceiling is the one
-            // release allowed to spin fans inside a closed lid. Retrying cannot
-            // fix it: an immediate retry recovered 0 of 18 misses, and so did
-            // +5 ms and +50 ms, because the key is not failing — it is
-            // answering with a lie. Gate episodes last 1.1–84.8 s; a 2 s tick
-            // cannot wait one out.
-            //
-            // The probe is a READ WHOSE VALUE IS DISCARDED. `SMCControlPort`
-            // has no key-info call and must not grow one, but `readDouble`
-            // already answers the only two questions membership turns on, in
-            // its error rather than its result — see `probeExists`.
-            var existing: Set<String> = []
-            existing.reserveCapacity(candidates.count)
-            // ONE retry budget for the whole probe, not one per candidate: a
-            // reopen after `port.reset()` is retried once, not forty times, and
-            // a dead connection cannot spend the whole 2 s tick sleeping.
-            var retryBudget = Self.probeRetryBudget
-            for sensor in candidates where await probeExists(sensor.key, retryBudget: &retryBudget) {
-                existing.insert(sensor.key)
-            }
-            let present = SensorAdmission
-                .admit(candidates: candidates, presentKeys: existing)
-                .map(\.key)
-            // SAFETY: an EMPTY probe is "unresolved", not "this Mac has no
-            // sensors". Caching [] is non-nil, so the old code never retried —
-            // and the very first probe runs right after `start()`'s
-            // `port.reset()` closed the connection, so one failed lazy reopen
-            // blinded the daemon for its whole lifetime, silently, even on
-            // supported hardware. Leaving it nil makes the next tick retry.
-            // SAFETY: a probe that resolved nothing — or resolved no DIE sensor
-            // — is "unresolved", not an answer. Caching [] is non-nil, so the
-            // old code never retried, and the very first probe runs right after
-            // `start()`'s `port.reset()` closed the connection: one failed lazy
-            // reopen blinded the daemon for its whole lifetime.
-            //
-            // The die requirement is the safety-relevant half. `hottestDieCelsius`
-            // is what BOTH the curve and the guardian run on, so a set of only
-            // battery and airflow sensors leaves the daemon unable to control or
-            // protect anything while looking healthy. Observed for real: one
-            // probe resolved 2 sensors on a machine that normally reports 12.
-            let hasDie = present.contains(where: SMCKeyMaps.isDieKey)
-            guard !present.isEmpty, hasDie else {
-                record(
-                    "SAFETY: sensor probe unusable (\(present.count) found, die: \(hasDie), "
-                        + "model \(model)) — retrying next tick"
-                )
-                throw IceCubeError.smcKeyNotFound(key: "T***")
-            }
-            sensorKeys = present
-            record("resolved \(present.count) temperature sensors (model \(model))")
-        }
-        var readings: [SensorReading] = []
-        var missing: [String] = []
-        for key in sensorKeys ?? [] {
-            // Only a genuine READ FAILURE counts as missing. A member that
-            // reads an implausible value has glitched for this tick, not gone
-            // away: it stays in the set and is picked up again when it
-            // recovers. Re-probing would not fix a glitch and, before the
-            // admission rule above, guaranteed an infinite re-probe loop.
-            guard let value = try? await port.readDouble(key) else {
-                missing.append(key)
-                continue
-            }
-            // SAFETY: an over-range reading is CLAMPED, never discarded. The
-            // plausibility filter caps at 120 °C, so a sensor reporting 121 °C
-            // used to vanish from the array entirely — i.e. the single hottest
-            // point in the machine silently stopped counting toward the ceiling
-            // at exactly the moment it mattered most. Below 10 °C still reads as
-            // a dead/unpopulated sensor and is dropped.
-            if value >= 120 {
-                readings.append(SensorReading(key: key, label: key, celsius: 120))
-                continue
-            }
-            if SMCKeyMaps.isPlausibleTemperature(value) {
-                readings.append(SensorReading(key: key, label: key, celsius: value))
-            }
-            // else: a one-tick glitch on an admitted sensor. Skipped for this
-            // evaluation, kept in the set — NOT counted as missing, or a single
-            // flapping sensor would re-probe the whole map every couple of ticks.
-        }
-        guard !readings.isEmpty else {
-            throw IceCubeError.smcKeyNotFound(key: "T***")
-        }
-        // Partial blindness is a health event too. `readTemperatures` only threw
-        // when EVERY sensor failed, so losing just the hottest one left the
-        // ceiling evaluating a set that no longer contained it — with no
-        // counter, no log line and no change in HelperStatus. Re-probe once the
-        // set shrinks, and say so.
-        // Surfaced via `record` (and therefore `HelperStatus.recentEvents`)
-        // rather than a new status field: HelperStatus crosses XPC with a
-        // synthesized decoder, so a new non-optional key would fail to decode
-        // against a mismatched helper for no gain here.
-        if missing.count > partialSensorFailureTolerance {
-            record("SAFETY: \(missing.count) of \(readings.count + missing.count) sensors unreadable — re-probing")
-            sensorKeys = nil
-        }
-        return readings
-    }
-
-    /// How many sensors may drop out before we re-probe the whole set. One
-    /// flaky key is normal; a third of them vanishing is a connection problem.
-    private var partialSensorFailureTolerance: Int {
-        max(1, (sensorKeys?.count ?? 0) / 3)
+        try await sensors.readFans()
     }
 
     /// The hottest die reading, retrying briefly rather than skipping a tick.
@@ -1689,7 +1482,7 @@ public actor DaemonCore {
     /// not to paper over a broken one.
     private func hottestDieRetrying() async -> Double? {
         for attempt in 0 ..< 3 {
-            if let die = await (try? readTemperatures())?.hottestDieCelsius {
+            if let die = await readTemperatures()?.hottestDieCelsius {
                 return die
             }
             if attempt < 2 {
