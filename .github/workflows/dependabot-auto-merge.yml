@@ -29,8 +29,17 @@ jobs:
     steps:
       - name: Read Dependabot metadata
         id: meta
-        # SHA-pinned like every other action that runs with write permissions
-        # here — see the note in release.yml.
+        # SHA-pinned because it is outside the `actions/*` namespace — see the
+        # note in release.yml for why that matters in a job with write
+        # permissions. GitHub's own `actions/*` deliberately stay on major tags:
+        # they are the one publisher whose tag-moving would be an industry-wide
+        # event, and SHA-pinning them buys a Dependabot PR per point release for
+        # no real gain.
+        #
+        # This comment used to claim SHA pinning covered "every action that runs
+        # with write permissions here", which was never true — `actions/checkout`
+        # runs under `contents: write` in release.yml on a movable tag. The rule
+        # is the namespace, not the permission.
         uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
 
       - name: Enable auto-merge for patch and minor updates
