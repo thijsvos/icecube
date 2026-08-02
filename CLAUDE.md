@@ -93,3 +93,13 @@ If a build needs signing (running the real helper), tell the owner to do it in X
 ## Definition of done (every task)
 
 Builds clean with no new warnings → `swift test` passes → feature works in simulated mode → safety invariants untouched → PLAN.md checkbox ticked with a one-line note if implementation deviated from plan.
+
+**"No new warnings" is enforced, not aspirational.** CI compiles with
+`SWIFT_TREAT_WARNINGS_AS_ERRORS=YES` (xcodebuild) and `-Xswiftc -warnings-as-errors`
+(`swift test`), so a warning fails the build. It is deliberately *not* set in
+`project.yml`: a local build still tolerates the half-finished code you get mid-edit, and
+the gate is on what lands rather than on how you get there. Check locally before pushing by
+appending those flags to the commands above.
+
+When a macOS SDK deprecation fails CI on a PR that did not cause it, fix the deprecation —
+do not delete the flag.
