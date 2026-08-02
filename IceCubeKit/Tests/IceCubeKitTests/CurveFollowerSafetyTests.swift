@@ -143,21 +143,19 @@ struct CurveFollowerSafetyTests {
         #expect(last > cold, "however hostile the tuning, a sustained hot die must still move the fans")
     }
 
-    /// **A gap this suite found, recorded rather than fixed.**
+    /// The gap this suite found, now closed.
     ///
-    /// `init` clamps `hysteresisCelsius` with `max(0, …)` — a lower bound only.
-    /// There is no upper bound, so a deadband wider than the temperature range
-    /// the machine actually moves through makes the follower permanently inert:
-    /// `effectiveTemp` never updates, and the output stays wherever the first
-    /// tick put it while the die climbs.
+    /// `init` used to clamp `hysteresisCelsius` with `max(0, …)` — a lower
+    /// bound only — so a deadband wider than the range the die moves through
+    /// made the follower permanently inert: `effectiveTemp` never updated and
+    /// the fans held their idle speed while the die climbed. A 100 °C deadband
+    /// slept through a 30 → 95 °C ramp.
     ///
-    /// Not a thermal hazard — `SafetyMonitor`'s ceiling and `FanGuardian` both
-    /// sit downstream of this and are unaffected — but it is the one tuning
-    /// value that can silently disable a curve. Deliberately pinned as-is:
-    /// adding an upper clamp changes fan-control behaviour, which is the
-    /// owner's call and not a side effect of writing tests.
-    @Test("A deadband wider than the die's whole range leaves the fans where they started")
-    func wideDeadbandMakesTheFollowerInert() {
+    /// It is now bounded at both ends. Unlike the ramp and alpha floors, which
+    /// fail loudly (a negative ramp used to crash), this one failed silently,
+    /// which is why it was worth closing rather than documenting.
+    @Test("An absurd deadband is clamped, so it can no longer disable a curve")
+    func wideDeadbandCannotDisableACurve() {
         var follower = CurveFollower(
             hysteresisCelsius: 100, rampUpPerTick: 1, rampDownPerTick: 1, smoothingAlpha: 1
         )
@@ -166,10 +164,44 @@ struct CurveFollowerSafetyTests {
         for _ in 0 ..< 500 {
             last = follower.step(dieCelsius: 95, curve: curve)
         }
-        #expect(
-            last == cold,
-            "documenting today's behaviour: hysteresis has no upper clamp, so a 100 °C deadband is inert"
+        #expect(last > cold, "a 100 °C deadband must be clamped, not honoured")
+    }
+
+    /// The bound is generous on purpose, and this proves it by measuring the
+    /// deadband rather than by comparing the follower to itself.
+    ///
+    /// The first version of this test constructed two identical followers and
+    /// asserted they agreed, which of course they did — it could not fail, and
+    /// a mutation tightening the clamp to `0 ... 3` sailed through it. What
+    /// matters is that an 8 °C setting still *behaves* as 8 °C: the curve
+    /// editor's slider stops there, so anything the app can produce must pass
+    /// through the clamp unchanged.
+    @Test("A deadband the curve editor can produce is honoured exactly, not narrowed")
+    func editorRangeDeadbandIsHonoured() {
+        var follower = CurveFollower(
+            hysteresisCelsius: 8, rampUpPerTick: 1, rampDownPerTick: 1, smoothingAlpha: 1
         )
+        let atFifty = follower.step(dieCelsius: 50, curve: curve)
+
+        // 5 °C is inside an 8 °C deadband: the fans must not move.
+        #expect(
+            follower.step(dieCelsius: 55, curve: curve) == atFifty,
+            "a 5 °C change must sit inside an 8 °C deadband — if this fails the clamp narrowed it"
+        )
+
+        // 10 °C is outside it: the fans must move.
+        let atSixty = follower.step(dieCelsius: 60, curve: curve)
+        #expect(atSixty > atFifty, "a 10 °C change must break through an 8 °C deadband")
+    }
+
+    /// A zero deadband means every reading counts, which the editor also allows.
+    @Test("A zero deadband passes every change straight through")
+    func zeroDeadbandTracksEveryReading() {
+        var follower = CurveFollower(
+            hysteresisCelsius: 0, rampUpPerTick: 1, rampDownPerTick: 1, smoothingAlpha: 1
+        )
+        let atFifty = follower.step(dieCelsius: 50, curve: curve)
+        #expect(follower.step(dieCelsius: 55, curve: curve) > atFifty)
     }
 
     /// `reset()` is never called by the daemon — it clears its follower
