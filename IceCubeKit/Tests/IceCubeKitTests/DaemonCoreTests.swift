@@ -2266,3 +2266,54 @@ struct GatedSensorAdmissionTests {
         )
     }
 }
+
+/// The dark-wake hold is logged once per spell, not once per tick — a
+/// maintenance dark wake runs for minutes at a 2 s tick, and 150 copies of the
+/// line would defeat the purpose it was added for. But "once per spell" has a
+/// second half nothing pinned until now: the throttle has to RESET when the
+/// machine sleeps again, or the second dark wake of a night is silent and the
+/// one line the owner greps for to see the gate working never appears.
+///
+/// Found by mutation: clearing only `powerOnPending` in
+/// `WakeEvidence.forgetAcrossSleep()` left all eight dark-wake tests green.
+@Suite("DaemonCore — the dark-wake hold is logged once per spell, every spell")
+struct DarkWakeHoldThrottleTests {
+    private func holdLines(_ events: [String]) -> Int {
+        events.filter { $0.contains("no display is powered") }.count
+    }
+
+    @Test("A long dark wake logs the hold once, not once per tick")
+    func onceWithinASpell() async throws {
+        let smc = FakeSMC(temperature: 75)
+        let core = makeCore(smc: smc, capabilities: { .darkWakeCapabilities })
+        try await core.apply(curveConfig(persists: true))
+        await core.prepareForSleep()
+        await core.tick(sleptFor: .seconds(900))
+
+        for _ in 0 ..< 20 {
+            await core.heartbeat()
+            await core.tick(sleptFor: .zero)
+        }
+        #expect(await holdLines(core.currentStatus().recentEvents) == 1)
+    }
+
+    /// THE MUTATION-FOUND GAP. Sleep, dark wake, sleep, dark wake: the second
+    /// spell must speak too.
+    @Test("The next dark wake logs its own hold, because sleeping resets the throttle")
+    func againAfterSleeping() async throws {
+        let smc = FakeSMC(temperature: 75)
+        let core = makeCore(smc: smc, capabilities: { .darkWakeCapabilities })
+        try await core.apply(curveConfig(persists: true))
+
+        for _ in 0 ..< 2 {
+            await core.prepareForSleep()
+            await core.tick(sleptFor: .seconds(900))
+            await core.heartbeat()
+            await core.tick(sleptFor: .zero)
+        }
+        #expect(
+            await holdLines(core.currentStatus().recentEvents) == 2,
+            "one line per dark wake — the throttle resets on will-sleep"
+        )
+    }
+}

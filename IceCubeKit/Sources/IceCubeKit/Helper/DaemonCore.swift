@@ -84,18 +84,9 @@ public actor DaemonCore {
     /// ``SleepLatch``. `internal` for the same reason as ``config`` — a parked
     /// daemon is a safety state that must be assertable in tests.
     var sleepLatch = SleepLatch()
-    /// A `kIOMessageSystemHasPoweredOn` that arrived before any display was up.
-    ///
-    /// The message and the capability bits are not guaranteed to change in the
-    /// same instant, and the message is the only edge we get — a
-    /// DarkWake→FullWake promotion does not send a second one. Remembering the
-    /// edge and completing it from the tick is what makes the gate safe in both
-    /// directions: a message that races the video bit still unparks within one
-    /// tick, and a message genuinely delivered on a dark wake never unparks at
-    /// all.
-    private var pendingPowerOn = false
-    /// Throttles the "staying parked" line to one per dark wake.
-    private var darkWakeHoldRecorded = false
+    /// What we have been TOLD about a wake, as opposed to what we have proven.
+    /// See ``WakeEvidence`` — the two flags must be cleared together.
+    private var wake = WakeEvidence()
     /// True while a hand-back is running, so N racing engages that all discover
     /// the park produce ONE `revertAllAuto`, not N.
     private var parkInFlight = false
@@ -343,8 +334,7 @@ public actor DaemonCore {
         // fires, so a power-on edge observed during one dark wake can never be
         // spent on the next one. Before the `parkLanded` early return below,
         // which is the path a dark wake → sleep actually takes.
-        pendingPowerOn = false
-        darkWakeHoldRecorded = false
+        wake.forgetAcrossSleep()
         if isNewSleep {
             record("the Mac is going to sleep — handing the fans back (keeping the \(config.mode.rawValue) config)")
             if coolingOverride {
@@ -373,7 +363,7 @@ public actor DaemonCore {
     /// fact: the capability read decides, and this only says when to ask.
     public func systemDidPowerOn() {
         guard sleepLatch.isAsleep else { return }
-        pendingPowerOn = true
+        wake.notePowerOnEdge()
         unparkIfProvenAwake(reason: "the system powered on", capabilities: capabilities())
     }
 
@@ -404,8 +394,7 @@ public actor DaemonCore {
     /// One line per dark wake, not one per tick: a maintenance dark wake runs
     /// for minutes, and this is the line to grep for to see the fix working.
     private func recordDarkWakeHold(refused reason: String, capabilities caps: PowerCapabilities?) {
-        guard !darkWakeHoldRecorded else { return }
-        darkWakeHoldRecorded = true
+        guard wake.shouldLogHold() else { return }
         record(
             "dark wake (\(PowerCapabilities.describe(caps))) — \(reason), but no display is powered, so the fans stay with the firmware"
         )
@@ -501,8 +490,7 @@ public actor DaemonCore {
         followers = [:]
         curveTargets = [:]
         verifyFailures = 0
-        pendingPowerOn = false
-        darkWakeHoldRecorded = false
+        wake.forgetAcrossSleep()
         guardian.reset()
         status.guardianActive = false
         record("wake: resuming \(config.mode.rawValue) control (\(reason))")
@@ -977,7 +965,7 @@ public actor DaemonCore {
         // The edge arrived earlier and the display was not up yet — or the
         // message really was delivered on a dark wake, in which case this never
         // fires and the next `systemWillSleep` forgets it.
-        if pendingPowerOn, unparkIfProvenAwake(reason: "the system powered on", capabilities: caps) {
+        if wake.powerOnPending, unparkIfProvenAwake(reason: "the system powered on", capabilities: caps) {
             return true
         }
         // A daemon that started inside a dark wake has no edge to wait for and
@@ -1060,16 +1048,32 @@ public actor DaemonCore {
         }
     }
 
+    /// Whether the hardware is holding what we last commanded.
+    ///
+    /// One copy on purpose. This predicate was written out twice — once for
+    /// manual mode, once for curve mode — and the two paths reach the same
+    /// consequence: a second consecutive miss reverts to auto and tells the
+    /// user control was lost. Two copies of a rule that decides that are two
+    /// rules, and the day they diverge nothing says so.
+    ///
+    /// A fan with no expected target is holding by definition (nothing was
+    /// asked of it). The 1 RPM tolerance is the firmware's own rounding, not
+    /// slack: `F{i}Tg` reads back as a float and a commanded 2317 can return
+    /// 2316.9999.
+    private static func isHolding(_ fans: [Fan], expected: [Int: Double]) -> Bool {
+        fans.allSatisfy { fan in
+            guard let target = expected[fan.id] else { return true }
+            return fan.mode == .forced && abs(fan.targetRPM - target) <= 1
+        }
+    }
+
     /// Read-back + re-assert: firmware or thermalmonitord can silently take
     /// control back. One re-apply is attempted; a second consecutive failure
     /// means we are not actually in control → revert and say so.
     private func verifyManualState() async {
         let generation = revertGeneration
         guard let fans = try? await readFans() else { return }
-        let held = fans.allSatisfy { fan in
-            guard let target = config.manualTargets[fan.id] else { return true }
-            return fan.mode == .forced && abs(fan.targetRPM - target) <= 1
-        }
+        let held = Self.isHolding(fans, expected: config.manualTargets)
         if held {
             verifyFailures = 0
             status.lastWriteVerified = true
@@ -1339,10 +1343,7 @@ public actor DaemonCore {
 
     /// Same read-back discipline as manual mode: one re-assert, then revert.
     private func verifyCurveHeld(expected: [Int: Double], fans: [Fan], since generation: Int) async {
-        let held = fans.allSatisfy { fan in
-            guard let target = expected[fan.id] else { return true }
-            return fan.mode == .forced && abs(fan.targetRPM - target) <= 1
-        }
+        let held = Self.isHolding(fans, expected: expected)
         if held {
             verifyFailures = 0
             status.lastWriteVerified = true
