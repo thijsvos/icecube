@@ -472,9 +472,26 @@ final class HelperManager {
         // is exactly the ambiguity that made "is it slow?" unanswerable.
         let started = ContinuousClock.now
         log.notice("preset: sending \(preset.name, privacy: .public)")
-        await apply(config)
+        let outcome = await apply(config)
         let ms = (ContinuousClock.now - started).components.attoseconds / 1_000_000_000_000_000
-        log.notice("preset: \(preset.name, privacy: .public) applied in \(ms, privacy: .public) ms")
+        // Report what HAPPENED, not merely that we got here. This line used to
+        // say "applied" whatever came back, so a preset the daemon refused —
+        // because the Mac was parked for sleep, or because the connection was
+        // not up — logged exactly like one that reached the fans. Caught with a
+        // disconnected app logging "Balanced applied in 2 ms" while the daemon
+        // recorded nothing at all. A daemon whose every write must be auditable
+        // cannot have an app that narrates writes it never made; the same
+        // mistake is what protocol v19 exists to fix on the other side.
+        switch outcome {
+        case .ok:
+            log.notice("preset: \(preset.name, privacy: .public) applied in \(ms, privacy: .public) ms")
+        case .deferredUntilWake:
+            log.notice(
+                "preset: \(preset.name, privacy: .public) held — the Mac is asleep; it will be sent on wake"
+            )
+        case .failed:
+            log.error("preset: \(preset.name, privacy: .public) was refused after \(ms, privacy: .public) ms")
+        }
     }
 
     /// The app-wide "keep the curve running when I quit" preference.
