@@ -57,12 +57,6 @@ struct PopoverView: View {
         state.menuBar?.closeVendoredPopover()
     }
 
-    /// The easing used for live readings, or `nil` when the user has turned the
-    /// "smooth readings" preference off (values then snap instantly).
-    private var readingAnimation: Animation? {
-        state.chartSettings.smoothReadings ? .easeInOut(duration: 0.35) : nil
-    }
-
     var body: some View {
         // MenuBarExtra(.window) keeps this view graph alive after the first
         // open, so while the window is off screen the live content must not be
@@ -114,14 +108,14 @@ struct PopoverView: View {
 
     private var liveContent: some View {
         VStack(alignment: .leading, spacing: Theme.Metrics.sectionSpacing) {
-            header
+            PopoverHeader(state: state)
             if let errorMessage = state.errorMessage {
-                errorRow(errorMessage)
+                PopoverErrorRow(message: errorMessage)
             }
             if state.snapshot == nil {
-                waitingRow
+                PopoverWaitingRow()
             } else {
-                fanCard
+                PopoverFanCard(state: state)
                 if state.chartSettings.showControls {
                     FanControlSection(
                         helper: state.helper,
@@ -131,315 +125,38 @@ struct PopoverView: View {
                 }
                 if state.chartSettings.showCharts {
                     DashboardView(state: state)
-                } else {
-                    compactTemperatureCard
                 }
-                if state.chartSettings.showTemperatureList {
-                    temperatureListCard
-                }
+                PopoverTemperatureCards(state: state)
             }
             Divider()
-            footer
+            PopoverFooter(state: state, dismissPopover: dismissPopover)
         }
         .padding(Theme.Metrics.popoverPadding)
         .frame(width: Theme.Metrics.popoverWidth)
     }
 
-    /// The fan readouts, grouped as a titled card.
-    private var fanCard: some View {
-        VStack(alignment: .leading, spacing: Theme.Metrics.cardContentSpacing) {
-            Text("Fans").premiumSectionLabel()
-            fanSection
-        }
-        .popoverCard()
-    }
-
-    /// The compact CPU/GPU line, grouped as a titled card (shown when the full
-    /// charts are hidden).
-    private var compactTemperatureCard: some View {
-        VStack(alignment: .leading, spacing: Theme.Metrics.cardContentSpacing) {
-            Text("Temperature").premiumSectionLabel()
-            compactTemperatureLine
-        }
-        .popoverCard()
-    }
-
-    /// The full per-sensor list, grouped as a titled card.
-    /// The full per-sensor list, grouped as a titled card.
-    ///
-    /// The height is **reserved**, not measured: see ``SensorListMetrics``. On
-    /// a curated Mac it is exactly the list; on a Mac whose sensors are
-    /// enumerated rather than curated it is the cap, and the region scrolls
-    /// instead of pushing the footer — and the app's only Quit — off screen.
-    private var temperatureListCard: some View {
-        // The inventory is what this Mac HAS; the published rows are what is
-        // reporting this second. `max` covers the moment before the inventory
-        // lands, and the enumerating path where the two are the same thing.
-        let count = max(state.sensorInventoryCount, state.temperatures.count)
-        let layout = SensorListMetrics.layout(sensorCount: count, availableHeight: availableHeight)
-        return VStack(alignment: .leading, spacing: Theme.Metrics.cardContentSpacing) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Sensors").premiumSectionLabel()
-                Spacer()
-                // Only when the region cannot hold them all: the count is the
-                // one fact that explains why you are scrolling, and the
-                // footer's Sensors… button is already the see-everything
-                // affordance. Derived from the inventory, so it is decided once
-                // per launch and cannot blink in and out.
-                if layout.scrolls {
-                    Text("\(count) total").premiumSectionLabel()
-                }
-            }
-            temperatureListSection
-                .frame(height: layout.height, alignment: .top)
-        }
-        .popoverCard()
-    }
-
-    /// The height the popover has to live in. `visibleFrame` has already
-    /// excluded the menu bar and the Dock.
-    ///
-    /// Read per render rather than captured once — it is a cheap lookup and the
-    /// display can change under an open popover. No screen at all (headless, or
-    /// mid display change) falls back to the absolute cap rather than the
-    /// floor, the same choice `IceCubeApp` makes for the Sensors window.
-    private var availableHeight: CGFloat {
-        NSScreen.main?.visibleFrame.height ?? .infinity
-    }
-
     // MARK: - Header
-
-    private var header: some View {
-        HStack(spacing: 8) {
-            // The ice-cube brand mark — instant confirmation you opened the
-            // right app the moment the popover appears.
-            Image(nsImage: MenuBarGlyph.iceCube)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 22, height: 22)
-                .accessibilityHidden(true)
-            Text("Ice Cube")
-                .font(.headline)
-            if state.isSimulated {
-                badge("SIMULATED")
-                    .foregroundStyle(Theme.warning)
-                    .accessibilityLabel("Simulated data")
-            }
-            Spacer()
-            // No temperature here on purpose: the header is identity, not data.
-            // The hottest reading lives in the body (and the menu bar) once —
-            // showing it here too was the duplicate readout.
-        }
-    }
-
-    /// A small capsule label using a hierarchical fill (never an opaque color).
-    private func badge(_ text: String) -> some View {
-        Text(text)
-            .font(.caption2.weight(.semibold))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(.quaternary, in: Capsule())
-    }
 
     // MARK: - Fans
 
-    private var fanSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(state.fans) { fan in
-                fanRow(fan)
-            }
-        }
-    }
-
-    private func fanRow(_ fan: Fan) -> some View {
-        // Derived once so every part of the row answers from the same snapshot
-        // rather than re-deriving from `fan` four times.
-        let activity = FanActivity(fan)
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(fan.name)
-                    .font(.callout.weight(.medium))
-                // Beside the NAME, not the number. The number is right-aligned,
-                // so anything reserved next to it pushes the number left even
-                // when empty. Here the Spacer absorbs the hint appearing and
-                // disappearing, so the reading never moves — which is the rule
-                // this popover holds to: no reflow on data change.
-                if let heading = activity.rampTargetRPM {
-                    Text(verbatim: "→ \(RPM.text(heading))")
-                        .font(.caption2)
-                        .monospacedDigit()
-                        .foregroundStyle(Theme.accent)
-                        .transition(.opacity)
-                }
-                Spacer()
-                rpmReadout(fan, activity: activity)
-            }
-            // Keyed on the hint's PRESENCE, not on `activity`: the value is
-            // Equatable but carries `fillFraction`, so it differs on every 1 Hz
-            // reading and would animate this row continuously.
-            .animation(readingAnimation, value: activity.rampTargetRPM != nil)
-            FanSpeedBar(
-                fraction: activity.fillFraction,
-                target: activity.rampTargetFraction,
-                animated: state.chartSettings.smoothReadings
-            )
-        }
-    }
-
-    /// The current RPM, prominent, with a quiet unit label, plus where the fan
-    /// is heading while it is still getting there.
-    ///
-    /// The destination slot is **permanently reserved** rather than inserted
-    /// when needed. An earlier version appended "→ target" only while ramping,
-    /// which toggled on and off every tick and shoved the number sideways; a
-    /// fixed-width slot shows the same information without ever reflowing.
-    ///
-    /// Worth showing because the gap can be large and slow: switching from
-    /// Automatic (where macOS may park the fans at 0) to a curve commands the
-    /// new speed within a second, but the fan takes many seconds to physically
-    /// wind up. Without this the popover reads "0 RPM" while everything is in
-    /// fact working, which is indistinguishable from broken.
-    private func rpmReadout(_ fan: Fan, activity: FanActivity) -> some View {
-        HStack(spacing: 3) {
-            if activity.readout == .starting {
-                Text("starting…")
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(Theme.accent)
-            } else {
-                Text(RPM.text(fan.actualRPM))
-                    .font(.callout.weight(.semibold))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-                Text("RPM")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .animation(readingAnimation, value: Int(fan.actualRPM))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            "\(fan.name) fan: \(RPM.labeled(fan.actualRPM)), target \(RPM.labeled(fan.targetRPM))"
-        )
-    }
-
     // MARK: - Minimalist temperature views (when charts are hidden)
 
-    /// A single compact CPU/GPU temperature readout — the whole temperature
-    /// story for the minimalist menu, shown once and grouped (not the obscure
-    /// hottest-core name, and not duplicated in the header).
-    private var compactTemperatureLine: some View {
-        HStack(spacing: 14) {
-            if let cpu = state.cpuTempMax {
-                tempReadout("CPU", cpu)
-            }
-            if let gpu = state.gpuTempMax {
-                tempReadout("GPU", gpu)
-            }
-            if state.cpuTempMax == nil, state.gpuTempMax == nil {
-                Text("—").foregroundStyle(.secondary)
-            }
-            Spacer()
-        }
-    }
-
-    private func tempReadout(_ label: String, _ celsius: Double) -> some View {
-        HStack(spacing: 4) {
-            Text(label)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-            Text(state.temperatureUnit.text(celsius))
-                .font(.callout.weight(.semibold))
-                .monospacedDigit()
-                .foregroundStyle(Theme.temperatureColor(celsius))
-                .contentTransition(.numericText())
-                .animation(readingAnimation, value: state.temperatureUnit.text(celsius))
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(label) \(Int(celsius.rounded())) degrees")
-    }
-
-    /// The full per-sensor list — opt-in for people who want every reading in
-    /// the menu (the Sensors window always has the exhaustive view).
-    ///
-    /// Scrolls inside a height its caller reserves. The rows themselves are
-    /// unchanged: discovery order, never sorted by temperature, the hottest
-    /// emphasized in place — sorting is what made the whole list reshuffle
-    /// every second.
-    private var temperatureListSection: some View {
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: SensorListMetrics.rowSpacing) {
-                ForEach(state.temperatures) { reading in
-                    let isHottest = reading.id == state.hottest?.id
-                    HStack {
-                        Text(reading.label)
-                            .font(.caption.weight(isHottest ? .medium : .regular))
-                            .foregroundStyle(isHottest ? HierarchicalShapeStyle.primary : .secondary)
-                        Spacer()
-                        // Each value tinted by its own heat — the list reads as a
-                        // subtle thermal map instead of flat gray with one orange row.
-                        Text(state.temperatureUnit.text(reading.celsius))
-                            .font(.caption.weight(.medium))
-                            .monospacedDigit()
-                            .foregroundStyle(Theme.temperatureColor(reading.celsius))
-                            .contentTransition(.numericText())
-                            .animation(readingAnimation, value: state.temperatureUnit.text(reading.celsius))
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        // Without this, a list shorter than its reserved height rubber-bands on
-        // a trackpad flick — motion in the one card meant to be still.
-        .scrollBounceBehavior(.basedOnSize)
-    }
-
     // MARK: - Waiting / error states
-
-    private var waitingRow: some View {
-        HStack(spacing: 8) {
-            ProgressView()
-                .controlSize(.small)
-            Text("Waiting for first reading…")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private func errorRow(_ message: String) -> some View {
-        Label(message, systemImage: "exclamationmark.triangle")
-            .font(.caption)
-            .foregroundStyle(Theme.warning)
-            // The same omission as the Control card's error line: a fixed
-            // 380 pt popover truncates any real sentence at one line.
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityLabel("Error: \(message)")
-    }
 
     // MARK: - Footer
 
     /// Needed to open the sensors window scene from inside the popover.
     @Environment(\.openWindow) private var openWindow
+}
 
-    private var footer: some View {
-        HStack {
-            Button("Sensors…") {
-                WindowOpener.openFromPopover(
-                    WindowOpener.ID.sensors, using: openWindow, dismissing: dismissPopover
-                )
-            }
-            .help("Browse every SMC key and export a diagnostics report")
-            Button("Settings…") {
-                WindowOpener.openFromPopover(
-                    WindowOpener.ID.settings, using: openWindow, dismissing: dismissPopover
-                )
-            }
-            .help("All Ice Cube settings")
-            Spacer()
-            Button("Quit") {
-                NSApplication.shared.terminate(nil)
-            }
-            .keyboardShortcut("q")
-        }
-        .controlSize(.small)
+/// The easing used for live readings, or `nil` when the user has turned the
+/// "smooth readings" preference off (values then snap instantly).
+///
+/// On `AppState` rather than on a view because the popover's cards are three
+/// files now and all of them animate the same readings; duplicating the
+/// derivation is how two of them end up disagreeing.
+extension AppState {
+    var readingAnimation: Animation? {
+        chartSettings.smoothReadings ? .easeInOut(duration: 0.35) : nil
     }
 }
