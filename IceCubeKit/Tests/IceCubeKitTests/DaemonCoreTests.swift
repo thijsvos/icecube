@@ -243,6 +243,36 @@ private func makeCore(
     DaemonCore(port: smc, store: store, capabilities: capabilities, sleep: instantSleep)
 }
 
+/// A wall clock that advances one second every time it is read, matching the
+/// `@unchecked Sendable` + `NSLock` idiom the other test doubles in this file use.
+private final class TickingClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private let epoch: Date
+    private var count = 0
+
+    init(epoch: Date) {
+        self.epoch = epoch
+    }
+
+    func next() -> Date {
+        lock.lock()
+        defer { count += 1; lock.unlock() }
+        return epoch.addingTimeInterval(Double(count))
+    }
+}
+
+/// A core whose wall clock is a dial the test turns by hand.
+private func makeClockedCore(
+    smc: FakeSMC,
+    store: MemoryConfigStore = MemoryConfigStore(),
+    now: @escaping @Sendable () -> Date
+) -> DaemonCore {
+    DaemonCore(
+        port: smc, store: store, capabilities: { .fullWakeCapabilities },
+        sleep: instantSleep, now: now
+    )
+}
+
 private func manualConfig(_ rpm: Double = 4000) -> FanConfig {
     FanConfig(mode: .manual, manualTargets: [0: rpm, 1: rpm])
 }
@@ -2315,5 +2345,66 @@ struct DarkWakeHoldThrottleTests {
             await holdLines(core.currentStatus().recentEvents) == 2,
             "one line per dark wake — the throttle resets on will-sleep"
         )
+    }
+}
+
+@Suite("DaemonCore — the decision log the app draws")
+struct DaemonCoreDecisionTests {
+    /// The claim the chart markers make, asserted instead of eyeballed.
+    ///
+    /// A marker is drawn at `DecisionEvent.date`, so if that date is not the
+    /// instant the daemon acted, every marker sits in the wrong place and the
+    /// feature is confidently lying. Before the clock was injectable this was
+    /// only checkable by engaging a curve on real hardware and diffing the app
+    /// against `log show` by eye.
+    @Test("A decision is stamped at the moment the daemon made it, not when it was read")
+    func stampedAtDecisionTime() async throws {
+        let smc = FakeSMC()
+        let epoch = Date(timeIntervalSince1970: 1_753_000_000)
+        let tick = TickingClock(epoch: epoch)
+        // One second per recorded decision, so a stamp taken later — at status
+        // time, say — would land visibly off.
+        let core = makeClockedCore(smc: smc, now: { tick.next() })
+
+        try await core.apply(curveConfig(persists: false))
+        let decisions = try #require(await core.currentStatus().recentDecisions)
+        #expect(!decisions.isEmpty)
+        for (index, decision) in decisions.enumerated() {
+            #expect(
+                decision.date == epoch.addingTimeInterval(Double(index)),
+                "decision \(index) (\(decision.text)) is stamped \(decision.date), not when it happened"
+            )
+        }
+    }
+
+    /// The two logs must not drift: `recentEvents` is what `log show` prints and
+    /// what ~34 assertions in this file pin, `recentDecisions` is what the app
+    /// draws. If they disagree, cross-checking a marker against the unified log
+    /// — the thing a bug reporter is asked to do — stops working.
+    @Test("Every logged event reaches the app with its sentence unchanged")
+    func textsMatchTheUnifiedLog() async throws {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        try await core.apply(curveConfig(persists: false))
+        try await core.apply(manualConfig(5000))
+        let status = await core.currentStatus()
+        let decisions = try #require(status.recentDecisions)
+        #expect(decisions.map(\.text) == status.recentEvents)
+    }
+
+    /// Engaging a curve is the exact case the plan named for hardware
+    /// verification: "confirm markers appear at the moments the log shows
+    /// `curve engaged`". It is a classification, so it can be asserted here.
+    @Test("Engaging a curve produces a marker the chart will draw")
+    func curveEngagedIsDrawable() async throws {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        try await core.apply(curveConfig(persists: false))
+        let decisions = try #require(await core.currentStatus().recentDecisions)
+        let engaged = try #require(
+            decisions.first { $0.text.contains("engaged") },
+            "the daemon no longer says 'engaged' when a curve engages"
+        )
+        #expect(engaged.kind == .engaged)
     }
 }

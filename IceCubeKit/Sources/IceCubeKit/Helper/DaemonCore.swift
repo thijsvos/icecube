@@ -136,12 +136,14 @@ public actor DaemonCore {
         port: any SMCControlPort,
         store: any FanConfigStoring,
         capabilities: @escaping @Sendable () -> PowerCapabilities?,
-        sleep: @escaping @Sendable (Duration) async -> Void = { try? await Task.sleep(for: $0) }
+        sleep: @escaping @Sendable (Duration) async -> Void = { try? await Task.sleep(for: $0) },
+        now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.port = port
         self.store = store
         self.capabilities = capabilities
         self.sleep = sleep
+        self.now = now
         // The injected `sleep` reaches the sequencer for the first time here.
         // Production behaviour is identical (both defaults are `Task.sleep`); it
         // exists so a future ftst-branch `DaemonCoreTests` case is instant.
@@ -151,6 +153,17 @@ public actor DaemonCore {
     }
 
     private let sleep: @Sendable (Duration) async -> Void
+
+    /// Wall-clock, injectable.
+    ///
+    /// Everything else in this file measures *durations* with `ContinuousClock`,
+    /// which is the right tool for watchdogs and deliberately has no wall-clock
+    /// origin. A decision needs one anyway: the app draws it on a chart axis
+    /// made of `Date`s, and "the marker sits where the daemon decided" is the
+    /// whole claim the feature makes. Injecting it is what turns that claim from
+    /// something only checkable against `log show` on real hardware into
+    /// something `DaemonCoreTests` can assert.
+    private let now: @Sendable () -> Date
     /// Reads the live system power capabilities, or nil when neither source
     /// answers. Injected for the same reason `port` is: IceCubeKit must not
     /// import IOKit, and the rule that consumes this is the rule that has to be
@@ -1504,7 +1517,7 @@ public actor DaemonCore {
         // ~34 assertions in DaemonCoreTests depend on those strings, and none
         // of them had to change for this.
         var decisions = status.recentDecisions ?? []
-        decisions.append(DecisionEvent(text: event, date: Date()))
+        decisions.append(DecisionEvent(text: event, date: now()))
         if decisions.count > 20 {
             decisions.removeFirst(decisions.count - 20)
         }
