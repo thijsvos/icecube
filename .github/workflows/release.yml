@@ -56,6 +56,21 @@ jobs:
       - name: Install tools
         run: brew install xcodegen swiftformat
 
+      - name: Note tool versions
+        # Mirrors the step in ci.yml, and matters more here: this workflow
+        # produces the artifact people download, so an xcodegen that generates
+        # differently would ship rather than merely build. Warn, never fail —
+        # blocking a release on a Homebrew bump trades a visibility problem for
+        # an availability one.
+        run: |
+          check() {
+            have=$("$1" --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+            echo "$1 $have (Brewfile documents $2)"
+            [ "$have" = "$2" ] || echo "::warning::$1 drifted $2 -> $have; check its release notes against project.yml"
+          }
+          check xcodegen 2.46.0
+          check swiftformat 0.62.1
+
       # A tag that disagrees with the bundle version ships a build labelled
       # one thing and reporting another, which makes every future bug report
       # ambiguous. Cheapest possible guard, run before anything expensive.
