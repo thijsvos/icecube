@@ -26,10 +26,21 @@ final class AppState: PopoverLifecycleObserving {
     /// True when running against `MockSMCProvider` — the UI shows a badge so
     /// simulated numbers are never mistaken for real hardware.
     let isSimulated: Bool
+    /// Where this launch's preferences live — real `UserDefaults`, or an
+    /// in-memory store when simulated so a simulated session cannot steer the
+    /// real app's next launch.
+    @ObservationIgnored let defaults: any KeyValueStore
     /// Helper daemon lifecycle + fan-control commands (Phase 3).
-    let helper = HelperManager()
-    /// Built-in + user presets (Phase 4).
-    let presets = PresetStore()
+    ///
+    /// Injected, never constructed here. It used to be `HelperManager()` as a
+    /// stored property, which defaults to the real XPC client, the real launchd
+    /// registrar and the real power watcher — and, being a stored-property
+    /// initialiser, ran *before* `isSimulated` was even assigned, so it could
+    /// not have consulted the flag even if it had wanted to. That is how a
+    /// simulated launch came to drive the owner's real fans.
+    let helper: HelperManager
+    /// Built-in + user presets (Phase 4). Injected for the same reason.
+    let presets: PresetStore
     /// Customizable chart/display preferences — the tinkerer surface.
     let chartSettings = ChartSettings()
 
@@ -116,7 +127,7 @@ final class AppState: PopoverLifecycleObserving {
     /// Icon-only also downshifts polling (nothing on screen needs 1 Hz).
     var menuBarDisplay: MenuBarDisplayMode {
         didSet {
-            UserDefaults.standard.set(menuBarDisplay.rawValue, forKey: Self.menuBarDisplayKey)
+            defaults.set(menuBarDisplay.rawValue, forKey: Self.menuBarDisplayKey)
             restartPolling()
         }
     }
@@ -125,19 +136,19 @@ final class AppState: PopoverLifecycleObserving {
 
     /// Display unit; storage and math stay °C, conversion happens in UI only.
     var temperatureUnit: TemperatureUnit {
-        didSet { UserDefaults.standard.set(temperatureUnit.rawValue, forKey: Self.unitKey) }
+        didSet { defaults.set(temperatureUnit.rawValue, forKey: Self.unitKey) }
     }
 
     /// Display sampling cadence (the daemon's safety tick is independent).
     var pollInterval: PollInterval {
         didSet {
-            UserDefaults.standard.set(pollInterval.rawValue, forKey: Self.intervalKey)
+            defaults.set(pollInterval.rawValue, forKey: Self.intervalKey)
             restartPolling()
         }
     }
 
     /// Temperature-threshold notifications.
-    let alerts = AlertManager()
+    let alerts: AlertManager
 
     private static let menuBarDisplayKey = "menuBarDisplay"
     private static let unitKey = "temperatureUnit"
@@ -169,14 +180,39 @@ final class AppState: PopoverLifecycleObserving {
     /// The in-flight chart re-render, cancelled when a newer one supersedes it.
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
 
-    init(provider: any SMCProviding, isSimulated: Bool) {
+    /// Takes the whole graph rather than assembling it, so that simulated mode
+    /// is decided in exactly one place. See ``CompositionRoot``.
+    convenience init(graph: CompositionRoot.Graph) {
+        self.init(
+            provider: graph.provider,
+            isSimulated: graph.isSimulated,
+            helper: graph.helper,
+            presets: graph.presets,
+            defaults: graph.defaults
+        )
+    }
+
+    init(
+        provider: any SMCProviding,
+        isSimulated: Bool,
+        helper: HelperManager,
+        presets: PresetStore,
+        defaults: any KeyValueStore
+    ) {
         self.provider = provider
         self.isSimulated = isSimulated
+        self.helper = helper
+        self.presets = presets
+        self.defaults = defaults
+        // Simulated temperatures are a sine wave with random spikes; posting
+        // real Notification Centre banners about them would be writing fiction
+        // into the user's actual notification history.
+        alerts = AlertManager(defaults: defaults, deliversNotifications: !isSimulated)
         let interval = PollInterval(
-            rawValue: UserDefaults.standard.integer(forKey: Self.intervalKey)
+            rawValue: defaults.integer(forKey: Self.intervalKey)
         ) ?? .oneSecond
         let display = MenuBarDisplayMode(
-            rawValue: UserDefaults.standard.string(forKey: Self.menuBarDisplayKey) ?? ""
+            rawValue: defaults.string(forKey: Self.menuBarDisplayKey) ?? ""
         ) ?? .temperature
         // Built from the SAME rule `restartPolling()` uses. This used to pass
         // `interval.rawValue` straight through, and since the downshift lived
@@ -190,7 +226,7 @@ final class AppState: PopoverLifecycleObserving {
         pollInterval = interval
         menuBarDisplay = display
         temperatureUnit = TemperatureUnit(
-            rawValue: UserDefaults.standard.string(forKey: Self.unitKey) ?? ""
+            rawValue: defaults.string(forKey: Self.unitKey) ?? ""
         ) ?? .celsius
         // Explicit, because constructing a HelperManager no longer starts its
         // own timers — see `HelperManager.start()`. The app is the only caller;
@@ -233,7 +269,7 @@ final class AppState: PopoverLifecycleObserving {
     private func reconcileMenuBarMode() {
         guard let menuBar else { return }
         menuBar.apply(MenuBarMode.resolve(
-            prefersSilentOptionClick: UserDefaults.standard.bool(forKey: MenuBarMode.preferenceKey),
+            prefersSilentOptionClick: defaults.bool(forKey: MenuBarMode.preferenceKey),
             isSetUp: helper.registration == .enabled
         ))
     }

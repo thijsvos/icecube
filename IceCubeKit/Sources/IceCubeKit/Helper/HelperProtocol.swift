@@ -103,8 +103,13 @@ public enum HelperConstants {
     /// name the subsystem directly, and the app is never the one under test.
     public static let logSubsystem: String = {
         let environment = ProcessInfo.processInfo.environment
+        // ICECUBE_SIMULATED belongs here for the same reason the test vars do:
+        // a simulated run writes lines like "curve engaged" into the SAME
+        // subsystem a real investigation greps, and this project has already
+        // lost time to exactly that confusion.
         let underTest = environment["XCTestConfigurationFilePath"] != nil
             || environment["SWIFT_TESTING_ENABLED"] != nil
+            || environment["ICECUBE_SIMULATED"] == "1"
             || ProcessInfo.processInfo.processName.contains("testing-helper")
             || ProcessInfo.processInfo.processName.hasSuffix("PackageTests")
         return underTest ? "io.github.thijsvos.icecube.tests" : "io.github.thijsvos.icecube"

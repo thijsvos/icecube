@@ -168,6 +168,29 @@ final class HelperManager {
 
     /// Defaults are the production wiring, so `HelperManager()` still means
     /// "the real daemon, the real XPC channel, the real preferences".
+    // MARK: - Isolation introspection
+
+    /// Whether the XPC channel is a stand-in rather than the real one.
+    ///
+    /// These three exist for `SimulatedIsolationTests`, which guards the defect
+    /// that let a simulated launch drive the owner's real fans. Asserting on
+    /// the seam's identity is the only way to prove the property — the manager
+    /// deliberately cannot tell the difference in its own logic, and that is
+    /// what makes it testable.
+    var usesSimulatedChannel: Bool {
+        client is SimulatedEnvironment.HelperChannel
+    }
+
+    /// Whether launchd registration is a stand-in rather than `SMAppService`.
+    var usesSimulatedRegistrar: Bool {
+        service is SimulatedEnvironment.Registrar
+    }
+
+    /// Whether the power watcher is a stand-in rather than real IOKit.
+    var usesSimulatedPowerSource: Bool {
+        powerSource is SimulatedEnvironment.PowerSource
+    }
+
     init(
         service: any DaemonRegistering = SMAppServiceRegistrar(),
         client: any HelperChanneling = HelperClient(),
