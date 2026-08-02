@@ -295,10 +295,13 @@ forever on the only machine that can verify it. Measuring the physics directly
 also keeps us inside §3.4's "SMC keys only, one code path, fewer private-API
 risks", which an IOReport-based power reading would not.
 
-Measured on hardware the same day: at a fixed 5950 RPM, R held at 0.89–0.93 °C/W
-across 21.5–24.0 W — the load-invariance property the feature depends on. The
-fan-speed dependence is predicted but **not yet cleanly measured**; see
-docs/THERMAL.md, which says so in the table rather than estimating.
+Measured on hardware: at a fixed 5950 RPM, R held at 0.89–0.93 °C/W across
+21.5–24.0 W — the load-invariance the feature depends on. Fan-speed dependence
+measured 2026-08-03 once a stray load was cleared: **1.04–1.13 °C/W at 3550 RPM
+against 0.89–0.93 at 5950**, i.e. ~20 % better heat transfer for 68 % more fan.
+A third sample that session read 1.89 while the die was still falling, and is
+recorded in docs/THERMAL.md as the settle rule earning its keep — an unsettled
+quotient measures nothing and looks exactly like a real reading.
 
 ## 7. Risks & mitigations
 - **SMC keys vary wildly per model** → curated map + fallback enumeration + community diagnostics pipeline (§3.3). Biggest ongoing cost; design for it.

@@ -114,19 +114,34 @@ The central claim. Three readings at the same fan speed across a range of power:
 load-invariance property holding, and it is what makes the number worth
 tracking over time.
 
-### Fan-speed dependence — **not yet measured**
+### Fan-speed dependence — measured
 
-The prediction is that `R` falls as the fans speed up. One suggestive data point
-exists: an earlier sample at **4950 RPM** read 7.9 W and 48.2 °C die, which
-against a ~38.6 °C airflow reading taken nearby gives `R ≈ 1.2` — higher than the
-0.89–0.93 measured at 5950 RPM, in the predicted direction.
+`R` falls as the fans speed up. Two speeds, same machine, same session:
 
-It is **not** in the table above, because the airflow reading was not captured at
-the same instant, and a number assembled from two moments is not a measurement.
+| Fans (RPM) | Power (W) | Die (°C) | Airflow (°C) | R (°C/W) |
+| --- | --- | --- | --- | --- |
+| 3550 | 9.0 | 53.1 | 44.7 | **1.04** |
+| 3550 | 8.6 | 53.2 | 43.8 | **1.13** |
+| 5950 | 21.5–24.0 | 65.7–66.8 | 46.8–47.0 | **0.89–0.93** |
 
-Getting a clean figure needs readings at several fan speeds with the machine
-otherwise steady — switch presets (Quiet → Balanced → Cold → Max), let each
-settle, and record. Contributions welcome; see below.
+Roughly **20 % better heat transfer for a 68 % increase in fan speed** — which is
+the trade this app exists to let you make, in measured units.
+
+Two honest caveats on the low-speed rows. They sit close to the 5 W power floor
+(8.6–9.0 W), where the quotient is noisier — the two samples differ by 9 %, against
+2 % at the high-speed end. And they are a *lower bound* on the effect: the die is
+also cooler there, and silicon leaks less current when cool, so some of the
+difference is the chip, not the fans.
+
+**A third sample is worth recording because it is the settle rule earning its
+keep.** Taken seconds after a cooldown ended, it read **1.89 °C/W** — while the die
+was still falling from 57.9 °C to 53.1 °C. It is not a worse measurement of the
+same thing; it is a measurement of nothing, and it looks identical to a real one.
+`isSettled` is what stops that number reaching a user, and the figure above it in
+this table is what it looks like once the machine has stopped moving.
+
+Readings at Quiet and Max would extend the table further; contributions welcome
+(see below).
 
 ### Idle draw
 
@@ -176,4 +191,5 @@ The measurements above cover exactly one Mac. If you want to add yours:
 3. Open an issue with those numbers and the preset that was running.
 
 Readings at several fan speeds on one machine are more useful than single
-readings from many, because the fan-speed row above is the one still empty.
+readings from many, because the interesting quantity is how much cooling a given
+amount of noise buys — and that is a per-machine curve, not a single number.
