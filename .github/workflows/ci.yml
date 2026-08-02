@@ -74,14 +74,28 @@ jobs:
       - name: Lint
         run: swiftformat --lint .
 
+      # `-warnings-as-errors` here and `SWIFT_TREAT_WARNINGS_AS_ERRORS` below:
+      # "builds clean with no new warnings" is the project's definition of done
+      # (CLAUDE.md), and until 2026-08-02 nothing enforced it — a superfluous
+      # `await` sat in DaemonCoreTests as the repo's only warning until an audit
+      # found it. A rule nothing checks is a rule that decays.
+      #
+      # CI-only, deliberately: this is NOT set in project.yml, so a local build
+      # still tolerates the half-finished code you get mid-edit. The gate is on
+      # what LANDS, not on how you get there.
+      #
+      # The cost is real and accepted: a macOS SDK deprecation can fail this on
+      # a PR that did not cause it. When that happens the fix is to address the
+      # deprecation, not to quietly delete this flag.
       - name: Run IceCubeKit tests
-        run: cd IceCubeKit && swift test
+        run: cd IceCubeKit && swift test -Xswiftc -warnings-as-errors
 
       - name: Build app (unsigned)
         run: >
           xcodebuild -project IceCube.xcodeproj -scheme IceCube
           -configuration Debug -derivedDataPath build
           build CODE_SIGNING_ALLOWED=NO
+          SWIFT_TREAT_WARNINGS_AS_ERRORS=YES
 
       # Layout + the capability boundary (app must link no SMC writer).
       # Ad-hoc signed (`CODE_SIGN_IDENTITY=-`), NOT unsigned like the build step
@@ -94,6 +108,7 @@ jobs:
           xcodebuild test -project IceCube.xcodeproj -scheme IceCube
           -configuration Debug -derivedDataPath build
           CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=YES DEVELOPMENT_TEAM=""
+          SWIFT_TREAT_WARNINGS_AS_ERRORS=YES
 
       - name: Verify bundle
         run: sh scripts/verify-bundle.sh
