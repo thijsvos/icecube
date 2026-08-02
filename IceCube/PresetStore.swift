@@ -1,4 +1,4 @@
-// PresetStore.swift — built-in presets (Auto/Quiet/Balanced/Max) + user presets persisted as JSON.
+// PresetStore.swift — built-in presets (Quiet/Balanced/Cold/Max) + user presets persisted as JSON.
 
 import Foundation
 import IceCubeKit

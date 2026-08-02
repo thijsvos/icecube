@@ -1998,7 +1998,7 @@ struct SensorAdmissionCharacterizationTests {
 
         let events = await core.currentStatus().recentEvents
         #expect(
-            await resolvedCounts(events) == [5],
+            resolvedCounts(events) == [5],
             "membership is existence: all five keys exist, so all five are admitted"
         )
         // The other half of the bargain, and the reason admitting them is safe.

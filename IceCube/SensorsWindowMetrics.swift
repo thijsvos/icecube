@@ -48,9 +48,35 @@ nonisolated enum SensorsWindowMetrics {
     /// fan row despite the flame icon and the RPM-range caption.
     private static let rowHeight: CGFloat = 24
 
+    /// The decisions section is a **fixed-height scroller**, not a growing list.
+    ///
+    /// Every other section here is modelled as `n × rowHeight`, which works
+    /// because a sensor row is one line of known height. A decision row is not:
+    /// the daemon's sentences wrap to one, two or three lines depending on
+    /// content and window width, and the app retains up to 500 of them. No
+    /// `n × rowHeight` model can track that — so instead of guessing, the view
+    /// is given a constant height and scrolls inside it, which makes this
+    /// arithmetic exact rather than approximately right.
+    /// 88 pt is roughly four wrapped caption lines. Deliberately modest: the
+    /// sensor list is what this window is for, `maximumFrameHeight` is a hard
+    /// ceiling, and a taller timeline would permanently squeeze the sensors on
+    /// exactly the sensor-rich Macs that need the room most.
+    static let decisionSectionHeight: CGFloat = 88
+
+    /// The whole decisions block when it is present: its `Section` header, the
+    /// gap above it, and the fixed-height scroller.
+    ///
+    /// Zero when there is nothing to show. A fresh install has made no
+    /// decisions, and charging it for an empty box would shrink the sensor
+    /// list to pay for a section with no content in it.
+    static func decisionChrome(hasDecisions: Bool) -> CGFloat {
+        hasDecisions ? 28 + 20 + decisionSectionHeight : 0
+    }
+
     /// Everything in the list that is not a data row: 10 pt top inset, two
     /// 28 pt `Section` headers, the 20 pt gap between the sections, 10 pt
-    /// bottom inset.
+    /// bottom inset. The decisions block is added separately by
+    /// ``decisionChrome(hasDecisions:)`` because it is conditional.
     private static let listChrome: CGFloat = 10 + 28 + 20 + 28 + 10
 
     /// The controls strip — `.mini` controls under `.padding(10)`, measured at
@@ -131,9 +157,14 @@ nonisolated enum SensorsWindowMetrics {
     ///   - availableHeight: `NSScreen.visibleFrame.height` for the screen the
     ///     window will land on, or `.infinity` when there is no screen to ask —
     ///     which falls back to ``maximumFrameHeight``, not to the floor.
-    static func frameHeight(rowCount: Int?, availableHeight: CGFloat) -> CGFloat {
+    static func frameHeight(
+        rowCount: Int?,
+        availableHeight: CGFloat,
+        hasDecisions: Bool = false
+    ) -> CGFloat {
         let rows = max(0, rowCount ?? unmeasuredRowCount)
-        let wanted = titleBarHeight + controlsBar + listChrome + slack + rowHeight * CGFloat(rows)
+        let wanted = titleBarHeight + controlsBar + listChrome + decisionChrome(hasDecisions: hasDecisions)
+            + slack + rowHeight * CGFloat(rows)
         // The ceiling is floored first. On a small enough display the
         // screen-relative limit would otherwise drop below `minimumFrameHeight`
         // and the two clamps would fight, yielding a window shorter than the

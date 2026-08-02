@@ -157,7 +157,10 @@ struct IceCubeApp: App {
                 // No main screen (headless, or mid display change) means no
                 // screen-relative limit — fall back to the absolute cap rather
                 // than to the floor.
-                availableHeight: NSScreen.main?.visibleFrame.height ?? .infinity
+                availableHeight: NSScreen.main?.visibleFrame.height ?? .infinity,
+                // The decisions section only exists when the daemon has said
+                // something, so it only costs height then.
+                hasDecisions: !appState.helper.decisions.isEmpty
             )
         )
 
