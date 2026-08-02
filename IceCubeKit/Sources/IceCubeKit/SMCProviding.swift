@@ -59,6 +59,16 @@ public extension SMCProviding {
     /// One timestamped reading of everything — the unit that polling publishes
     /// and charts consume.
     func snapshot() async throws(IceCubeError) -> SMCSnapshot {
-        try await SMCSnapshot(date: Date(), fans: fans(), temperatures: temperatures())
+        // Power is read last and its failure is swallowed on purpose. A Mac
+        // with no `PSTR`/`PDTR` must still get fans and temperatures — the
+        // whole app depends on those, and watts is an extra. `power()` already
+        // returns nil for "no such key"; the `try?` covers a transport hiccup
+        // on a machine that does have one.
+        try await SMCSnapshot(
+            date: Date(),
+            fans: fans(),
+            temperatures: temperatures(),
+            power: (try? power()) ?? nil
+        )
     }
 }

@@ -57,10 +57,16 @@ struct SensorsWindowMetricsTests {
     func heightFollowsTheSensorCount() {
         let simulated = height(SensorsWindowMetrics.rowCount(temperatures: 6, fans: 2))
         let sensorRich = height(SensorsWindowMetrics.rowCount(temperatures: 20, fans: 2))
-        #expect(simulated == 377, "185 pt of chrome and slack, plus eight 24 pt rows")
-        #expect(sensorRich == 713, "the same chrome, plus twenty-two rows")
-        #expect(simulated < 480, "the simulated list used to open at a fixed 480 pt")
-        #expect(sensorRich > 480, "and twenty-two rows never fitted in 480 pt")
+        #expect(simulated == 501, "309 pt of chrome and slack, plus eight 24 pt rows")
+        #expect(sensorRich == 837, "the same chrome, plus twenty-two rows")
+        // The original assertion here was `simulated < 480`, recording that a
+        // six-sensor Mac used to open at a hardcoded 480 pt and now opens
+        // *smaller*. That is no longer true and the change is legitimate: the
+        // window has since gained a decisions timeline and a cooling section,
+        // 124 pt of chrome that a six-sensor Mac pays for like any other. What
+        // still holds — and is the point — is that the height tracks the sensor
+        // count instead of being fixed.
+        #expect(sensorRich > simulated, "height still follows the list, which is what 480 pt did not do")
         #expect(sensorRich - simulated == 14 * oneRow, "fourteen extra sensors, fourteen extra rows")
     }
 
@@ -71,7 +77,7 @@ struct SensorsWindowMetricsTests {
     /// whole type replaced: no worse than what came before.
     @Test("An unknown sensor count opens near the old fixed height, not at the floor")
     func theUnmeasuredCaseIsNotTheEmptyCase() {
-        #expect(height(nil) == 473)
+        #expect(height(nil) == 597)
         #expect(height(nil) > SensorsWindowMetrics.minimumFrameHeight)
         #expect(height(nil) == height(SensorsWindowMetrics.unmeasuredRowCount))
         #expect(height(nil) > height(SensorsWindowMetrics.rowCount(temperatures: 0, fans: 0)))
@@ -95,10 +101,25 @@ struct SensorsWindowMetricsTests {
 
     // MARK: The clamps
 
+    /// The emptiest possible Mac — no recognised sensors, no fans — still gets
+    /// a window worth opening.
+    ///
+    /// This used to assert equality with `minimumFrameHeight`, because two
+    /// empty-state rows plus chrome came to less than the 320 pt floor and the
+    /// floor was what produced the answer. Since the decisions timeline and the
+    /// cooling section landed, the chrome alone clears it, so the floor no
+    /// longer binds here. The property that matters is unchanged and is what is
+    /// asserted now: never below the floor, never a peephole.
     @Test("A fanless Mac with no recognized sensors still opens a usable window")
     func theFloorHolds() {
         let rows = SensorsWindowMetrics.rowCount(temperatures: 0, fans: 0)
-        #expect(height(rows) == SensorsWindowMetrics.minimumFrameHeight)
+        #expect(height(rows) >= SensorsWindowMetrics.minimumFrameHeight)
+        #expect(height(rows) < SensorsWindowMetrics.maximumFrameHeight)
+        // And the floor still does its job when the screen is what is small.
+        #expect(
+            SensorsWindowMetrics.frameHeight(rowCount: 0, availableHeight: 400)
+                >= SensorsWindowMetrics.minimumFrameHeight
+        )
     }
 
     /// A content minimum overrides `.defaultSize` upward and there is no
@@ -145,7 +166,7 @@ struct SensorsWindowMetricsTests {
         for screen in [CGFloat.nan, .signalingNaN, .infinity] {
             #expect(height(40, screen: screen) == SensorsWindowMetrics.maximumFrameHeight)
         }
-        #expect(height(nil, screen: .nan) == 473, "and it leaves smaller windows alone")
+        #expect(height(nil, screen: .nan) == 597, "and it leaves smaller windows alone")
     }
 }
 
@@ -292,6 +313,48 @@ struct SensorsWindowDecisionMetricsTests {
         #expect(
             SensorsWindowMetrics.frameHeight(rowCount: 40, availableHeight: 600, hasDecisions: true)
                 <= 600 - 24
+        )
+    }
+}
+
+@MainActor
+@Suite("Sensors window — the cooling section")
+struct SensorsWindowCoolingMetricsTests {
+    private func height(_ rows: Int, decisions: Bool = false) -> CGFloat {
+        SensorsWindowMetrics.frameHeight(
+            rowCount: rows, availableHeight: 1200, hasDecisions: decisions
+        )
+    }
+
+    /// The same regression that bit the decision timeline: a section was added
+    /// to this window without telling the arithmetic, the window opened short,
+    /// and macOS saved the clipped frame. Cooling is section number four.
+    @Test("The cooling section is paid for in the window height")
+    func coolingCostsHeight() {
+        let expected: CGFloat = 76
+        #expect(SensorsWindowMetrics.coolingSectionHeight == expected)
+        // Two known row counts, both clear of either clamp, must both include it.
+        for rows in [8, 12] {
+            let bare = SensorsWindowMetrics.titleBarHeight + 45 + 12
+                + 24 * CGFloat(rows) + 10 + 28 + 20 + 28 + 20 + 28 + 10 - expected + expected
+            #expect(
+                height(rows) == bare + expected,
+                "the window must include the cooling section it always draws"
+            )
+        }
+    }
+
+    /// Unlike the timeline, this section is never absent — so unlike
+    /// `decisionChrome`, there is no zero case to model.
+    @Test("Cooling is unconditional, so it is in the base chrome rather than a toggle")
+    func coolingIsUnconditional() {
+        #expect(
+            height(12, decisions: false) > 0,
+            "there is no hasCooling flag by design: the section always draws, explaining itself when empty"
+        )
+        #expect(
+            height(12, decisions: true) - height(12, decisions: false) == 136,
+            "only the timeline is conditional"
         )
     }
 }

@@ -271,6 +271,35 @@ Work in order. Each phase ends with its acceptance criteria demonstrably true (s
   3. **No sleep regression.** `pmset -g log | grep -iE "Delays to Sleep|Clamshell Sleep"` — `IceCubeHelper` must appear in no delay line, and lid-close → `Entering Sleep state` must stay well under a second.
   4. **A closed-lid night.** Between the evening `Clamshell Sleep` and the morning `Wake … [CDNVA]` there must be **no** `curve engaged`, `holding fans at minimum`, `guardian:` or `SAFETY:` lines — while `pmset -g log` confirms the `DarkWake … [CDNP]` cycles really happened. **SETTLED 2026-07-31, and the pre-registered remedy was wrong.** `kIOMessageSystemHasPoweredOn` is clean: all five `wake: resuming … (the system powered on)` lines land on `[CDNVA]`/`[CDNVAP]` full wakes, including three `DarkWake to FullWake` promotions, and no pure `[CDNP]` ever produced one. The rule that fired on dark wakes was **heartbeat-after-a-nap** (3 of 3 `[CDNP]`/`[CDNPB]` wakes), because the menu-bar app's 5 s timer runs perfectly well inside a dark wake — so gating on `sawNap` would not have helped either: the nap was real. On 00:31:51 an rtc/Maintenance dark wake unparked the daemon and drove both fans to 6800 RPM for 69 s with the lid shut. The remedy is a positive `PowerCapabilities` full-wake determination gating **every** discretionary unpark — see the §4.3.6 note below.
 
+### Cooling efficiency (2026-08-02)
+
+Added SoC power to the snapshot and derived thermal resistance (°C/W) from it —
+`CoolingEfficiency` in IceCubeKit, a Sensors-window readout, an opt-in chart row,
+and `DiagnosticsReport` schema v4. `SMCProviding.power()` had been implemented on
+both providers since Phase 1 and called only by `icecube-diag --watch`; this is
+what it was for.
+
+**`ProcessInfo.thermalState` was considered and rejected.** It is the obvious way
+to ask macOS whether a Mac is struggling, and it is unused repo-wide. Probed on
+Mac14,9 before committing to the alternative:
+
+```
+$ pmset -g therm
+Note: No thermal warning level has been recorded
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+```
+
+Zero thermal log lines in six hours. A feature built on it would read "nominal"
+forever on the only machine that can verify it. Measuring the physics directly
+also keeps us inside §3.4's "SMC keys only, one code path, fewer private-API
+risks", which an IOReport-based power reading would not.
+
+Measured on hardware the same day: at a fixed 5950 RPM, R held at 0.89–0.93 °C/W
+across 21.5–24.0 W — the load-invariance property the feature depends on. The
+fan-speed dependence is predicted but **not yet cleanly measured**; see
+docs/THERMAL.md, which says so in the table rather than estimating.
+
 ## 7. Risks & mitigations
 - **SMC keys vary wildly per model** → curated map + fallback enumeration + community diagnostics pipeline (§3.3). Biggest ongoing cost; design for it.
 - **Free-Apple-ID helper approval unproven** → Phase 0.5 spike with the fallback documented *before* it runs (manual `sudo launchctl bootstrap` install for Phases 3–5).

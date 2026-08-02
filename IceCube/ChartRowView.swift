@@ -56,6 +56,11 @@ struct ChartRowView: View {
             return Theme.temperatureColor(latest)
         case .rpm:
             return Theme.accent
+        case .watts:
+            // Power is the *cause*, not the response, so it deliberately does
+            // not share the fans' accent — a reader glancing at the stack
+            // should not mistake the load line for another fan line.
+            return Theme.warning
         }
     }
 

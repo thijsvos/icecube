@@ -73,11 +73,28 @@ nonisolated enum SensorsWindowMetrics {
         hasDecisions ? 28 + 20 + decisionSectionHeight : 0
     }
 
-    /// Everything in the list that is not a data row: 10 pt top inset, two
-    /// 28 pt `Section` headers, the 20 pt gap between the sections, 10 pt
-    /// bottom inset. The decisions block is added separately by
-    /// ``decisionChrome(hasDecisions:)`` because it is conditional.
-    private static let listChrome: CGFloat = 10 + 28 + 20 + 28 + 10
+    /// The Cooling section: two value rows plus its explanatory caption.
+    ///
+    /// Unconditional, unlike the timeline — the section is always drawn, and
+    /// when there is no reading it explains *why* rather than disappearing, so
+    /// there is no empty-box case to avoid paying for.
+    ///
+    /// Two 22 pt value rows, a single-line 16 pt caption, and the spacing
+    /// between them.
+    ///
+    /// The caption is deliberately one line with the rest on hover. At three
+    /// wrapped lines this section cost 168 pt of chrome, which pushed a
+    /// 24-row Mac permanently against `maximumFrameHeight` — the sensor list
+    /// is what this window is for, and it should not be squeezed to hold
+    /// prose that a tooltip and `docs/THERMAL.md` carry better.
+    static let coolingSectionHeight: CGFloat = 76
+
+    /// Everything in the list that is not a data row: 10 pt top inset, three
+    /// 28 pt `Section` headers, the two 20 pt gaps between them, 10 pt bottom
+    /// inset, and the Cooling section. The decisions block is added separately
+    /// by ``decisionChrome(hasDecisions:)`` because it alone is conditional.
+    private static let listChrome: CGFloat =
+        10 + 28 + 20 + 28 + 20 + 28 + 10 + coolingSectionHeight
 
     /// The controls strip — `.mini` controls under `.padding(10)`, measured at
     /// 44 pt — plus the 1 pt `Divider` below it.
@@ -105,7 +122,18 @@ nonisolated enum SensorsWindowMetrics {
 
     /// The absolute ceiling. Beyond this a 560 pt-wide window reads as a broken
     /// column rather than a sensor list, however many sensors there are.
-    static let maximumFrameHeight: CGFloat = 860
+    ///
+    /// Raised from 860 on 2026-08-02, by exactly the 124 pt the Cooling section
+    /// and its header/gap added. The judgement this number encodes is about how
+    /// long the *list* may get before the proportions look wrong — and chrome is
+    /// not list, so leaving it at 860 while adding chrome would have quietly
+    /// shortened the sensor list this window exists for. A 24-row Mac had
+    /// started clamping.
+    ///
+    /// This is an aesthetic bound, not a fit-on-screen one: `frameHeight` also
+    /// clamps to `availableHeight - screenMargin`, which is 1010 pt on the
+    /// owner's 1130 pt visible frame and governs on anything smaller.
+    static let maximumFrameHeight: CGFloat = 984
 
     /// How much of the usable height to leave alone. `visibleFrame` has
     /// already excluded the menu bar and the Dock (measured here: 1169 pt of

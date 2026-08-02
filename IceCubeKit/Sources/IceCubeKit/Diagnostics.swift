@@ -95,6 +95,23 @@ public struct DiagnosticsReport: Sendable, Codable, Equatable {
     /// read it. Attaching it is the difference between a reproducible report
     /// and a prose description of a noise.
     public let decisions: [DecisionEvent]?
+    /// Total SoC package power at capture, in watts, or nil on a Mac with no
+    /// usable key.
+    ///
+    /// Optional so a v3 report still decodes. This is the field `icecube-diag`'s
+    /// own doc comment had been arguing for: watts beside a die temperature is
+    /// what separates *"you are running something heavy"* from *"your cooling
+    /// is not working"*, and until v4 the artefact people attach to issues
+    /// could not tell those apart.
+    public let watts: Double?
+    /// Thermal resistance, °C per watt, when the machine was settled enough to
+    /// measure it — see ``CoolingEfficiency`` and `docs/THERMAL.md`.
+    ///
+    /// Nil is common and is not a failure: it means the machine was mid-
+    /// transient, below the power floor, or has no airflow sensor to reference.
+    /// A number here describes the cooling system; nil describes nothing, which
+    /// is why the two are distinguishable rather than collapsed to 0.
+    public let coolingResistance: Double?
 
     /// Captures a report from `provider` right now.
     /// - Parameter writePath: the daemon's last write-path self-test, when one
@@ -105,11 +122,12 @@ public struct DiagnosticsReport: Sendable, Codable, Equatable {
         isSimulated: Bool,
         appVersion: String,
         writePath: WritePathReport? = nil,
-        decisions: [DecisionEvent]? = nil
+        decisions: [DecisionEvent]? = nil,
+        coolingResistance: Double? = nil
     ) async throws(IceCubeError) -> DiagnosticsReport {
         let snapshot = try await provider.snapshot()
         return try await DiagnosticsReport(
-            schemaVersion: 3,
+            schemaVersion: 4,
             generatedAt: snapshot.date,
             modelIdentifier: HostInfo.modelIdentifier(),
             osVersion: HostInfo.osVersion(),
@@ -119,7 +137,9 @@ public struct DiagnosticsReport: Sendable, Codable, Equatable {
             temperatures: snapshot.temperatures,
             keys: provider.keyDump(),
             writePath: writePath,
-            decisions: decisions
+            decisions: decisions,
+            watts: snapshot.power,
+            coolingResistance: coolingResistance
         )
     }
 

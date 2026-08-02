@@ -40,6 +40,7 @@ dependencies**; small footprint is a design goal, not an accident.
 | ⌥-click the menu bar icon to jump to the next preset | ✅ |
 | Curve keeps running at boot, app closed — daemon-side | ✅ |
 | Sensors browser (every SMC key, live) + JSON diagnostics export | ✅ |
+| SoC power draw, and cooling efficiency in °C/W — *is it hot, or is cooling failing?* | ✅ |
 | Decision timeline: the charts mark *why* the fans moved, in the daemon's words | ✅ |
 | CSV history export, temperature alerts, launch at login, °C/°F | ✅ |
 | Update check via GitHub Releases (link only, never auto-install) | ✅ |
@@ -119,6 +120,22 @@ fighting you. Off until you turn it on, and both sides are your own choices.
 
 Being app-side, it does not fire while a persisted curve runs with Ice Cube
 closed — that curve keeps running exactly as configured.
+
+### Cooling efficiency
+
+Temperature alone cannot tell you whether a hot Mac is working hard or failing to
+shed heat — 95 °C means one thing while exporting video and another while idle.
+Ice Cube reads the SoC's power draw and reports **thermal resistance** in degrees
+per watt: how much the chip heats up for each watt it burns. Unlike temperature,
+that number is comparable to itself over time, so a slow rise across months is
+dust or dried paste rather than a busier week.
+
+It is shown only when the machine has held steady for 20 seconds, because the
+figure is meaningless mid-transient, and it compares your Mac to *its own past* —
+the reference is a sensor inside the case, not the room. The physics, every
+constant, the measurements behind them and the limits are in
+[docs/THERMAL.md](docs/THERMAL.md). As with everything else here, the numbers come
+from one verified Mac.
 
 ## Safety design
 
