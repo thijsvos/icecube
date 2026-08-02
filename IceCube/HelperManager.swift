@@ -103,6 +103,8 @@ final class HelperManager {
     /// Where preferences live. Injected so tests get an isolated suite instead
     /// of scribbling on the developer's own `standard` defaults.
     private let defaults: any KeyValueStore
+    /// What the app remembers about fan control between launches.
+    private let memory: FanControlMemory
     /// Why registration cannot proceed, or nil.
     ///
     /// A closure because the real answer reads this process's code signature and
@@ -140,6 +142,7 @@ final class HelperManager {
         self.service = service
         self.client = client
         self.defaults = defaults
+        memory = FanControlMemory(defaults: defaults)
         self.blocker = blocker
         self.powerSource = powerSource
         self.client.onDisconnect = { [weak self] in
@@ -293,11 +296,10 @@ final class HelperManager {
         // wake, or the app would resurrect a config the user just switched off.
         deferredConfig = nil
         deferredSince = nil
-        defaults.removeObject(forKey: Self.lastCurveKey)
+        memory.forgetEverything()
         // Turning the feature off is a clean slate, not a pause. Leaving a
         // preference behind would mean re-enabling later silently resurrects a
         // curve from a session the user has long forgotten.
-        defaults.removeObject(forKey: Self.preferenceKey)
         // …and the clean slate has to include the once-per-session latch, or
         // the slate is only half wiped.
         //
@@ -385,9 +387,6 @@ final class HelperManager {
     /// daemon's status remains the truth for what is actually enforced).
     private(set) var lastAppliedConfig: FanConfig?
 
-    private static let lastCurveKey = "lastCurveConfig"
-    /// The user's last deliberate mode choice. See ``storedPreference()``.
-    private static let preferenceKey = "startupPreference"
     /// Guards the once-per-session auto-resume of the last curve on launch.
     @ObservationIgnored private var didAutoResume = false
 
@@ -430,12 +429,7 @@ final class HelperManager {
         // the next launch. The user would get fan control they never
         // successfully engaged, resumed without any interaction, after being
         // shown an error saying it failed.
-        rememberPreference(for: config)
-        if config.mode == .curve, let data = try? JSONEncoder().encode(config) {
-            defaults.set(data, forKey: Self.lastCurveKey)
-        } else if config.mode == .auto {
-            defaults.removeObject(forKey: Self.lastCurveKey)
-        }
+        memory.remember(applied: config)
         return .ok
     }
 
@@ -489,12 +483,6 @@ final class HelperManager {
     /// `UserDefaults.standard` here instead, which quietly undid the point of
     /// injecting it: under test that read the developer's own preference, so
     /// the power rule's assertions depended on a setting outside the test.
-    private var persistCurvePreference: Bool {
-        defaults.bool(forKey: Self.persistCurveKey)
-    }
-
-    private static let persistCurveKey = "persistCurve"
-
     /// Why a quick-switch was declined, or nil when it may proceed.
     ///
     /// Pure and static so the rule can be tested directly. The obvious
@@ -555,7 +543,7 @@ final class HelperManager {
         }
         guard let next = PresetCycle.next(after: lastAppliedConfig, in: cycle) else { return nil }
         log.notice("quick-switch: \(next.name, privacy: .public)")
-        await applyPreset(next, persistCurve: persistCurvePreference)
+        await applyPreset(next, persistCurve: memory.persistsCurveWithoutApp)
         // `applyPreset` swallows failures into `lastError`; report honestly
         // rather than claiming a switch that did not happen.
         return lastError == nil ? next : nil
@@ -573,10 +561,7 @@ final class HelperManager {
     /// The last curve profile the app saved, with the current "Keep running"
     /// preference applied (not whatever flag was stored with it).
     private func storedCurveConfig() -> FanConfig? {
-        guard let data = defaults.data(forKey: Self.lastCurveKey),
-              var config = try? JSONDecoder().decode(FanConfig.self, from: data),
-              config.mode == .curve else { return nil }
-        config.persistsWithoutApp = persistCurvePreference
+        guard let config = memory.lastCurve, config.mode == .curve else { return nil }
         return config
     }
 
@@ -618,31 +603,12 @@ final class HelperManager {
     /// how "Automatic" used to be recorded, which made a deliberate Automatic
     /// indistinguishable from a fresh install.
     private func storedPreference() -> StartupPolicy.Preference? {
-        defaults.string(forKey: Self.preferenceKey)
-            .flatMap(StartupPolicy.Preference.init(rawValue:))
+        memory.storedPreference
     }
 
     /// Records a deliberate choice. Manual is not a startup mode — it is
     /// watchdogged and must never be what an app launch puts you in — so it
     /// leaves the stored preference untouched.
-    private func rememberPreference(for config: FanConfig) {
-        switch config.mode {
-        case .curve:
-            defaults.set(
-                StartupPolicy.Preference.curve.rawValue, forKey: Self.preferenceKey
-            )
-        case .auto:
-            // Unreachable from the UI since the macOS preset was removed — auto
-            // is now only ever a daemon resting state, never a user choice. If
-            // one does arrive, forget the stored preference rather than record
-            // an intent nothing can express: "never chose" is the truth, and it
-            // lands the next launch on the fallback curve.
-            defaults.removeObject(forKey: Self.preferenceKey)
-        case .manual:
-            break
-        }
-    }
-
     // MARK: - Power-aware profiles
 
     private static let powerRuleKey = "powerProfileRule"
@@ -690,7 +656,7 @@ final class HelperManager {
               let preset = PresetStore.builtins.first(where: { $0.kind == kind })
         else { return }
         log.notice("power rule: switching to \(preset.name, privacy: .public)")
-        await applyPreset(preset, persistCurve: persistCurvePreference)
+        await applyPreset(preset, persistCurve: memory.persistsCurveWithoutApp)
     }
 
     // MARK: - Write-path self-test (PLAN.md §4.3.6)

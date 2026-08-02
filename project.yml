@@ -126,6 +126,7 @@ targets:
       - IceCube/CurveEditorModel.swift
       - IceCube/HelperManager.swift
       - IceCube/HelperDependencies.swift
+      - IceCube/FanControlMemory.swift
       - IceCube/HelperClient.swift
       - IceCube/PresetStore.swift
       - IceCube/PowerSourceMonitor.swift

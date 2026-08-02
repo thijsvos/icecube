@@ -67,60 +67,11 @@ struct FanControlSection: View {
     private var content: some View {
         switch helper.registration {
         case .unknown, .notRegistered:
-            onboarding
+            FanControlOnboarding(helper: helper, dismissPopover: dismissPopover)
         case .requiresApproval:
-            approvalPrompt
+            FanControlOnboarding(helper: helper, dismissPopover: dismissPopover)
         case .enabled:
             enabledContent
-        }
-    }
-
-    // MARK: - Onboarding & approval
-
-    /// Both pre-enabled states hand off to the guided setup window rather than
-    /// trying to run the flow inside a popover.
-    ///
-    /// The popover dismisses itself whenever the user clicks away — including
-    /// when they go to System Settings to grant the permission — so the one
-    /// moment they most need guidance was the one moment this card could not be
-    /// on screen.
-    private var onboarding: some View {
-        setupPrompt(
-            title: "Fan control is off",
-            icon: "fan.slash",
-            message: "Ice Cube can run your fans quieter or cooler. It needs your "
-                + "permission once — takes about ten seconds.",
-            button: "Set Up Fan Control…"
-        )
-    }
-
-    private var approvalPrompt: some View {
-        setupPrompt(
-            title: "Almost there",
-            icon: "checkmark.shield",
-            message: "Just needs your approval in System Settings. Ice Cube will "
-                + "walk you through it.",
-            button: "Finish Setup…"
-        )
-    }
-
-    private func setupPrompt(
-        title: String, icon: String, message: String, button: String
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label(title, systemImage: icon)
-                .font(.callout.weight(.medium))
-            Text(message)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Button(button) {
-                WindowOpener.openFromPopover(
-                    WindowOpener.ID.setup, using: openWindow, dismissing: dismissPopover
-                )
-            }
-            .controlSize(.small)
-            .primaryGlassButton()
         }
     }
 
@@ -136,12 +87,13 @@ struct FanControlSection: View {
         case .versionMismatch:
             // The version number was the whole message before. It told the user
             // nothing they could act on and read as a fault they had caused.
-            setupPrompt(
+            FanControlSetupPrompt(
                 title: "Update needed",
                 icon: "arrow.triangle.2.circlepath",
                 message: "Ice Cube was updated. One more step finishes it — fan "
                     + "control is paused until then.",
-                button: "Finish Update…"
+                button: "Finish Update…",
+                dismissPopover: dismissPopover
             )
         case .connected:
             // A Mac with no controllable fans is a supported configuration, not
