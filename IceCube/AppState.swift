@@ -117,7 +117,7 @@ final class AppState: PopoverLifecycleObserving {
         refreshTask = nil
     }
 
-    private static let uiLog = Logger(subsystem: "io.github.thijsvos.icecube", category: "ui")
+    private static let uiLog = Logger(subsystem: HelperConstants.logSubsystem, category: "ui")
 
     /// The shared x axis for all chart rows: trailing `window`, ending at the
     /// newest sample — every row scrolls in lockstep.

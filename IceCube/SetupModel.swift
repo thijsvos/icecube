@@ -17,7 +17,7 @@ import SwiftUI
 @MainActor
 final class SetupModel {
     private let helper: HelperManager
-    private let log = Logger(subsystem: "io.github.thijsvos.icecube", category: "ui")
+    private let log = Logger(subsystem: HelperConstants.logSubsystem, category: "ui")
 
     /// Set once the user presses the enable button, so the flow can distinguish
     /// "hasn't asked yet" from "asked, waiting on System Settings" — the same

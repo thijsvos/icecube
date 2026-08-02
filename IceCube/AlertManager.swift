@@ -1,6 +1,7 @@
 // AlertManager.swift — temperature-threshold notifications with a graceful permission flow.
 
 import Foundation
+import IceCubeKit
 import Observation
 import os
 import UserNotifications
@@ -51,7 +52,7 @@ final class AlertManager {
 
     private var armed = true
     private static let key = "alertThresholdCelsius"
-    private let log = Logger(subsystem: "io.github.thijsvos.icecube", category: "ui")
+    private let log = Logger(subsystem: HelperConstants.logSubsystem, category: "ui")
 
     /// When true, every threshold rule still runs and the UI still updates —
     /// but nothing is handed to `UNUserNotificationCenter`.

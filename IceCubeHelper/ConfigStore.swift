@@ -17,7 +17,7 @@ import os
 struct ConfigStore: FanConfigStoring {
     private static let directory = URL(fileURLWithPath: "/Library/Application Support/IceCube")
     private static let file = Self.directory.appendingPathComponent("config.json")
-    private static let log = Logger(subsystem: "io.github.thijsvos.icecube", category: "curve")
+    private static let log = Logger(subsystem: HelperConstants.logSubsystem, category: "curve")
 
     private struct Envelope: Codable {
         let schemaVersion: Int

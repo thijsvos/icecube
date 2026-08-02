@@ -4,7 +4,7 @@ import Foundation
 import IceCubeKit
 import os
 
-let log = Logger(subsystem: "io.github.thijsvos.icecube", category: "xpc")
+let log = Logger(subsystem: HelperConstants.logSubsystem, category: "xpc")
 
 let core: DaemonCore
 do {

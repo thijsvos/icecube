@@ -17,7 +17,7 @@ import os
 /// independent of Sendable.
 final class HelperService: NSObject, NSXPCListenerDelegate, HelperProtocol, Sendable {
     private let core: DaemonCore
-    private let log = Logger(subsystem: "io.github.thijsvos.icecube", category: "xpc")
+    private let log = Logger(subsystem: HelperConstants.logSubsystem, category: "xpc")
 
     init(core: DaemonCore) {
         self.core = core

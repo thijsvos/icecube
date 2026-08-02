@@ -1,6 +1,7 @@
 // WindowOpener.swift — the one place that opens windows from the menu bar (LSUIElement focus dance).
 
 import AppKit
+import IceCubeKit
 import os
 import SwiftUI
 
@@ -139,7 +140,7 @@ enum WindowOpener {
         guard !doomed.isEmpty else { return }
         // Logged because the failure mode is a window moving on its own with no
         // trace of why — which is exactly how long this bug went unexplained.
-        Logger(subsystem: "io.github.thijsvos.icecube", category: "ui").notice(
+        Logger(subsystem: HelperConstants.logSubsystem, category: "ui").notice(
             "menu bar: closing \(doomed.sorted().joined(separator: ", "), privacy: .public) before opening \(id, privacy: .public)"
         )
         for window in visible where doomed.contains(window.frameAutosaveName) {

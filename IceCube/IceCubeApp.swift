@@ -104,7 +104,7 @@ struct IceCubeApp: App {
                     false
                 }
                 let notSetUp = appState.helper.registration != .enabled
-                let log = Logger(subsystem: "io.github.thijsvos.icecube", category: "ui")
+                let log = Logger(subsystem: HelperConstants.logSubsystem, category: "ui")
                 guard needsUpdate || (notSetUp && !hasDismissedSetup) else {
                     // Say the ACTUAL reason. The old message asserted
                     // "registration ok, versions match" for every non-open,
