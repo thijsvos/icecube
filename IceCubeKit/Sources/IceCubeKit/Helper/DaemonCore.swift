@@ -1499,5 +1499,15 @@ public actor DaemonCore {
         if status.recentEvents.count > 20 {
             status.recentEvents.removeFirst(status.recentEvents.count - 20)
         }
+        // The same decision, timestamped and classified, so the app can draw it
+        // on the charts' time axis. `recentEvents` is left exactly as it was —
+        // ~34 assertions in DaemonCoreTests depend on those strings, and none
+        // of them had to change for this.
+        var decisions = status.recentDecisions ?? []
+        decisions.append(DecisionEvent(text: event, date: Date()))
+        if decisions.count > 20 {
+            decisions.removeFirst(decisions.count - 20)
+        }
+        status.recentDecisions = decisions
     }
 }

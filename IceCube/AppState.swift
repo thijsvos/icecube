@@ -236,6 +236,11 @@ final class AppState: PopoverLifecycleObserving {
                 host: StatusItemController(state: self), lifecycle: self
             )
         }
+        if isSimulated {
+            // No daemon in simulated mode, so nothing would ever populate the
+            // decision timeline. See `seedSimulatedDecisions`.
+            helper.seedSimulatedDecisions()
+        }
         // Once, in parallel with polling: the inventory is a property of the
         // Mac, not of the moment. A failure is not worth reporting — the only
         // consumer is the Sensors window's opening height, which falls back to
@@ -391,7 +396,11 @@ final class AppState: PopoverLifecycleObserving {
         }
         let report = try await DiagnosticsReport.generate(
             provider: provider, isSimulated: isSimulated, appVersion: version,
-            writePath: helper.writePathReport
+            writePath: helper.writePathReport,
+            // The decision log is the half of a bug report that was previously
+            // impossible to attach: "my fans ramped at 2am" is unanswerable
+            // from reads alone.
+            decisions: helper.decisions.isEmpty ? nil : helper.decisions
         )
         return try report.jsonData()
     }

@@ -44,7 +44,8 @@ struct DashboardView: View {
                         row: row,
                         xDomain: state.chartXDomain,
                         unit: state.temperatureUnit,
-                        options: state.chartSettings
+                        options: state.chartSettings,
+                        decisions: state.helper.decisions
                     )
                 }
             }

@@ -204,8 +204,14 @@ struct DiagnosticsTests {
             provider: provider, isSimulated: true, appVersion: "test"
         )
         #expect(report.simulated)
-        #expect(report.schemaVersion == 2)
+        // v3 added `decisions`. Bumped deliberately, and this assertion is the
+        // thing that made the change deliberate rather than accidental.
+        #expect(report.schemaVersion == 3)
         #expect(report.writePath == nil, "the CLI has no daemon, so it cannot claim a verdict")
+        #expect(
+            report.decisions == nil,
+            "and for the same reason it has no decision log — those come from the daemon"
+        )
         #expect(report.fans.count == 2)
         #expect(report.temperatures.count == 6)
         #expect(!report.keys.isEmpty)

@@ -65,7 +65,22 @@ public enum HelperConstants {
     ///     classification only works against a daemon that sends the name, and
     ///     a new app beside a v21 daemon would silently be the old bug — the
     ///     rule v21 above sets out.
-    public static let protocolVersion = "22"
+    /// v23: the daemon's decision log reaches the app. Every meaningful choice
+    ///     already went through `DaemonCore.record()` in plain prose and rode
+    ///     over in `HelperStatus.recentEvents` — and the app dropped it: a grep
+    ///     for `recentEvents` in the app target returned nothing. The strings
+    ///     were computed, tested in ~34 places, transported, and shown to
+    ///     nobody. `recentDecisions` adds the two things a bare string cannot
+    ///     carry — a timestamp, so a decision can be drawn on the same axis as
+    ///     the charts, and a `DecisionEvent.Kind`, so a ceiling trip is not
+    ///     coloured like a routine engage.
+    ///
+    ///     The XPC surface gains one optional field and nothing else; the bump
+    ///     is here because the daemon's behaviour changed (it now timestamps
+    ///     and classifies), and because an app expecting decisions from a v22
+    ///     helper would show an empty timeline with no explanation. Same rule
+    ///     as v21 and v22.
+    public static let protocolVersion = "23"
     /// How often the app sends a heartbeat while connected.
     public static let heartbeatInterval: TimeInterval = 5
     /// SAFETY: no heartbeat for this long → the daemon's watchdog reverts to
@@ -147,6 +162,18 @@ public struct HelperStatus: Codable, Sendable, Equatable {
     /// predates it.
     public var activeCurve: FanCurve?
 
+    /// The same decisions as ``recentEvents``, timestamped and classified.
+    ///
+    /// Carried alongside the strings rather than replacing them: `recentEvents`
+    /// is asserted in ~34 places across `DaemonCoreTests`, and the point of this
+    /// addition is that none of those had to change.
+    ///
+    /// **Optional on purpose**, for the same reason ``activeCurve`` is: a
+    /// missing key decodes to nil, so a peer that predates this field still
+    /// decodes. A new non-optional key here would fail the whole status decode
+    /// against a mismatched helper — which the app treats as a dead connection.
+    public var recentDecisions: [DecisionEvent]?
+
     public init(
         protocolVersion: String = HelperConstants.protocolVersion,
         mode: FanConfig.Mode = .auto,
@@ -155,7 +182,8 @@ public struct HelperStatus: Codable, Sendable, Equatable {
         lastWriteVerified: Bool = false,
         guardianActive: Bool = false,
         recentEvents: [String] = [],
-        activeCurve: FanCurve? = nil
+        activeCurve: FanCurve? = nil,
+        recentDecisions: [DecisionEvent]? = nil
     ) {
         self.protocolVersion = protocolVersion
         self.mode = mode
@@ -165,6 +193,7 @@ public struct HelperStatus: Codable, Sendable, Equatable {
         self.guardianActive = guardianActive
         self.recentEvents = recentEvents
         self.activeCurve = activeCurve
+        self.recentDecisions = recentDecisions
     }
 
     public func jsonData() throws -> Data {

@@ -138,6 +138,7 @@ targets:
       - IceCube/SensorListMetrics.swift
       - IceCube/MenuBarLabel.swift
       - IceCube/AppSettings.swift
+      - IceCube/DecisionMarkers.swift
     dependencies:
       - package: IceCubeKit
     settings:
