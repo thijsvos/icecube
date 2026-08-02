@@ -19,6 +19,9 @@ struct ChartRowView: View {
     var unit: TemperatureUnit = .celsius
     /// User chart preferences (band, secondary line, height).
     var options: ChartSettings
+    /// Daemon decisions to mark on the time axis. Defaults to none so a chart
+    /// with no helper — and every existing test — behaves exactly as before.
+    var decisions: [DecisionEvent] = []
 
     /// The crosshair position while the pointer is over this row's plot.
     @State private var hoverDate: Date?
@@ -149,6 +152,23 @@ struct ChartRowView: View {
                         dash: series.isSecondary ? [3, 3] : []
                     ))
                 }
+            }
+            // Why the fan line moved. Drawn under the crosshair so the
+            // pointer always wins, and dashed so a decision can never be
+            // mistaken for a reading.
+            ForEach(DecisionMarkers.visible(decisions, in: xDomain)) { decision in
+                RuleMark(x: .value("Time", decision.date))
+                    .foregroundStyle(DecisionTimelineView.colour(for: decision.kind).opacity(0.55))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 2]))
+                    .annotation(position: .top, alignment: .center, spacing: 0) {
+                        // The sentence itself would overflow a 380 pt popover,
+                        // so the mark carries a dot and the text rides the
+                        // accessibility label and the Sensors-window list.
+                        Circle()
+                            .fill(DecisionTimelineView.colour(for: decision.kind))
+                            .frame(width: 4, height: 4)
+                            .help(decision.text)
+                    }
             }
             if let hoverDate {
                 RuleMark(x: .value("Time", hoverDate))
