@@ -86,6 +86,15 @@ public struct DiagnosticsReport: Sendable, Codable, Equatable {
     /// describes READS; a new-model bug is almost always about WRITES, so a
     /// report without this could not answer the question it was collected for.
     public let writePath: WritePathReport?
+    /// What the daemon actually decided, most recent last.
+    ///
+    /// Optional so a v2 report still decodes. Added because a behavioural bug
+    /// report — "my fans ramped at 2am", "manual reverted and I don't know why"
+    /// — was previously unanswerable from an exported report: the daemon's
+    /// decision log existed and was tested, and then reached nobody who could
+    /// read it. Attaching it is the difference between a reproducible report
+    /// and a prose description of a noise.
+    public let decisions: [DecisionEvent]?
 
     /// Captures a report from `provider` right now.
     /// - Parameter writePath: the daemon's last write-path self-test, when one
@@ -95,11 +104,12 @@ public struct DiagnosticsReport: Sendable, Codable, Equatable {
         provider: any SMCProviding,
         isSimulated: Bool,
         appVersion: String,
-        writePath: WritePathReport? = nil
+        writePath: WritePathReport? = nil,
+        decisions: [DecisionEvent]? = nil
     ) async throws(IceCubeError) -> DiagnosticsReport {
         let snapshot = try await provider.snapshot()
         return try await DiagnosticsReport(
-            schemaVersion: 2,
+            schemaVersion: 3,
             generatedAt: snapshot.date,
             modelIdentifier: HostInfo.modelIdentifier(),
             osVersion: HostInfo.osVersion(),
@@ -108,7 +118,8 @@ public struct DiagnosticsReport: Sendable, Codable, Equatable {
             fans: snapshot.fans,
             temperatures: snapshot.temperatures,
             keys: provider.keyDump(),
-            writePath: writePath
+            writePath: writePath,
+            decisions: decisions
         )
     }
 

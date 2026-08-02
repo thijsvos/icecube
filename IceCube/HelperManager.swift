@@ -45,6 +45,22 @@ final class HelperManager {
     private(set) var registration: Registration = .unknown
     private(set) var connection: Connection = .disconnected
     private(set) var status: HelperStatus?
+
+    /// The daemon's decisions, accumulated past its own 20-entry cap.
+    ///
+    /// The daemon keeps 20 so `HelperStatus` stays small on the wire; the app
+    /// polls every 5 s and merges, so the timeline covers the session rather
+    /// than the last few seconds. Merged by `id` — the same decision arrives in
+    /// several consecutive status payloads and must appear once.
+    ///
+    /// In memory only. Persisting it is a follow-up and belongs daemon-side,
+    /// where the events are actually generated and where a reboot does not lose
+    /// the overnight window that motivates it.
+    private(set) var decisions: [DecisionEvent] = []
+
+    /// Session cap. Roughly a day of ordinary activity at the rate the daemon
+    /// speaks, and bounded so a long-running app cannot grow without limit.
+    private static let decisionHistoryLimit = 500
     private(set) var lastError: String?
 
     /// A config the daemon declined because the Mac is parked for sleep, held
@@ -899,5 +915,23 @@ final class HelperManager {
 
     private func refreshStatus() async {
         status = try? await client.status()
+        mergeDecisions(status?.recentDecisions)
+    }
+
+    /// Folds a status payload's decisions into the session timeline.
+    ///
+    /// Assigned only when something is genuinely new: the popover renders this,
+    /// and reassigning an identical array every 5 s would invalidate the view
+    /// for nothing. `nil` means a daemon that predates v23, which is not an
+    /// error — it simply contributes nothing.
+    private func mergeDecisions(_ incoming: [DecisionEvent]?) {
+        guard let incoming, !incoming.isEmpty else { return }
+        let known = Set(decisions.map(\.id))
+        let fresh = incoming.filter { !known.contains($0.id) }
+        guard !fresh.isEmpty else { return }
+        decisions.append(contentsOf: fresh)
+        if decisions.count > Self.decisionHistoryLimit {
+            decisions.removeFirst(decisions.count - Self.decisionHistoryLimit)
+        }
     }
 }
