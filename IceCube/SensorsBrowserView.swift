@@ -139,6 +139,9 @@ struct SensorsBrowserView: View {
                     )
                 }
             }
+            Section("Recent decisions") {
+                DecisionTimelineView(decisions: state.helper.decisions)
+            }
             Section("Fans") {
                 if state.fans.isEmpty {
                     Text("No fans reported (fanless Mac).")

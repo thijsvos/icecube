@@ -58,6 +58,31 @@ final class HelperManager {
     /// the overnight window that motivates it.
     private(set) var decisions: [DecisionEvent] = []
 
+    /// Seeds a representative timeline when there is no daemon to supply one.
+    ///
+    /// Simulated mode swaps the SMC *provider*, not the helper — with no
+    /// registered daemon there is no `HelperStatus`, so the timeline would be
+    /// permanently empty and the feature undemonstrable. CLAUDE.md rule 3 says
+    /// every feature must be demonstrable with no root, no helper and no real
+    /// SMC, so simulated mode gets a plausible set of the daemon's real
+    /// sentences rather than an empty box.
+    ///
+    /// Only ever called from the simulated composition root; a real install
+    /// never synthesises a decision it did not make.
+    func seedSimulatedDecisions(now: Date = Date()) {
+        let script: [(TimeInterval, String)] = [
+            (-540, "all fans auto (daemon start)"),
+            (-535, "boot: resuming persisted curve config"),
+            (-534, "curve engaged (persists without app: false)"),
+            (-300, "guardian: die 78 °C and nothing cooling — driving the fans (built-in curve)"),
+            (-240, "guardian: cooled to 61 °C — releasing the fans"),
+            (-120, "the Mac is going to sleep — handing the fans back (keeping the curve config)"),
+            (-90, "dark wake (0x39 [CDNP]) — the app checked in after a nap, but no display is powered"),
+            (-30, "wake: resuming curve control (the system powered on — 0x1F [CDNVA])"),
+        ]
+        decisions = script.map { DecisionEvent(text: $0.1, date: now.addingTimeInterval($0.0)) }
+    }
+
     /// Session cap. Roughly a day of ordinary activity at the rate the daemon
     /// speaks, and bounded so a long-running app cannot grow without limit.
     private static let decisionHistoryLimit = 500
