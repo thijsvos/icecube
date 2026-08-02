@@ -39,7 +39,7 @@ final class AlertManager {
     /// Alert threshold; `.off` disables notifications. Persisted.
     var threshold: Threshold {
         didSet {
-            UserDefaults.standard.set(threshold.rawValue, forKey: Self.key)
+            defaults.set(threshold.rawValue, forKey: Self.key)
             if threshold != .off {
                 requestPermissionIfNeeded()
             }
@@ -53,10 +53,23 @@ final class AlertManager {
     private static let key = "alertThresholdCelsius"
     private let log = Logger(subsystem: "io.github.thijsvos.icecube", category: "ui")
 
-    init() {
+    /// When true, every threshold rule still runs and the UI still updates —
+    /// but nothing is handed to `UNUserNotificationCenter`.
+    ///
+    /// Simulated temperatures are a sine wave with random spikes, so an ungated
+    /// simulated run posts real Notification Centre banners about a machine
+    /// that is fine, and can raise a real permission prompt the user never
+    /// asked for. Suppressing only the delivery keeps the Alerts settings and
+    /// the arm/re-arm logic demonstrable, which CLAUDE.md rule 3 requires.
+    private let deliversNotifications: Bool
+    private let defaults: any KeyValueStore
+
+    init(defaults: any KeyValueStore = UserDefaults.standard, deliversNotifications: Bool = true) {
+        self.deliversNotifications = deliversNotifications
+        self.defaults = defaults
         // `integer(forKey:)` reads a previously stored 85.0 as 85, so existing
         // users migrate with no shim.
-        threshold = Threshold(rawValue: UserDefaults.standard.integer(forKey: Self.key)) ?? .off
+        threshold = Threshold(rawValue: defaults.integer(forKey: Self.key)) ?? .off
     }
 
     /// Called once per snapshot with the hottest die reading.
@@ -64,6 +77,7 @@ final class AlertManager {
         guard let limit = threshold.celsius, let die = dieCelsius else { return }
         if die >= limit, armed {
             armed = false
+            guard deliversNotifications else { return }
             deliver(die: die, threshold: limit)
         } else if die < limit - 5 {
             armed = true // re-arm only after a real cooldown

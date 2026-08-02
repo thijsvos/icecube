@@ -32,8 +32,10 @@ struct IceCubeApp: App {
 
     init() {
         // CompositionRoot decides simulated vs real; the app never chooses.
-        let (provider, isSimulated) = CompositionRoot.make()
-        let state = AppState(provider: provider, isSimulated: isSimulated)
+        // It now returns the WHOLE graph, not just a provider — deciding only
+        // the provider here is what let a simulated launch reach the real
+        // daemon.
+        let state = AppState(graph: CompositionRoot.make())
         state.start() // begin 1 Hz polling immediately so the label is live
         _appState = State(initialValue: state)
     }

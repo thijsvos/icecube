@@ -80,6 +80,10 @@ protocol KeyValueStore: AnyObject {
     func string(forKey defaultName: String) -> String?
     func data(forKey defaultName: String) -> Data?
     func bool(forKey defaultName: String) -> Bool
+    /// `AppState` stores the poll interval as a raw `Int`. Part of the protocol
+    /// rather than read off `UserDefaults.standard` directly, because a
+    /// simulated launch must not read or write the real app's cadence.
+    func integer(forKey defaultName: String) -> Int
 }
 
 extension UserDefaults: KeyValueStore {}

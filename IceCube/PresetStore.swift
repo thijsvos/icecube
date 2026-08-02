@@ -69,6 +69,13 @@ final class PresetStore {
     /// `createDirectory` out of this type — and those are two of the four
     /// branches worth testing.
     private let file: URL
+
+    /// Which file this store is bound to. Read by `SimulatedIsolationTests` to
+    /// prove a simulated run cannot reach the owner's real catalog.
+    var fileURL: URL {
+        file
+    }
+
     /// `HelperConstants.logSubsystem`, not the literal: under test this resolves
     /// to a separate subsystem.
     ///

@@ -139,6 +139,9 @@ targets:
       - IceCube/MenuBarLabel.swift
       - IceCube/AppSettings.swift
       - IceCube/DecisionMarkers.swift
+      - IceCube/CompositionRoot.swift
+      - IceCube/SimulatedEnvironment.swift
+      - IceCube/AlertManager.swift
     dependencies:
       - package: IceCubeKit
     settings:
