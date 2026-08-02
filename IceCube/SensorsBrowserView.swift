@@ -139,8 +139,13 @@ struct SensorsBrowserView: View {
                     )
                 }
             }
-            Section("Recent decisions") {
-                DecisionTimelineView(decisions: state.helper.decisions)
+            // Omitted entirely when empty: the window's height is computed
+            // from its content, and an empty box would cost the sensor list
+            // ~136 pt to say nothing.
+            if !state.helper.decisions.isEmpty {
+                Section("Recent decisions") {
+                    DecisionTimelineView(decisions: state.helper.decisions)
+                }
             }
             Section("Fans") {
                 if state.fans.isEmpty {

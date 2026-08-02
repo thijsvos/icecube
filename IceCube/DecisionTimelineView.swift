@@ -23,6 +23,17 @@ struct DecisionTimelineView: View {
     private static let clock: Date.FormatStyle = .dateTime.hour().minute().second()
 
     var body: some View {
+        // Fixed height with its own scroller. The Sensors window sizes itself
+        // arithmetically from its content (`SensorsWindowMetrics`), and a
+        // section that grows with uptime would make that sum unknowable — the
+        // window would open short and macOS would persist the clipped frame.
+        ScrollView {
+            content
+        }
+        .frame(height: SensorsWindowMetrics.decisionSectionHeight)
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 0) {
             if decisions.isEmpty {
                 // Not an error state: a daemon that has just started genuinely

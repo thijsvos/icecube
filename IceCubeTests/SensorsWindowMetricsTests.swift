@@ -220,3 +220,78 @@ struct SensorListMetricsTests {
         #expect(SensorListMetrics.contentHeight(sensorCount: 0) == 0)
     }
 }
+
+@MainActor
+@Suite("Sensors window — the decisions section")
+struct SensorsWindowDecisionMetricsTests {
+    private func height(_ rows: Int, decisions: Bool) -> CGFloat {
+        SensorsWindowMetrics.frameHeight(
+            rowCount: rows, availableHeight: 1200, hasDecisions: decisions
+        )
+    }
+
+    /// The regression this suite exists to stop happening twice.
+    ///
+    /// The decision timeline was added to the Sensors window as a third
+    /// `Section` without telling the arithmetic, so the window asked for a
+    /// height that omitted a 28 pt header, a 20 pt gap and the whole timeline —
+    /// and macOS saves the frame of a window the first time it opens.
+    @Test("A visible decisions section is paid for in the window height")
+    func decisionsCostHeight() {
+        #expect(
+            height(8, decisions: true) - height(8, decisions: false)
+                == SensorsWindowMetrics.decisionChrome(hasDecisions: true)
+        )
+        // Typed: `#expect(aCGFloat == 28 + 20 + 88)` infers Int on the right and
+        // compares through AnyHashable, which is false even at equal values.
+        let expected: CGFloat = 28 + 20 + 88
+        #expect(SensorsWindowMetrics.decisionChrome(hasDecisions: true) == expected)
+    }
+
+    /// A fresh install has made no decisions. Charging it for an empty box
+    /// would shrink the sensor list to display nothing.
+    @Test("An absent decisions section costs nothing")
+    func noDecisionsCostNothing() {
+        #expect(SensorsWindowMetrics.decisionChrome(hasDecisions: false) == 0)
+        // Row counts chosen so neither clamp binds at either setting — the
+        // clamps are the subject of `respectsCeiling` and `sensorRichClamps`,
+        // and folding them in here would let a clamp bug hide as an
+        // arithmetic pass.
+        let unclamped: CGFloat = 136
+        for rows in [8, 12, 20] {
+            #expect(height(rows, decisions: true) - height(rows, decisions: false) == unclamped)
+        }
+    }
+
+    /// Worth stating outright, because it is a real consequence rather than an
+    /// edge case: on the owner's M2 Pro (22 temperatures + 2 fans = 24 rows) a
+    /// visible timeline pushes the wanted height past `maximumFrameHeight`, so
+    /// the window opens at the cap and the list scrolls. That is the correct
+    /// trade — the cap exists to keep the window on screen — but it means the
+    /// timeline is not free on sensor-rich Macs, which is exactly why
+    /// `decisionSectionHeight` is 88 and not 120.
+    @Test("On a sensor-rich Mac the timeline pushes the window to its ceiling")
+    func sensorRichClamps() {
+        #expect(height(24, decisions: false) < SensorsWindowMetrics.maximumFrameHeight)
+        #expect(height(24, decisions: true) == SensorsWindowMetrics.maximumFrameHeight)
+    }
+
+    /// The section is fixed-height on purpose: it scrolls internally, so 500
+    /// retained decisions cost exactly as much window as one does. Without
+    /// that, no arithmetic here could be correct.
+    @Test("The timeline's cost does not depend on how many decisions there are")
+    func fixedRegardlessOfCount() {
+        #expect(SensorsWindowMetrics.decisionSectionHeight == 88)
+    }
+
+    /// The ceiling still wins — a sensor-rich Mac with a timeline must not
+    /// produce a window taller than the screen allows.
+    @Test("The decisions section cannot push the window past its ceiling")
+    func respectsCeiling() {
+        #expect(height(40, decisions: true) <= SensorsWindowMetrics.maximumFrameHeight)
+        #expect(
+            SensorsWindowMetrics.frameHeight(rowCount: 40, availableHeight: 600, hasDecisions: true)
+                <= 600 - 24
+        )
+    }
+}

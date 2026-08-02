@@ -240,7 +240,8 @@ Work in order. Each phase ends with its acceptance criteria demonstrably true (s
 ### Phase 5 — Modern-app polish
 - [x] Settings: launch at login, intervals, units, notifications thresholds, persist-toggle.
 - [x] UserNotifications alerts (permission flow handled gracefully).
-- [x] History window + CSV export; onboarding; accessibility audit (VoiceOver labels, keyboard-only curve editing); String Catalog; Reduce Motion.
+- [x] CSV export; onboarding; accessibility audit (VoiceOver labels, keyboard-only curve editing); String Catalog; Reduce Motion.
+  - No separate History *window* shipped: the charts live in the popover dashboard, and a second window showing the same rows was cut as duplicate surface. CSV export covers the "I want the numbers out" case it was for.
 - [x] App icon + menu bar glyph + popover surfaces on system materials. *(2026-07-27: two of the three sub-items were settled differently from this line and the checkbox was simply never updated. **Icon:** ships as `AppIcon.icns` from the Noto artwork, declared final by the owner — Tahoe's Icon Composer `.icon` format remains a nice-to-have, not a gap. **Menu bar glyph:** deliberately NOT a tinted template — it is rendered in colour because "looks like ice" is the brand, and `MenuBarGlyph.swift` records that reasoning. **Surfaces:** `LiquidGlass.swift` builds on `.ultraThinMaterial`; confirmed on macOS 26.4.1.)*
 - **Accept:** run through a "new user" script end-to-end without touching the mouse for core flows; VoiceOver can read the dashboard.
 

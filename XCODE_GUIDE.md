@@ -4,7 +4,7 @@ Everything Claude Code *can't* do for you lives here: installing Xcode, identity
 
 **Daily TL;DR**
 - Build/run UI work: no Xcode needed — `ICECUBE_SIMULATED=1`, commands in CLAUDE.md.
-- Anything touching the real helper: open Xcode, run the **Ice Cube** scheme, and if the helper misbehaves after a rebuild → Debug menu → **Re-register helper**.
+- Anything touching the real helper: open Xcode, run the **Ice Cube** scheme, and if the helper misbehaves after a rebuild → menu bar icon → **Settings…** → **Fan Control** → **Reinstall**.
 - Signing errors? 90 % of the time: `Configs/Local.xcconfig` is missing or stale (re-run `scripts/set-team.sh`), or you changed a setting in Xcode's GUI and a regeneration wiped it. See §7.
 
 **Brand new to Xcode? Learn only these three things today** — pick up everything else on demand:
@@ -48,8 +48,8 @@ The helper is a **LaunchDaemon registered via SMAppService** — macOS makes you
 
 1. **Run the app from /Applications for helper testing.** Product → Build, then drag the built app there (Product → Show Build Folder in Finder → Products/Debug), or use the `scripts/install.sh` Claude Code provides. Registering daemons from Xcode's DerivedData path is flaky and every rebuild changes the binary anyway.
 2. Launch Ice Cube. Heads-up: it's an **LSUIElement** app — **no Dock icon, ever**; the menu bar item is the only UI, so look up, not down. Go through onboarding → **Enable fan control**. macOS shows a notification / takes you to **System Settings → General → Login Items & Extensions** (older: "Login Items"). Toggle **Ice Cube** ON under "Allow in the Background"; enter your admin password if asked.
-3. Back in Ice Cube, helper status should read *enabled*, and the Debug menu → Helper Status shows a version. Try a manual fan slider — you should hear it.
-4. **After every rebuild of the helper**, macOS may still run the *old* registered copy. Fix: Ice Cube Debug menu → **Re-register helper** (it unregisters + registers; once approved, re-registering doesn't re-prompt for your password). This is the #1 "why isn't my change live" trap.
+3. Back in Ice Cube, open **Settings… → Fan Control**: status should read *enabled* and show a version. Try a manual fan slider — you should hear it.
+4. **After every rebuild of the helper**, macOS may still run the *old* registered copy. Fix: menu bar icon → **Settings…** → **Fan Control** → **Reinstall** (it unregisters + registers; once approved, this doesn't re-prompt for your password). This is the #1 "why isn't my change live" trap.
 
 ## 5. Signing & entitlements — the 3-minute mental model
 - **Code signing** = cryptographic identity on every binary. Xcode's "Automatic" handles day-to-day.
@@ -65,15 +65,15 @@ The helper is a **LaunchDaemon registered via SMAppService** — macOS makes you
   - Attach a debugger: Xcode → Debug → Attach to Process by PID or Name… → `IceCubeHelper` (Xcode will ask to take you root). Or set the *helper* scheme's Run → "Wait for the executable to be launched", then trigger it from the app.
   - Is it even running? `sudo launchctl print system/io.github.thijsvos.icecube.helper`.
 - **Inspect Background Task Management** (what SMAppService talks to): `sfltool dumpbtm | less` — search for icecube. Nuclear reset: `sudo sfltool resetbtm` (⚠️ resets approvals for *every* app on the Mac; you'll re-approve things — last resort only).
-- **Fans stuck after a crash?** They auto-revert (watchdog), but belt-and-braces: relaunch Ice Cube → preset **Auto**, or reboot — SMC returns to system control.
+- **Fans stuck after a crash?** They auto-revert (watchdog), but belt-and-braces: relaunch Ice Cube, or use **Settings… → Fan Control → Turn Off Fan Control**, or reboot — the SMC returns to system control. (There is no "Auto" preset; handing the fans back to macOS was removed on 2026-07-26 because on Mac14,9 macOS left them parked while the die climbed past 90 °C.)
 
 ## 7. Troubleshooting table
 | Symptom | Likely cause → fix |
 |---|---|
 | `register()` throws "Operation not permitted" / SMAppServiceErrorDomain | Running from DerivedData, or plist filename/Label/BundleProgram don't all match, or helper unsigned/different team → run from /Applications, re-check the four names, same Team, rebuild |
-| Toggle in Login Items flips back OFF | Stale BTM state → Re-register from Debug menu; if still stuck, `sudo sfltool resetbtm`, reboot, approve again |
+| Toggle in Login Items flips back OFF | Stale BTM state → **Settings… → Fan Control → Reinstall**; if still stuck, `sudo sfltool resetbtm`, reboot, approve again |
 | Registration/toggle broken on macOS 26.4.x, `backgroundtaskmanagementd` at high CPU | Known OS bug in 26.4 — not your code → update macOS if a newer point release exists; otherwise `sudo sfltool resetbtm` + reboot (⚠️ resets approvals for **every** app — last resort) |
-| XPC pinning suddenly fails near **2026-08-15** with no code change | Apple Development cert auto-renewed (free-ID certs are short-lived) → rebuild + Debug menu → Re-register helper |
+| XPC pinning suddenly fails near **2026-08-15** with no code change | Apple Development cert auto-renewed (free-ID certs are short-lived) → rebuild + **Settings… → Fan Control → Reinstall** |
 | Helper enabled but XPC connects then instantly invalidates | Codesign pinning rejecting: teams differ, or DEBUG vs release requirement mismatch → confirm both targets' Team; check helper log for the rejection line |
 | Slider moves, fans don't | Wrong write path for your architecture, or values out of clamp → check helper log read-back lines; run Sensors browser and confirm `F0Mn/F0Mx` look sane |
 | "Ice Cube is damaged and can't be opened" on another Mac | Unsigned/un-notarized build + quarantine → recipient runs `xattr -dr com.apple.quarantine /Applications/Ice Cube.app` (dev builds only) — or do §8 properly |
@@ -104,7 +104,7 @@ One-time:
      --password "app-specific-pw"
    ```
 
-Per release (scripted in `scripts/release.sh` + CI, but know the moves):
+Per release (scripted in `.github/workflows/release.yml`, but know the moves):
    ```bash
    xcodebuild -project IceCube.xcodeproj -scheme IceCube -configuration Release archive -archivePath build/Ice Cube.xcarchive
    # export with Developer ID (Xcode Organizer → Distribute App → Direct Distribution, or exportOptions.plist in CI)

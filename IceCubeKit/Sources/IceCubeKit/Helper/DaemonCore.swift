@@ -1251,7 +1251,15 @@ public actor DaemonCore {
                 try await withWriteLock { try await self.sequencer.revertAllAuto(fans: fans) }
                 reverted = true
             } catch {
-                record("revert attempt \(attempt) failed: \(error.localizedDescription)")
+                // Throttled on the same counter as the summary 20 lines below.
+                // Unthrottled, a stuck SMC wrote one of these every 2 s — which
+                // not only floods the log but flushes the decision timeline,
+                // since the app keeps the last 20 and this would be all of
+                // them. The one decision worth surfacing is "revert is still
+                // failing", not 1800 copies of it an hour.
+                if failedRevertAttempts % 30 == 0 {
+                    record("revert attempt \(attempt) failed: \(error.localizedDescription)")
+                }
             }
             break
         }

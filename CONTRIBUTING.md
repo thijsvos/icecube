@@ -28,7 +28,7 @@ sh scripts/verify-bundle.sh       # bundle layout sanity
 ```
 
 Helper-daemon changes additionally need `sh scripts/install.sh --debug` and a
-**Re-register** from the app's Settings (launchd keeps running the old binary
+**Reinstall** from the app's Settings → Fan Control (launchd keeps running the old binary
 otherwise — the #1 "why isn't my change live" trap).
 
 ## Rules that are not up for debate

@@ -18,7 +18,16 @@ struct SettingsWindowView: View {
     /// turned it off" are indistinguishable through `@AppStorage`, so a
     /// default-true toggle cannot tell a fresh install from a considered no.
     @AppStorage(MenuBarMode.preferenceKey) private var silentOptionClick = false
-    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+    /// Seeded in `onAppear`, not here.
+    ///
+    /// A `@State` default expression runs on every re-init of the view struct,
+    /// and a `Window` scene's content is re-initialised whenever the observed
+    /// state it reads changes — which for `AppState` is every poll tick, even
+    /// while the Settings window is shut. `SMAppService.mainApp.status` is a
+    /// synchronous XPC round-trip to the ServiceManagement daemon, so this line
+    /// was making one of those once a second for the life of the process to
+    /// compute a value `onAppear` immediately overwrites anyway.
+    @State private var launchAtLogin = false
     @State private var loginItemError: String?
     @State private var updates = UpdateChecker()
     @Environment(\.openWindow) private var openWindow
