@@ -116,6 +116,21 @@ jobs:
       # Simulated mode is a hard project rule: every feature must be
       # demonstrable with no root, no helper and no real SMC. If the app
       # cannot even stay up under ICECUBE_SIMULATED=1, that rule is broken.
+      # A source-level guard for the log subsystem, because the runtime one
+      # cannot see it: a Logger built from the literal string bypasses
+      # HelperConstants.logSubsystem entirely, so a simulated run writes into
+      # the subsystem a real investigation greps. Six app-side loggers did
+      # exactly that until 2026-08-03, and the only reason it was noticed is
+      # that someone counted lines during a controlled test.
+      - name: No hardcoded log subsystem
+        run: |
+          set -euo pipefail
+          if grep -rn 'Logger(subsystem: "io\.github' IceCube/ IceCubeHelper/ IceCubeKit/Sources/; then
+            echo "::error::Build the Logger from HelperConstants.logSubsystem, not a literal — a literal cannot be redirected under test or simulation." >&2
+            exit 1
+          fi
+          echo "ok: every Logger routes through HelperConstants.logSubsystem"
+
       - name: Smoke-test simulated mode
         run: |
           set -euo pipefail
@@ -131,6 +146,16 @@ jobs:
             cat /tmp/icecube-sim.log >&2
             exit 1
           fi
+          # Liveness alone is what this step used to assert, and it is exactly
+          # why the isolation defect reached a user's machine: an instance that
+          # drives the real daemon is *more* alive, not less. A runner has no
+          # daemon registered, so the honest structural check available here is
+          # that the simulated build never resolves the real mach service name.
+          if grep -q "io.github.thijsvos.icecube.helper.xpc" /tmp/icecube-sim.log; then
+            echo "::error::a simulated run referenced the real mach service" >&2
+            exit 1
+          fi
+          echo "ok: no reference to the real mach service"
 
       - name: Upload simulated-mode log on failure
         if: failure()

@@ -30,7 +30,7 @@ final class StatusItemController: NSObject, MenuBarHosting, NSPopoverDelegate {
     /// switch. Nil the rest of the time.
     private var flashedName: String?
     private var flashTask: Task<Void, Never>?
-    private let log = Logger(subsystem: "io.github.thijsvos.icecube", category: "ui")
+    private let log = Logger(subsystem: HelperConstants.logSubsystem, category: "ui")
 
     init(state: AppState) {
         self.state = state

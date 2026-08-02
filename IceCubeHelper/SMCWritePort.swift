@@ -18,7 +18,7 @@ import os
 actor SMCWritePort: SMCControlPort {
     private var connection: io_connect_t = 0
     private var keyInfoCache: [String: (size: Int, type: String)] = [:]
-    private let log = Logger(subsystem: "io.github.thijsvos.icecube", category: "smc")
+    private let log = Logger(subsystem: HelperConstants.logSubsystem, category: "smc")
 
     init() throws {
         connection = try Self.openSMCConnection()
