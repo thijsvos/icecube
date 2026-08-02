@@ -70,12 +70,39 @@ final class UpdateChecker {
         URL(string: "https://api.github.com/repos/\(repository)/releases?per_page=\(pageSize)")!
     }
 
+    /// Performs the HTTP request. Injectable so `check()` is reachable without a
+    /// network.
+    ///
+    /// All of `check()` was untestable before this: the branch that decides
+    /// whether a user is told about an update was welded to `URLSession.shared`,
+    /// which does not reliably honour `URLProtocol.registerClass`, so there was
+    /// no back door either. That is the same function whose endpoint choice
+    /// caused #12 — "up to date" reported to everyone, forever.
+    typealias Fetch = @Sendable (URLRequest) async throws -> (Data, URLResponse)
+
+    private let fetch: Fetch
+
+    /// The running app's version, injectable for a reason that is easy to miss:
+    /// `IceCubeTests` is a host-less bundle, so `Bundle.main` is the xctest
+    /// runner and ``currentVersion`` degrades to `"0"` — under which *every*
+    /// release looks newer and an "is this update offered?" test would pass no
+    /// matter what the comparison did.
+    private let version: String
+
+    init(
+        fetch: @escaping Fetch = { try await URLSession.shared.data(for: $0) },
+        version: String = UpdateChecker.currentVersion
+    ) {
+        self.fetch = fetch
+        self.version = version
+    }
+
     func check() async {
         status = .checking
         do {
             var request = URLRequest(url: Self.releasesURL)
             request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await fetch(request)
             guard let http = response as? HTTPURLResponse else {
                 throw URLError(.badServerResponse)
             }
@@ -90,7 +117,7 @@ final class UpdateChecker {
                 throw URLError(.badServerResponse)
             }
             let releases = try JSONDecoder().decode([Release].self, from: data)
-            if let offer = Self.offer(from: releases, current: Self.currentVersion) {
+            if let offer = Self.offer(from: releases, current: version) {
                 status = .available(version: offer.version, url: offer.url)
             } else {
                 status = .upToDate

@@ -44,9 +44,31 @@ final class PresetStore {
         let presets: [Preset]
     }
 
-    private static let file = FileManager.default
+    /// Where presets live in a real install.
+    static let defaultFile = FileManager.default
         .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("IceCube/presets.json")
+
+    /// The file this store reads and writes. Injectable for the same reason
+    /// `FanControlMemory` takes a ``KeyValueStore``: without a seam there is no
+    /// way to exercise this type that does not touch the developer's own data.
+    ///
+    /// It was worse than untestable. `init()` loads unconditionally, the test
+    /// bundle is host-less and unsandboxed, so `.applicationSupportDirectory`
+    /// resolves to the real `~/Library/Application Support` — a test calling
+    /// `saveUserPreset` would have overwritten the owner's saved curves, and the
+    /// corrupt-file test would have moved them to `presets.corrupt-*.json`.
+    ///
+    /// Tests point this at a unique directory under `temporaryDirectory` and
+    /// delete it afterwards. That makes them the first filesystem-touching tests
+    /// in the project, which is a deliberate exception rather than a drift: the
+    /// no-IO rule exists because `UserDefaults(suiteName:)` left 1,097 plists in
+    /// `~/Library/Preferences` that nothing could clean up, and a temp directory
+    /// removed in the same test is not that. A `PresetFileStoring` protocol
+    /// would have preserved zero-IO, but it moves `moveItem` and
+    /// `createDirectory` out of this type — and those are two of the four
+    /// branches worth testing.
+    private let file: URL
     /// `HelperConstants.logSubsystem`, not the literal: under test this resolves
     /// to a separate subsystem.
     ///
@@ -56,7 +78,8 @@ final class PresetStore {
     /// two misdiagnoses this project.
     private let log = Logger(subsystem: HelperConstants.logSubsystem, category: "ui")
 
-    init() {
+    init(file: URL = PresetStore.defaultFile) {
+        self.file = file
         load()
     }
 
@@ -77,7 +100,7 @@ final class PresetStore {
     // MARK: - Disk
 
     private func load() {
-        guard let data = try? Data(contentsOf: Self.file) else { return }
+        guard let data = try? Data(contentsOf: file) else { return }
         let decoder = JSONDecoder()
         // Current format first, then the original un-versioned `[Preset]` so
         // existing installs keep their curves across this change.
@@ -100,15 +123,15 @@ final class PresetStore {
     private func quarantineUnreadableFile() {
         let stamp = ISO8601DateFormatter().string(from: Date())
             .replacingOccurrences(of: ":", with: "-")
-        let backup = Self.file.deletingLastPathComponent()
+        let backup = file.deletingLastPathComponent()
             .appendingPathComponent("presets.corrupt-\(stamp).json")
         do {
-            try FileManager.default.moveItem(at: Self.file, to: backup)
+            try FileManager.default.moveItem(at: file, to: backup)
             loadFailure = backup.lastPathComponent
             log.error("presets.json unreadable — kept a copy at \(backup.lastPathComponent, privacy: .public)")
         } catch {
             // Could not move it: still better to report than to overwrite.
-            loadFailure = Self.file.lastPathComponent
+            loadFailure = file.lastPathComponent
             log
                 .error(
                     "presets.json unreadable and could not be backed up: \(error.localizedDescription, privacy: .public)"
@@ -119,10 +142,10 @@ final class PresetStore {
     private func persist() {
         do {
             try FileManager.default.createDirectory(
-                at: Self.file.deletingLastPathComponent(), withIntermediateDirectories: true
+                at: file.deletingLastPathComponent(), withIntermediateDirectories: true
             )
             let envelope = Envelope(schemaVersion: Self.schemaVersion, presets: userPresets)
-            try JSONEncoder().encode(envelope).write(to: Self.file, options: .atomic)
+            try JSONEncoder().encode(envelope).write(to: file, options: .atomic)
         } catch {
             log.error("could not save presets: \(error.localizedDescription, privacy: .public)")
         }
