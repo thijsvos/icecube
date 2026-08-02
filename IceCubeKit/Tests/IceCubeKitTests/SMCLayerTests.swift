@@ -204,9 +204,13 @@ struct DiagnosticsTests {
             provider: provider, isSimulated: true, appVersion: "test"
         )
         #expect(report.simulated)
-        // v3 added `decisions`. Bumped deliberately, and this assertion is the
-        // thing that made the change deliberate rather than accidental.
-        #expect(report.schemaVersion == 3)
+        // v3 added `decisions`; v4 added `watts` and `coolingResistance`.
+        // Bumped deliberately, and this assertion is the thing that made each
+        // change deliberate rather than accidental.
+        #expect(report.schemaVersion == 4)
+        // The mock reports power, so a report from it must carry watts — this
+        // is the field the CLI's own comment had been asking for since v1.
+        #expect(report.watts != nil, "a provider that reports power must put it in the report")
         #expect(report.writePath == nil, "the CLI has no daemon, so it cannot claim a verdict")
         #expect(
             report.decisions == nil,

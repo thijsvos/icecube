@@ -78,6 +78,25 @@ do {
         print("Model:      \(report.modelIdentifier)\(report.simulated ? "  [SIMULATED]" : "")")
         print("macOS:      \(report.osVersion)")
         print("SMC keys:   \(report.keys.count)")
+        // Watts beside the temperatures, which is the pairing this tool's own
+        // header has argued for since it was written: it is what separates
+        // "you are running something heavy" from "your cooling is not working".
+        // R needs a settled window, which a one-shot run does not have — say so
+        // rather than printing a transient quotient.
+        if let watts = report.watts {
+            print("SoC power:  \(String(format: "%.1f", watts)) W")
+            let die = report.temperatures.filter { SMCKeyMaps.isDieKey($0.key) }.map(\.celsius).max()
+            let ambient = CoolingEfficiency.ambient(from: report.temperatures)
+            if let die, let ambient,
+               let r = CoolingEfficiency.resistance(dieCelsius: die, ambientCelsius: ambient, watts: watts)
+            {
+                print(
+                    "Cooling:    \(String(format: "%.2f", r)) °C/W  (instantaneous — see --watch for a settled figure)"
+                )
+            }
+        } else {
+            print("SoC power:  — (this Mac exposes no usable power key)")
+        }
         print("Fans:       \(report.fans.count)")
         for fan in report.fans {
             let rpm = "\(Int(fan.actualRPM)) RPM (target \(Int(fan.targetRPM)), range \(Int(fan.minRPM))–\(Int(fan.maxRPM)))"

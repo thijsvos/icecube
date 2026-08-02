@@ -65,6 +65,16 @@ final class AppState: PopoverLifecycleObserving {
     /// already filtered to the rows the user has enabled (`chartSettings`).
     private(set) var chartRows: [ChartStore.Row] = []
 
+    /// Thermal resistance in °C/W, or nil while the machine is not settled
+    /// enough to measure it. See ``CoolingEfficiency`` and `docs/THERMAL.md`.
+    ///
+    /// Published rather than computed on demand so the view never triggers the
+    /// window arithmetic during layout.
+    private(set) var coolingResistance: Double?
+
+    /// The rolling window behind ``coolingResistance``.
+    @ObservationIgnored private var cooling = CoolingEfficiency.Tracker()
+
     /// Frozen display (recording continues; see `togglePaused`).
     private(set) var isPaused = false
 
@@ -258,6 +268,12 @@ final class AppState: PopoverLifecycleObserving {
                 case let .snapshot(new):
                     snapshot = new
                     hottest = new.hottest(stickingTo: hottest?.key)
+                    // Fed every tick, including while the popover is shut: the
+                    // settle window needs an unbroken run of samples, and a gap
+                    // resets it. Recording here rather than in the view is what
+                    // makes a reading available the moment someone looks.
+                    cooling.ingest(new)
+                    coolingResistance = cooling.resistance
                     // Assigned only on a change: see `sensorRowCount`. Writing
                     // the same number every tick would still be a mutation, and
                     // Observation does not care that the value matched.
@@ -400,7 +416,8 @@ final class AppState: PopoverLifecycleObserving {
             // The decision log is the half of a bug report that was previously
             // impossible to attach: "my fans ramped at 2am" is unanswerable
             // from reads alone.
-            decisions: helper.decisions.isEmpty ? nil : helper.decisions
+            decisions: helper.decisions.isEmpty ? nil : helper.decisions,
+            coolingResistance: coolingResistance
         )
         return try report.jsonData()
     }

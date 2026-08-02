@@ -139,6 +139,12 @@ struct SensorsBrowserView: View {
                     )
                 }
             }
+            Section("Cooling") {
+                CoolingEfficiencyRow(
+                    watts: state.snapshot?.power,
+                    resistance: state.coolingResistance
+                )
+            }
             // Omitted entirely when empty: the window's height is computed
             // from its content, and an empty box would cost the sensor list
             // ~136 pt to say nothing.

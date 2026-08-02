@@ -48,6 +48,7 @@ struct SettingsMenuTab: View {
                     Toggle("CPU graph", isOn: $chart.showCPU)
                     Toggle("GPU graph", isOn: $chart.showGPU)
                     Toggle("Fan RPM graphs", isOn: $chart.showFans)
+                    Toggle("SoC power graph", isOn: $chart.showPower)
                     Toggle("Min/max band", isOn: $chart.showBand)
                     Toggle("Average / target line", isOn: $chart.showSecondary)
                     Picker("Height", selection: $chart.height) {

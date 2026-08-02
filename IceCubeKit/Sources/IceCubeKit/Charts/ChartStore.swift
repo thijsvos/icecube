@@ -83,6 +83,7 @@ public actor ChartStore {
     public enum Unit: String, Sendable, Equatable {
         case celsius = "°C"
         case rpm = "RPM"
+        case watts = "W"
     }
 
     /// One renderable series: a band (bucket min…max) plus its average line.
@@ -110,6 +111,7 @@ public actor ChartStore {
     private var cpuMax = RingBuffer<ChartSample>(capacity: ChartStore.capacity)
     private var cpuAvg = RingBuffer<ChartSample>(capacity: ChartStore.capacity)
     private var gpuMax = RingBuffer<ChartSample>(capacity: ChartStore.capacity)
+    private var power = RingBuffer<ChartSample>(capacity: ChartStore.capacity)
     private var fanActual: [Int: RingBuffer<ChartSample>] = [:]
     private var fanTarget: [Int: RingBuffer<ChartSample>] = [:]
 
@@ -118,6 +120,10 @@ public actor ChartStore {
     /// and then never disappears.
     private var hasCPU = false
     private var hasGPU = false
+    /// Latches on like `hasCPU`/`hasGPU`, and for the same anti-jump reason: a
+    /// Mac either has a power key or it does not, but `power()` can return nil
+    /// for a tick on one that does, and a row must not blink out.
+    private var hasPower = false
     private var fanMeta: [(id: Int, name: String, maxRPM: Double)] = []
     private var didDiscoverRows = false
     private var lastIngest: Date?
@@ -146,6 +152,7 @@ public actor ChartStore {
         // no crash, no log line, just a chart silently missing a series.
         hasCPU = hasCPU || !cpuValues.isEmpty
         hasGPU = hasGPU || !gpuValues.isEmpty
+        hasPower = hasPower || snapshot.power != nil
         // Fans still latch: `FNum` is answered on the first poll and a fan
         // never turns up late.
         if !didDiscoverRows {
@@ -160,6 +167,9 @@ public actor ChartStore {
         }
         if let top = gpuValues.max() {
             gpuMax.append(ChartSample(time: t, value: top))
+        }
+        if let watts = snapshot.power {
+            power.append(ChartSample(time: t, value: watts))
         }
         for fan in snapshot.fans {
             fanActual[fan.id, default: RingBuffer(capacity: Self.capacity)]
@@ -201,6 +211,18 @@ public actor ChartStore {
                 id: "gpu", title: "GPU", unit: .celsius, yDomainMin: 20, yDomainMax: 110,
                 series: [
                     series(id: "gpu.max", label: "Hottest", from: gpuMax, start: start, end: end, budget: budget),
+                ]
+            ))
+        }
+        if hasPower {
+            // Y domain fixed at 0…120 W rather than scaled to the observed
+            // maximum: the anti-jump rule forbids an axis that rescales while
+            // you watch, and 120 W comfortably covers an M-series laptop SoC
+            // (docs/SMC-KEYS.md measured ~52 W peak on Mac14,9).
+            rows.append(Row(
+                id: "power", title: "SoC Power", unit: .watts, yDomainMin: 0, yDomainMax: 120,
+                series: [
+                    series(id: "power.watts", label: "Package", from: power, start: start, end: end, budget: budget),
                 ]
             ))
         }

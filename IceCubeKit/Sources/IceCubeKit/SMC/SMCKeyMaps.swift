@@ -159,6 +159,20 @@ public enum SMCKeyMaps {
         classify(key).isDie
     }
 
+    /// Whether `key` names an **airflow** sensor — `TaLP`, `TaRF` and the
+    /// `TaLC`/`TaRC` variants in ``fallbackCandidateSensors``.
+    ///
+    /// Its own predicate rather than a use of ``classify(_:)`` because
+    /// `.ambient` is that function's catch-all: it collects airflow *and* SSD,
+    /// battery, wireless and proximity, which are attached to warm components
+    /// and are not intake air. ``CoolingEfficiency`` needs the narrow set —
+    /// picking the coolest `.ambient` sensor would silently start measuring
+    /// against a battery on a Mac whose airflow keys are missing, and produce a
+    /// plausible-looking number describing nothing.
+    public static func isAirflowKey(_ key: String) -> Bool {
+        key.hasPrefix("Ta")
+    }
+
     // MARK: - SoC power (the feedforward signal)
 
     /// Candidate keys for **total SoC package power in watts**, best first.

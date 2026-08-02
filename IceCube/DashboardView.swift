@@ -65,7 +65,12 @@ struct DashboardView: View {
     /// A value that changes whenever a row-visibility toggle flips — cheaper
     /// than observing each Bool separately.
     private var chartFilterSignature: [Bool] {
-        [state.chartSettings.showCPU, state.chartSettings.showGPU, state.chartSettings.showFans]
+        [
+            state.chartSettings.showCPU,
+            state.chartSettings.showGPU,
+            state.chartSettings.showFans,
+            state.chartSettings.showPower,
+        ]
     }
 
     // MARK: - Controls (live actions only — settings moved to the Settings window)

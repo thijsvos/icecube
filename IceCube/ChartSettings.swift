@@ -40,6 +40,7 @@ final class ChartSettings {
     private enum Key {
         static let show = "charts.show", window = "charts.window"
         static let cpu = "charts.cpu", gpu = "charts.gpu", fans = "charts.fans"
+        static let power = "charts.power"
         static let band = "charts.band", secondary = "charts.secondary"
         static let height = "charts.height", tempList = "charts.templist"
         static let controls = "menu.controls"
@@ -71,6 +72,17 @@ final class ChartSettings {
 
     var showGPU: Bool {
         didSet { defaults.set(showGPU, forKey: Key.gpu) }
+    }
+
+    /// Off by default, unlike the other row families.
+    ///
+    /// Watts is the newest row and the popover is already dense — the owner's
+    /// standing note is that the popover must not become "too much info". The
+    /// always-visible home for power is the Sensors window, which has room to
+    /// explain what the number means; this toggle is for someone who wants it
+    /// on the live stack too.
+    var showPower: Bool {
+        didSet { defaults.set(showPower, forKey: Key.power) }
     }
 
     var showFans: Bool {
@@ -124,6 +136,7 @@ final class ChartSettings {
         showCPU = bool(Key.cpu, true)
         showGPU = bool(Key.gpu, true)
         showFans = bool(Key.fans, true)
+        showPower = bool(Key.power, false)
         showBand = bool(Key.band, true)
         showSecondary = bool(Key.secondary, true)
         height = ChartHeight(rawValue: d.string(forKey: Key.height) ?? "") ?? .regular
@@ -138,6 +151,9 @@ final class ChartSettings {
         }
         if id == "gpu" {
             return showGPU
+        }
+        if id == "power" {
+            return showPower
         }
         if id.hasPrefix("fan.") {
             return showFans

@@ -144,11 +144,24 @@ public struct SMCSnapshot: Sendable, Codable, Equatable {
     public let date: Date
     public let fans: [Fan]
     public let temperatures: [SensorReading]
+    /// Total SoC package power in watts, or `nil` on a Mac with no usable key.
+    ///
+    /// Optional and defaulted so an older encoded snapshot still decodes, and
+    /// because `nil` is a real answer rather than a failure — a Mac without
+    /// `PSTR`/`PDTR` has no wattage to show, and the app omits the figure rather
+    /// than substituting a guess.
+    public let power: Double?
 
-    public init(date: Date, fans: [Fan], temperatures: [SensorReading]) {
+    public init(
+        date: Date,
+        fans: [Fan],
+        temperatures: [SensorReading],
+        power: Double? = nil
+    ) {
         self.date = date
         self.fans = fans
         self.temperatures = temperatures
+        self.power = power
     }
 
     /// The hottest sensor right now — drives the menu bar readout and badge.
