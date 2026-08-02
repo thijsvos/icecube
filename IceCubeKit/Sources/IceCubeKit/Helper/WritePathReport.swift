@@ -27,7 +27,9 @@ public struct WritePathReport: Sendable, Codable, Equatable {
     /// kind — the revert that "succeeded" while leaving the fans stopped at
     /// 0 RPM (see `FanWriteSequencer.revertAllAuto`'s field correction) — and
     /// collapsing them into "failed" would have hidden it.
-    public enum Verdict: String, Sendable, Codable {
+    /// `CaseIterable` so a test can assert every verdict produces a sentence —
+    /// the guard that stops a future case shipping with a blank `summary`.
+    public enum Verdict: String, Sendable, Codable, CaseIterable {
         /// Mode stuck at forced and the target read back as written. Fan
         /// control works on this machine.
         case verified
