@@ -40,6 +40,7 @@ dependencies**; small footprint is a design goal, not an accident.
 | ⌥-click the menu bar icon to jump to the next preset | ✅ |
 | Curve keeps running at boot, app closed — daemon-side | ✅ |
 | Sensors browser (every SMC key, live) + JSON diagnostics export | ✅ |
+| Decision timeline: the charts mark *why* the fans moved, in the daemon's words | ✅ |
 | CSV history export, temperature alerts, launch at login, °C/°F | ✅ |
 | Update check via GitHub Releases (link only, never auto-install) | ✅ |
 
@@ -101,6 +102,8 @@ diagnostics from the **Sensors** window and open a
 [New Mac model report](https://github.com/thijsvos/icecube/issues/new?template=new_mac_model.md).
 The JSON includes the verdict, which unlock path your firmware needed, and which
 mode key your generation uses — the three facts a row in this table is made of.
+It also carries the fan controller's recent decisions, so a report about
+surprising fan behaviour arrives with the reasoning already attached.
 
 ### Quiet on battery, cool on the desk
 
@@ -120,7 +123,12 @@ closed — that curve keeps running exactly as configured.
 ## Safety design
 
 Fan control can cook a machine when done carelessly. Ice Cube's rules are
-enforced **in the root daemon**, where the UI (or a bug in it) cannot reach:
+enforced **in the root daemon**, where the UI (or a bug in it) cannot reach.
+
+Every one of them announces itself. When a rule below fires, the daemon writes a
+plain sentence explaining what it did, and the app marks that moment on the
+charts — so you can watch the ceiling or the guardian act instead of taking this
+section's word for it:
 
 - Every RPM write is clamped to the fan's firmware-reported safe range — and
   because Apple Silicon firmware treats those limits as *advisory* (it will
