@@ -220,7 +220,7 @@ public actor ChartStore {
             // you watch, and 120 W comfortably covers an M-series laptop SoC
             // (docs/SMC-KEYS.md measured ~52 W peak on Mac14,9).
             rows.append(Row(
-                id: "power", title: "SoC Power", unit: .watts, yDomainMin: 0, yDomainMax: 120,
+                id: "power", title: "Power", unit: .watts, yDomainMin: 0, yDomainMax: 120,
                 series: [
                     series(id: "power.watts", label: "Package", from: power, start: start, end: end, budget: budget),
                 ]

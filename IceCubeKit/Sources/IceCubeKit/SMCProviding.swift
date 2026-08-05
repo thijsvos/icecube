@@ -36,7 +36,7 @@ public protocol SMCProviding: Sendable {
     /// clusters gate on and off.
     func sensorInventory() async throws(IceCubeError) -> [SMCKeyMaps.SensorDescriptor]
 
-    /// Total SoC package power in watts, or `nil` when this Mac exposes no
+    /// Total **system** power in watts (`PSTR`), or `nil` when this Mac exposes no
     /// usable key (see ``SMCKeyMaps/powerKeyCandidates``).
     ///
     /// `nil` is a first-class answer, not a failure — a Mac without the key

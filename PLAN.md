@@ -273,7 +273,7 @@ Work in order. Each phase ends with its acceptance criteria demonstrably true (s
 
 ### Cooling efficiency (2026-08-02)
 
-Added SoC power to the snapshot and derived thermal resistance (°C/W) from it —
+Added system power to the snapshot and derived a cooling-efficiency index (°C/W) from it —
 `CoolingEfficiency` in IceCubeKit, a Sensors-window readout, an opt-in chart row,
 and `DiagnosticsReport` schema v4. `SMCProviding.power()` had been implemented on
 both providers since Phase 1 and called only by `icecube-diag --watch`; this is

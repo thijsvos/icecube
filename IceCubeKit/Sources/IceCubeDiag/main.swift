@@ -84,7 +84,7 @@ do {
         // R needs a settled window, which a one-shot run does not have — say so
         // rather than printing a transient quotient.
         if let watts = report.watts {
-            print("SoC power:  \(String(format: "%.1f", watts)) W")
+            print("Power:      \(String(format: "%.1f", watts)) W  (PSTR — system total)")
             let die = report.temperatures.filter { SMCKeyMaps.isDieKey($0.key) }.map(\.celsius).max()
             let ambient = CoolingEfficiency.ambient(from: report.temperatures)
             if let die, let ambient,
@@ -95,7 +95,7 @@ do {
                 )
             }
         } else {
-            print("SoC power:  — (this Mac exposes no usable power key)")
+            print("Power:      — (this Mac exposes no usable power key)")
         }
         print("Fans:       \(report.fans.count)")
         for fan in report.fans {

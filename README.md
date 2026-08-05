@@ -34,13 +34,13 @@ dependencies**; small footprint is a design goal, not an accident.
 | Menu-bar popover with live stacked charts (CPU, GPU, per-fan RPM) | ✅ |
 | 1/5/15/60-min windows, pause, hover crosshair, min/avg/max | ✅ |
 | Fan-curve editor: drag points, double-click add, keyboard nudge, live marker | ✅ |
-| Presets: Quiet · Balanced · Cold · Max + your own | ✅ |
+| Presets: Quiet · Balanced · Cold · Max, plus your own curves saved in the editor | ✅ |
 | Manual per-fan sliders (watchdogged, never persisted) | ✅ |
 | Switch presets automatically when you plug in or unplug | ✅ |
 | ⌥-click the menu bar icon to jump to the next preset | ✅ |
-| Curve keeps running at boot, app closed — daemon-side | ✅ |
+| Curve keeps running at boot, app closed — daemon-side, opt-in | ✅ |
 | Sensors browser (every SMC key, live) + JSON diagnostics export | ✅ |
-| SoC power draw, and cooling efficiency in °C/W — *is it hot, or is cooling failing?* | ✅ |
+| Power draw, and a cooling-efficiency index in °C/W — *is it hot, or is cooling failing?* | ✅ |
 | Decision timeline: the charts mark *why* the fans moved, in the daemon's words | ✅ |
 | CSV history export, temperature alerts, launch at login, °C/°F | ✅ |
 | Update check via GitHub Releases (link only, never auto-install) | ✅ |
@@ -59,7 +59,7 @@ which is which rather than implying broader support than exists.
 | Mac | Monitoring | Fan control | Status |
 | --- | --- | --- | --- |
 | **MacBook Pro 14" M2 Pro** (`Mac14,9`) | curated sensor labels | works — `direct` path, `Md` key | **Verified** on macOS 26.4.1. The machine Ice Cube is developed on. |
-| Other **M2** family (`Mac14,x`) | curated sensor labels | expected — same `direct` path | Not yet reported |
+| Other **M2** family (11 mapped `Mac14,x` ids) | curated sensor labels | expected — same `direct` path | Not yet reported |
 | **M1** family | generic probe | implemented — `direct` path | Not yet reported |
 | **M3 / M4** | generic probe | implemented — `Ftst` unlock, **from research only** | Not yet reported |
 | **M5** | generic probe | implemented — `md` key rename, **from research only** | Not yet reported |
@@ -96,7 +96,10 @@ Ice Cube can now answer this about your Mac itself:
 
 It forces the fan mode, writes each fan's *current* target back to itself, checks
 the firmware kept it, and reverts — a real exercise of the write path that
-commands no change in speed. It takes a few milliseconds and nothing spins up.
+commands no change in speed. On a Mac that takes the direct path (M1/M2) it is over
+in milliseconds; a Mac that needs the `Ftst` unlock takes a few seconds. If macOS
+has parked a fan at 0 RPM, the check commands that fan's minimum, so it can spin
+briefly.
 
 If it reports anything other than "works", that is worth sending: export
 diagnostics from the **Sensors** window and open a
@@ -113,7 +116,7 @@ lap, probably at night, and quieter is worth a warmer machine; on a desk cool
 costs nothing. Settings → Fan Control can map a preset to each — *on battery use
 Quiet, plugged in use Cold* — and switch as you plug and unplug.
 
-It fires **only when the power source changes**, never continuously. Pick a
+It fires when the power source changes, and once when Ice Cube starts — never continuously. It is **off until you turn it on** in Settings. Pick a
 different preset any time and it stays until you next plug in or unplug; the
 rule responds to a change rather than policing a state, so it cannot end up
 fighting you. Off until you turn it on, and both sides are your own choices.
@@ -125,10 +128,11 @@ closed — that curve keeps running exactly as configured.
 
 Temperature alone cannot tell you whether a hot Mac is working hard or failing to
 shed heat — 95 °C means one thing while exporting video and another while idle.
-Ice Cube reads the SoC's power draw and reports **thermal resistance** in degrees
-per watt: how much the chip heats up for each watt it burns. Unlike temperature,
+Ice Cube reads the machine's power draw and reports **degrees per watt**: how much
+the chip heats up for each watt the Mac pulls. Unlike temperature,
 that number is comparable to itself over time, so a slow rise across months is
-dust or dried paste rather than a busier week.
+dust or dried paste rather than a busier week. Ice Cube does not keep that
+history for you yet — note a reading down now and again.
 
 It is shown only when the machine has held steady for 20 seconds, because the
 figure is meaningless mid-transient, and it compares your Mac to *its own past* —
@@ -142,7 +146,7 @@ from one verified Mac.
 Fan control can cook a machine when done carelessly. Ice Cube's rules are
 enforced **in the root daemon**, where the UI (or a bug in it) cannot reach.
 
-Every one of them announces itself. When a rule below fires, the daemon writes a
+Most of them announce themselves. When the ceiling, the watchdog, the dark-wake gate or the guardian fires, the daemon writes a
 plain sentence explaining what it did, and the app marks that moment on the
 charts — so you can watch the ceiling or the guardian act instead of taking this
 section's word for it:
@@ -158,23 +162,27 @@ section's word for it:
   you opt in.
 - **Nothing spins on a dark wake.** Before the Mac sleeps every fan goes back to
   the firmware, and the daemon writes nothing at all until a display is powered
-  again. A laptop wakes dozens of times a night without waking *you* — Time
+  again, with the two bounded exceptions below. A laptop wakes dozens of times a night without waking *you* — Time
   Machine, `softwareupdate`, a push notification — and a fan controller that
   reads one of those as morning runs the fans inside a closed bag. Ice Cube did
   exactly that for 69 seconds during development, which is why the proof of a
   real wake is now a lit display and nothing else. Keying on the display rather
   than on the lid gets both cases right: a clamshell Mac driving an external
   monitor keeps full fan control, a shut one in a bag gets none. The temperature
-  ceiling is the single exception and stays armed the whole time — a Mac
-  genuinely cooking in that bag is allowed to make noise. A preset or curve that
+  ceiling is the main exception and stays armed the whole time — a Mac
+  genuinely cooking in that bag is allowed to make noise. The second is a
+  bounded five-minute failsafe for a wake the daemon may have slept through,
+  which stands down entirely inside a confirmed dark wake. A preset or curve that
   arrives while it is parked is held rather than refused, and applied the moment
   it is properly awake.
 
   Verified on hardware: a deliberately reproduced `rtc/Maintenance` dark wake
   with the lid shut took **zero** fan writes across 9 min 40 s, and control came
   back 900 ms after the lid opened.
-- Every write is verified by read-back and audit-logged (`log stream
-  --predicate 'subsystem == "io.github.thijsvos.icecube"'`).
+- Every write that sets a fan speed is verified by read-back, and every write and
+  decision is logged (`log stream --predicate 'subsystem ==
+  "io.github.thijsvos.icecube"' --level info` — the `--level` matters, the
+  per-write lines are `info`).
 - **The guardian**: we found during development that macOS 26 does not
   reliably resume fan management after *any* fan app releases control (fans
   can sit stopped while the die climbs past 90 °C). Ice Cube therefore never
@@ -195,7 +203,7 @@ Writing fan speeds on Apple Silicon requires root — that's firmware-enforced,
 not a choice. Ice Cube keeps that surface tiny: a single daemon (registered via
 `SMAppService`, approved once by you in System Settings) that speaks a
 six-method XPC protocol, pinned to the app's code signature in both
-directions. The app itself contains **no fan-write code at all**.
+directions. The app contains **no SMC writer at all** — every byte that reaches the fans is written by the helper, and CI fails the build if a writer symbol appears in the app binary.
 
 ## Install
 
@@ -209,8 +217,10 @@ four history windows, the crosshair and min/avg/max readouts, CSV export, the
 sensors browser and diagnostics export. Reading the SMC needs no privileges, so
 none of that asks anything of you.
 
-It is unsigned, so macOS quarantines it on first launch — right-click the app
-and choose **Open**, or System Settings → Privacy & Security → **Open Anyway**.
+It is unsigned, so macOS blocks it on first launch. Open it once, dismiss the
+warning, then go to System Settings → Privacy & Security and press **Open Anyway**.
+(On current macOS the old right-click → **Open** shortcut no longer works for
+unsigned apps.)
 
 ### Build — adds fan control
 
@@ -248,7 +258,8 @@ sh scripts/set-team.sh YOURTEAMID
 sh scripts/install.sh    # builds Release, installs to /Applications, launches
 ```
 
-The build itself takes a couple of minutes on a warm machine.
+The build itself takes well under a minute on an M2 Pro; the Xcode download, if you
+need it, is the long part.
 
 > **Careful with the team ID.** It is the certificate's `OU`, which is what the
 > command above prints. It is **not** the value in parentheses that
@@ -301,7 +312,8 @@ the same reminder at the end of a source build.
 1. Ice Cube popover → Settings… → Fan Control Setup → **Turn Off Fan Control**
    (hands the fans back to macOS and removes the background service).
 2. Quit Ice Cube, delete `/Applications/Ice Cube.app`.
-3. Optional leftovers: `~/Library/Application Support/IceCube` (your presets)
+3. Optional leftovers: `~/Library/Application Support/IceCube` (your presets),
+   and your settings with `defaults delete io.github.thijsvos.icecube`
    and `sudo rm -rf "/Library/Application Support/IceCube"` (the daemon's
    persisted config).
 
@@ -316,7 +328,7 @@ model nobody has mapped yet: popover → **Sensors…** → **Export Diagnostics
 and open a report. The JSON is exactly what a curated mapping is written from.
 
 **The fan-control write path.** See [Compatibility](#compatibility) — Settings →
-**Check Fan Control** answers this in a few milliseconds, and the result rides
+**Check Fan Control** answers this in seconds at worst, and the result rides
 along in the same export.
 
 <p align="center">

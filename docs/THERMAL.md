@@ -36,10 +36,17 @@ workload:
 R = (T_die − T_ambient) / P          °C per watt
 ```
 
-This is how heatsinks are specified, and it is the only number in Ice Cube that
-is comparable to itself over time. Raw temperature is not: 70 °C means different
-things at 10 W and 50 W. Dividing by power removes the workload and leaves the
-cooling.
+That is the form heatsinks are specified in, and it is why the number is
+comparable to itself over time when raw temperature is not: 70 °C means different
+things at 10 W and 50 W, and dividing by power removes the workload.
+
+**One honest qualification, up front.** `P` here is *system* power, not the power
+dissipated by the die whose temperature is in the numerator. So this is not
+literally the chip's thermal resistance — some of those watts go to the display,
+the SSD and charging losses, and never pass through the heatsink. What it is, is
+a stable **cooling-efficiency index**: die rise per watt the machine draws. Every
+use below survives that, because all of them compare the number to itself on one
+machine. None of them survive treating it as a datasheet figure.
 
 Three consequences follow, and they are the reason the number is worth showing:
 
@@ -59,8 +66,10 @@ Source: `IceCubeKit/Sources/IceCubeKit/CoolingEfficiency.swift`.
   `SMCKeyMaps.classify`.
 - **`T_ambient`** — the *coolest* airflow sensor (`TaLP`, `TaRF`). See the
   limits section: this is not room temperature.
-- **`P`** — total SoC package power, from the `PSTR` key (`PDTR` as fallback).
-  Documented in [SMC-KEYS.md](SMC-KEYS.md).
+- **`P`** — total **system** power, from the `PSTR` key (`PDTR` as fallback).
+  [SMC-KEYS.md](SMC-KEYS.md) measured this as *system total*, not the SoC package
+  alone. That matters and is dealt with under "What this number is not" — the
+  first draft of this file called it SoC package power, which was wrong.
 
 The arithmetic is one division. The discipline around it is the actual feature:
 Ice Cube refuses to show a number more often than it shows one.
@@ -152,10 +161,14 @@ the 5 W floor, so a deeply idle Mac may legitimately show `—`.
 
 ## What this number is not
 
-- **Not comparable between machines.** The ambient reference is an airflow
-  sensor *inside* the Mac, downstream of warm components, so it reads several
-  degrees above the room. Comparing your `R` to someone else's compares two
-  different reference points. Compare it to **your own past readings**.
+- **Not the chip's thermal resistance, despite the units.** The denominator is
+  whole-system power (`PSTR`), not the heat crossing the die-to-air path. Treat
+  the number as an index, not a datasheet value.
+- **Not comparable between machines.** Two reasons now. The ambient reference is
+  an airflow sensor *inside* the Mac, downstream of warm components, so it reads
+  several degrees above the room. And the system-power denominator includes
+  whatever else that particular Mac is powering — a second display changes it
+  without anything thermal changing. Compare it to **your own past readings**.
 - **Not a health score.** There is no threshold at which a value becomes "bad".
   What matters is the *trend on one machine at a comparable fan speed*.
 - **Not a prediction.** It describes the state it was measured in.

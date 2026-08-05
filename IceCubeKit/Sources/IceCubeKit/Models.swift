@@ -144,7 +144,11 @@ public struct SMCSnapshot: Sendable, Codable, Equatable {
     public let date: Date
     public let fans: [Fan]
     public let temperatures: [SensorReading]
-    /// Total SoC package power in watts, or `nil` on a Mac with no usable key.
+    /// Total **system** power in watts, or `nil` on a Mac with no usable key.
+    ///
+    /// `PSTR`, which docs/SMC-KEYS.md measured as system total — not the SoC
+    /// package alone. The distinction matters wherever this is divided into a
+    /// die temperature; see docs/THERMAL.md.
     ///
     /// Optional and defaulted so an older encoded snapshot still decodes, and
     /// because `nil` is a real answer rather than a failure — a Mac without
