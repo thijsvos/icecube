@@ -95,7 +95,7 @@ public struct DiagnosticsReport: Sendable, Codable, Equatable {
     /// read it. Attaching it is the difference between a reproducible report
     /// and a prose description of a noise.
     public let decisions: [DecisionEvent]?
-    /// Total SoC package power at capture, in watts, or nil on a Mac with no
+    /// Total **system** power at capture, in watts (`PSTR`), or nil on a Mac with no
     /// usable key.
     ///
     /// Optional so a v3 report still decodes. This is the field `icecube-diag`'s

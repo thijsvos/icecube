@@ -31,8 +31,11 @@ what the committed config assumes rather than discovering it by breakage:
       can only be taken while fan control is **off** (with it on there is no
       setup entry point at all), so the free moment is a clean-machine install
       test — not unregistering a working daemon to stage a photo.
-- [ ] *Stale since 2026-08-01:* `sensors.png` and `popover.png` were taken on
-      2026-07-26 and show UI that no longer ships. The Sensors window now sizes
+- [ ] *Stale since 2026-08-01, and more so since 2026-08-03:* `sensors.png` and
+      `popover.png` were taken on 2026-07-26 and show UI that no longer ships.
+      The Sensors window has since gained a **Recent decisions** timeline and an
+      always-present **Cooling** section; the popover charts have gained decision
+      markers. Both shots therefore show fewer sections than the app has. The Sensors window now sizes
       itself to the sensor inventory rather than to a hardcoded 560×480, and the
       popover's sensor list now has a bounded scroll region sized from the
       inventory instead of an unclamped `ForEach`. Retake both from a machine

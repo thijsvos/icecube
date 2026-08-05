@@ -175,7 +175,11 @@ public enum SMCKeyMaps {
 
     // MARK: - SoC power (the feedforward signal)
 
-    /// Candidate keys for **total SoC package power in watts**, best first.
+    /// Candidate keys for **total system power in watts**, best first.
+    ///
+    /// Named carefully: `PSTR` is the whole machine, not the SoC package. The
+    /// doc below records the measurement; several places once called this "SoC
+    /// power" and were wrong.
     ///
     /// Reported for diagnostics: when someone says "my Mac is hot", watts are
     /// what distinguish *"you are running something heavy"* from *"cooling is
