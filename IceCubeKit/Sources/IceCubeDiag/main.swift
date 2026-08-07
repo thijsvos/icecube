@@ -8,9 +8,11 @@ import IceCubeKit
 //   swift run icecube-diag --json       full DiagnosticsReport as JSON
 //   swift run icecube-diag --simulated  run against the simulation instead
 //   swift run icecube-diag --watch [secs] CSV of fan/temp every 200 ms
+//   swift run icecube-diag --processes  per-process watts vs system total
 let arguments = CommandLine.arguments
 let wantsJSON = arguments.contains("--json")
 let wantsWatch = arguments.contains("--watch")
+let wantsProcesses = arguments.contains("--processes")
 let simulated = arguments.contains("--simulated") || ProcessInfo.processInfo.environment["ICECUBE_SIMULATED"] == "1"
 
 let provider: any SMCProviding
@@ -58,6 +60,58 @@ func watch(_ provider: any SMCProviding, seconds: Double) async {
         }
         try? await Task.sleep(for: .milliseconds(200))
     }
+}
+
+/// Prints per-process watts beside the SMC's system total.
+///
+/// **Opt-in, and deliberately absent from both the default summary and
+/// `--json`.** Those two are what people paste into public issues, and process
+/// names say what someone works on. This flag exists for the person holding the
+/// machine, and for ground-truthing ``SystemProcessSampler`` against
+/// `powermetrics`.
+///
+/// Two samples, because `ri_energy_nj` is a counter: the first establishes a
+/// baseline and only the second can be divided into watts.
+func showProcesses(_ provider: any SMCProviding, sampler: any ProcessSampling) async {
+    _ = await sampler.sample()
+    try? await Task.sleep(for: .seconds(2))
+    guard let reading = await sampler.sample() else {
+        print("No reading — too little time elapsed between samples.")
+        return
+    }
+
+    let systemWatts = await (try? provider.power()) ?? nil
+    print("Interval:   \(String(format: "%.2f", reading.interval)) s")
+    if let systemWatts {
+        print("System:     \(String(format: "%.1f", systemWatts)) W  (PSTR — the whole machine)")
+    } else {
+        print("System:     — (this Mac exposes no usable power key)")
+    }
+    let readable = reading.totalCount - reading.unreadableCount
+    print(
+        "Attributed: \(String(format: "%.1f", reading.attributedWatts)) W"
+            + "  (CPU energy of all \(readable) readable processes)"
+    )
+    if let systemWatts {
+        let remainder = systemWatts - reading.attributedWatts
+        print(
+            "Remainder:  \(String(format: "%.1f", remainder)) W"
+                + "  (display, SSD, radios, GPU, and \(reading.unreadableCount) processes needing root)"
+        )
+    }
+    print("Processes:  \(readable) readable of \(reading.totalCount)"
+        + "  (\(reading.unreadableCount) need root — kernel_task, WindowServer, other users)")
+    print("\nTop \(reading.processes.count) by draw:")
+    for sample in reading.processes {
+        print(String(format: "  %6.2f W  %@ (%d)", sample.watts, sample.name, sample.pid))
+    }
+    print("\nThese do not sum to the system total, and should not — see docs/DIAGNOSIS.md.")
+}
+
+if wantsProcesses {
+    let sampler: any ProcessSampling = simulated ? MockProcessSampler() : SystemProcessSampler()
+    await showProcesses(provider, sampler: sampler)
+    exit(0)
 }
 
 if wantsWatch {

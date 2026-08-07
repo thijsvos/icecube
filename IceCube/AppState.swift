@@ -86,6 +86,47 @@ final class AppState: PopoverLifecycleObserving {
     /// The rolling window behind ``coolingResistance``.
     @ObservationIgnored private var cooling = CoolingEfficiency.Tracker()
 
+    // MARK: - Diagnosis ("why is it hot?")
+
+    /// The live verdict, or `nil` while the Diagnose window is closed.
+    ///
+    /// See ``ThermalDiagnosis``. Published rather than computed on demand so
+    /// the view never runs the reasoning during layout.
+    private(set) var diagnosis: ThermalDiagnosis.Verdict?
+
+    /// The most recent per-process sample. Kept between ticks so a pass that
+    /// cannot produce a rate (the first one) leaves the previous answer up
+    /// rather than blanking the list.
+    @ObservationIgnored private var processReading: ProcessEnergyReading?
+
+    /// Whether the Diagnose window is on screen.
+    ///
+    /// Gates the sampling, for the same measured reason `isPopoverVisible`
+    /// gates chart publishing: a pass walks every PID on the machine, and doing
+    /// that every second for a window nobody has open is exactly the waste that
+    /// cost ~17 % sustained CPU before the popover gate existed. Unlike the
+    /// cooling window, nothing is lost by not recording — the verdict is about
+    /// this instant, so it is correct the moment you look.
+    @ObservationIgnored private var isDiagnosisVisible = false
+
+    /// The Diagnose window opened: start sampling.
+    func diagnosisAppeared() {
+        Self.uiLog.notice("diagnosis window appeared — sampling processes")
+        isDiagnosisVisible = true
+    }
+
+    /// The Diagnose window closed: stop sampling and drop what was collected.
+    ///
+    /// Dropping is deliberate. Process names are the most sensitive thing this
+    /// app touches, and there is no reason to keep a list of them alive in a
+    /// menu-bar process that will run for days after the window is shut.
+    func diagnosisDisappeared() {
+        Self.uiLog.notice("diagnosis window disappeared — discarding process data")
+        isDiagnosisVisible = false
+        processReading = nil
+        diagnosis = nil
+    }
+
     /// Frozen display (recording continues; see `togglePaused`).
     private(set) var isPaused = false
 
@@ -162,6 +203,9 @@ final class AppState: PopoverLifecycleObserving {
 
     /// Where readings come from. Injected so tests and simulated mode swap freely.
     private let provider: any SMCProviding
+    /// Who is drawing power. Injected via ``CompositionRoot`` so a simulated
+    /// launch reads no real PID — see ``ProcessSampling``.
+    @ObservationIgnored private let processSampler: any ProcessSampling
     /// Wraps `provider` in the snapshot stream; rebuilt when cadence changes.
     private var poller: SMCPoller
     /// The task consuming the polling stream; `nil` when stopped.
@@ -188,7 +232,8 @@ final class AppState: PopoverLifecycleObserving {
             isSimulated: graph.isSimulated,
             helper: graph.helper,
             presets: graph.presets,
-            defaults: graph.defaults
+            defaults: graph.defaults,
+            processes: graph.processes
         )
     }
 
@@ -197,13 +242,18 @@ final class AppState: PopoverLifecycleObserving {
         isSimulated: Bool,
         helper: HelperManager,
         presets: PresetStore,
-        defaults: any KeyValueStore
+        defaults: any KeyValueStore,
+        processes: any ProcessSampling = MockProcessSampler()
     ) {
         self.provider = provider
         self.isSimulated = isSimulated
         self.helper = helper
         self.presets = presets
         self.defaults = defaults
+        // Defaulted to the mock rather than to `SystemProcessSampler`, so a
+        // caller that forgets the argument reads fiction instead of the user's
+        // real process list. The safe default is the one that touches nothing.
+        processSampler = processes
         // Simulated temperatures are a sine wave with random spikes; posting
         // real Notification Centre banners about them would be writing fiction
         // into the user's actual notification history.
@@ -274,6 +324,25 @@ final class AppState: PopoverLifecycleObserving {
         ))
     }
 
+    /// Recomputes the "why is it hot?" verdict, if anyone is looking.
+    ///
+    /// The curve comes from the **daemon's** reported status rather than from
+    /// whatever the app last sent: the question is what is actually driving the
+    /// fans right now, and those two differ whenever a command was refused,
+    /// deferred until wake, or overridden by a safety rule.
+    private func refreshDiagnosis(_ new: SMCSnapshot) async {
+        guard isDiagnosisVisible else { return }
+        if let reading = await processSampler.sample() {
+            processReading = reading
+        }
+        diagnosis = ThermalDiagnosis.diagnose(
+            snapshot: new,
+            resistance: coolingResistance,
+            processes: processReading,
+            curve: helper.status?.activeCurve
+        )
+    }
+
     /// Starts consuming the 1 Hz polling stream. A second call is a no-op.
     func start() {
         guard pollTask == nil else { return }
@@ -310,6 +379,7 @@ final class AppState: PopoverLifecycleObserving {
                     // makes a reading available the moment someone looks.
                     cooling.ingest(new)
                     coolingResistance = cooling.resistance
+                    await refreshDiagnosis(new)
                     // Assigned only on a change: see `sensorRowCount`. Writing
                     // the same number every tick would still be a mutation, and
                     // Observation does not care that the value matched.

@@ -49,6 +49,39 @@ struct SimulatedIsolationTests {
             graph.helper.usesSimulatedPowerSource,
             "the power watcher must be a stand-in — a real charger change is what triggered the incident"
         )
+        #expect(
+            graph.processes is MockProcessSampler,
+            "the process sampler must be a stand-in — a simulated run has no business reading real process names"
+        )
+    }
+
+    /// The privacy half of isolation, asserted on behaviour rather than on type.
+    ///
+    /// The type check above can be satisfied by a mock that still calls
+    /// `proc_listpids`. This one pins what actually matters: the PIDs a
+    /// simulated run reports are fiction, and none of them can belong to a
+    /// process on this machine.
+    ///
+    /// The `kill(pid, 0)` probe alone would be a flaky test — it only proves
+    /// nothing holds that PID *at this instant*. The structural half is the
+    /// range: `MockProcessSampler` numbers from 900001, above Darwin's PID
+    /// ceiling of 99999, so a collision is impossible rather than merely
+    /// unobserved. Both are asserted, because the range is the guarantee and
+    /// the probe is what catches the range being changed back.
+    @Test("A simulated run reports no PID that could exist on this machine")
+    func simulatedProcessesAreFiction() async throws {
+        let reading = try #require(await simulatedGraph().processes.sample())
+        #expect(!reading.processes.isEmpty, "simulated mode must still demonstrate the feature")
+        for process in reading.processes {
+            #expect(
+                process.pid >= MockProcessSampler.firstFakePID,
+                "pid \(process.pid) is inside the range real processes use — a collision is only a matter of time"
+            )
+            #expect(
+                kill(process.pid, 0) != 0,
+                "pid \(process.pid) (\(process.name)) is a live process — simulated mode named a real one"
+            )
+        }
     }
 
     /// The presets file is redirected rather than disabled, so saving a preset

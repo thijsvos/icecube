@@ -172,6 +172,16 @@ struct IceCubeApp: App {
         }
         .defaultSize(width: 620, height: 460)
 
+        // "Why is it hot?" — the live diagnosis. Its own window rather than a
+        // Sensors section: that window is sized to a computed ceiling two
+        // earlier additions broke, and this answers a different question.
+        // Sampling starts on appear and stops on disappear (`DiagnosisView`),
+        // so a closed window costs nothing and holds no process names.
+        Window("Why is it hot?", id: WindowOpener.ID.diagnosis) {
+            DiagnosisView(state: appState)
+        }
+        .defaultSize(width: 460, height: 560)
+
         // Full settings. Fixed content size (the tabbed view is 480×380) and
         // non-resizable — one `.windowResizability(.contentSize)` only. (A
         // stray second `.contentMinSize` here previously let the window grow
