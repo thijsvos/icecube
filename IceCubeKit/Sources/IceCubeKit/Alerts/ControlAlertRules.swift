@@ -93,6 +93,71 @@ public enum ControlAlertRules {
         }
     }
 
+    // MARK: - Which safety lines are worth waking someone for
+
+    /// Daemon sentences that are `SAFETY:`-prefixed but are **Ice Cube working**,
+    /// not Ice Cube failing.
+    ///
+    /// The first version of this feature notified on `DecisionEvent.Kind.safety`
+    /// outright, and its very first firing on real hardware was noise: five
+    /// seconds after an update, *"Ice Cube lost fan control"*, about a condition
+    /// the user had just caused and which resolved immediately. The log showed
+    /// why — **every daemon start is followed by one of these within seconds**:
+    ///
+    ///     16:53:50  daemon start  →  16:53:54  SAFETY: system did not resume control
+    ///     17:24:34  daemon start  →  17:24:36  SAFETY: …
+    ///     18:49:51  daemon start  →  18:49:51  SAFETY: …
+    ///     22:24:11  daemon start  →  22:24:11  SAFETY: …
+    ///
+    /// The obvious patch — a grace period after a restart — treats the symptom.
+    /// The cause is that `SAFETY:` marks a line as safety-*relevant*, which is
+    /// the right bar for a log line and for a chart colour, and much too low a
+    /// bar for interrupting somebody. `holdAtFloor` emitting "system did not
+    /// resume control — holding fans at minimum RPM ourselves" is the guardian
+    /// doing precisely its job, on a known macOS behaviour, after every revert.
+    ///
+    /// Matched on the daemon's own prose, which is normally a smell — the
+    /// classification is supposed to live where the sentence is written. It is
+    /// safe here only because `ControlAlertRulesTests` reads the daemon's source
+    /// and fails if any `SAFETY:` literal is not covered by this list, so a new
+    /// or reworded sentence is a build failure and a decision, never a silent
+    /// change in what the app interrupts you for.
+    static let routineSafetyMarkers = [
+        // The guardian holding the fans because macOS did not take them back.
+        // Fires after every revert on hardware where that is the norm.
+        "system did not resume control",
+        // Self-healing: fans found in mode 0, re-parked and handed back.
+        "orphaned in mode 0",
+        // The write/revert race guard resolving itself.
+        "raced a revert",
+        // Informational: sleep is correct even mid-ceiling; the firmware takes over.
+        "parking for sleep while the temperature ceiling is active",
+        // The missed-wake failsafe releasing the latch — bounded, and by design.
+        //
+        // Matched on the prefix rather than on the distinctive tail ("with no
+        // wake notification"), because this sentence interpolates the budget
+        // immediately after "awake ". The tail is unreachable in the source
+        // literal that `ControlAlertRulesTests` pins, and a marker the pinning
+        // test cannot see is a marker nothing guards.
+        "safety: awake ",
+    ]
+
+    /// Whether a decision is worth a notification.
+    ///
+    /// `.guardian` always is: it means macOS stopped cooling a hot machine and
+    /// Ice Cube stepped in, which is news even though it is also Ice Cube
+    /// working. `.safety` is, unless it is one of the routine lines above.
+    static func isNotifiable(_ event: DecisionEvent) -> Bool {
+        switch event.kind {
+        case .guardian:
+            true
+        case .safety:
+            !routineSafetyMarkers.contains { event.text.lowercased().contains($0) }
+        default:
+            false
+        }
+    }
+
     // MARK: - The rule engine
 
     /// Tracks what has already been said, so it is not said again.
@@ -190,7 +255,7 @@ public enum ControlAlertRules {
         for kind in [DecisionEvent.Kind.safety, .guardian] {
             let category: Alert.Category = kind == .safety ? .lostControl : .guardianEngaged
             guard enabled.contains(category) else { continue }
-            guard let event = decisions.last(where: { $0.kind == kind }) else { continue }
+            guard let event = decisions.last(where: { $0.kind == kind && isNotifiable($0) }) else { continue }
             guard state.maySpeak(category, at: now) else { continue }
 
             state.recordSpoke(category, at: now)
