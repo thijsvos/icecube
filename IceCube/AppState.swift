@@ -42,7 +42,11 @@ final class AppState: PopoverLifecycleObserving {
     /// Built-in + user presets (Phase 4). Injected for the same reason.
     let presets: PresetStore
     /// Customizable chart/display preferences — the tinkerer surface.
-    let chartSettings = ChartSettings()
+    ///
+    /// Built from the injected `defaults`, not from `UserDefaults.standard`.
+    /// It used to construct its own, which quietly exempted twelve preferences
+    /// from simulated isolation.
+    let chartSettings: ChartSettings
 
     /// The hottest die-class sensor (CPU/GPU silicon), the curve input.
     var hottestDie: Double? {
@@ -258,6 +262,7 @@ final class AppState: PopoverLifecycleObserving {
         self.helper = helper
         self.presets = presets
         self.defaults = defaults
+        chartSettings = ChartSettings(defaults: defaults)
         // Defaulted to the mock rather than to `SystemProcessSampler`, so a
         // caller that forgets the argument reads fiction instead of the user's
         // real process list. The safe default is the one that touches nothing.

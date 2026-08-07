@@ -22,6 +22,10 @@ final class MemoryDefaults: KeyValueStore {
 
     nonisolated init() {}
 
+    func object(forKey defaultName: String) -> Any? {
+        values[defaultName]
+    }
+
     func integer(forKey defaultName: String) -> Int {
         values[defaultName] as? Int ?? 0
     }

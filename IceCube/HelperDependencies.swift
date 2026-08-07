@@ -84,6 +84,16 @@ protocol KeyValueStore: AnyObject {
     /// rather than read off `UserDefaults.standard` directly, because a
     /// simulated launch must not read or write the real app's cadence.
     func integer(forKey defaultName: String) -> Int
+    /// Whether a key has ever been written, which `bool` and `integer` cannot
+    /// say: both return a zero value for a missing key, and `false`/`0` are
+    /// legitimate stored values.
+    ///
+    /// Added for `ChartSettings`, whose twelve preferences each need a
+    /// first-run default that differs from `false` — and which, until this
+    /// existed, read `UserDefaults.standard` directly for exactly that reason.
+    /// That bypassed the whole seam: a simulated launch wrote chart settings
+    /// into the owner's real preferences domain.
+    func object(forKey defaultName: String) -> Any?
 }
 
 extension UserDefaults: KeyValueStore {}

@@ -9,7 +9,10 @@ import Testing
 /// Richer than `HelperLogicTests`' sequencer fake: it also serves `FNum`, the
 /// per-fan read keys and temperature sensors, because `DaemonCore` reads the
 /// hardware itself rather than being handed a fan list.
-private actor FakeSMC: SMCControlPort {
+/// Shared with `SensorReaderTests`, which drives the same protocol — hence
+/// internal rather than file-private. `MemoryDefaults` in the app suite is
+/// non-private for the same reason.
+actor FakeSMC: SMCControlPort {
     private(set) var values: [String: Double] = [:]
     private(set) var writes: [(key: String, value: Double)] = []
     private(set) var resetCount = 0
