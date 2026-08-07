@@ -45,8 +45,11 @@ struct ControlAlertRulesTests {
     @Test("A safety decision is worth interrupting someone for")
     func safetySpeaks() {
         var state = State()
+        // A genuine fault. The first version of this test used "system did not
+        // resume control", which is the guardian working — so the test asserted
+        // the very behaviour that turned out to be noise on real hardware.
         let event = Self.decision(
-            "SAFETY: system did not resume control — holding fans at minimum RPM ourselves",
+            "SAFETY: control lost (read-back failed twice) — reverting to auto",
             at: Self.at(0)
         )
         let alerts = Self.run(&state, decisions: [event], at: Self.at(0))
@@ -87,6 +90,144 @@ struct ControlAlertRulesTests {
         #expect(Self.run(&state, decisions: [Self.decision(text, at: Self.at(0))], at: Self.at(0)).isEmpty)
     }
 
+    // MARK: - Routine safety lines must not interrupt
+
+    /// The regression test for this feature's first real firing.
+    ///
+    /// Five seconds after a v0.3.0 install it said "Ice Cube lost fan control",
+    /// about `holdAtFloor` — the guardian holding the fans because macOS had not
+    /// taken them back. That is Ice Cube working, it follows every revert on
+    /// this hardware, and it is not something a person can act on.
+    @Test("The line that fires after every daemon restart is not an alert")
+    func guardianFloorHoldIsRoutine() {
+        var state = State()
+        let event = Self.decision(
+            "SAFETY: system did not resume control — holding fans at minimum RPM ourselves",
+            at: Self.at(0)
+        )
+        #expect(event.kind == .safety, "still a safety line — it belongs in the log and on the chart")
+        #expect(Self.run(&state, decisions: [event], at: Self.at(0)).isEmpty, "…but not in a banner")
+    }
+
+    /// Replays the exact restart sequence from the owner's log, 2026-08-07.
+    /// An update must be silent.
+    @Test("Installing an update produces no notification")
+    func anUpdateIsSilent() {
+        var state = State()
+        let script = [
+            "all fans auto (app connection invalidated)",
+            "SAFETY: system did not resume control — holding fans at minimum RPM ourselves",
+            "all fans auto (daemon shutdown)",
+            "all fans auto (daemon start)",
+            "SAFETY: system did not resume control — holding fans at minimum RPM ourselves",
+            "curve engaged (persists without app: false)",
+        ]
+        var alerts: [Alert] = []
+        for (index, text) in script.enumerated() {
+            alerts += Self.run(
+                &state,
+                decisions: [Self.decision(text, at: Self.at(Double(index)))],
+                at: Self.at(Double(index))
+            )
+        }
+        #expect(alerts.isEmpty, "a routine update must not interrupt: got \(alerts.map(\.title))")
+    }
+
+    @Test("Genuine faults still interrupt", arguments: [
+        "SAFETY: control lost (read-back failed twice) — reverting to auto",
+        "SAFETY: fan write failed mid-sequence — reverting (0x84)",
+        "SAFETY: forcing maximum cooling — Tp01 at 110 °C",
+        "SAFETY: wake re-assert failed — reverting to auto",
+        "SAFETY: sensor probe unusable (0 found, die: false, model Mac16,1) — retrying next tick",
+    ])
+    func realFaultsStillSpeak(text: String) {
+        var state = State()
+        #expect(Self.run(&state, decisions: [Self.decision(text, at: Self.at(0))], at: Self.at(0)).count == 1)
+    }
+
+    /// The daemon's complete safety vocabulary, and what each one is worth.
+    ///
+    /// Hand-written, and that is the point. `routineSafetyMarkers` matches on
+    /// substrings, which normally rots the moment somebody rewords a sentence —
+    /// so the table below states the intended answer **independently**, and the
+    /// test beneath it compares the source, the table and the implementation
+    /// three ways. A first attempt at this guard asserted the implementation
+    /// against a value derived from the implementation, which is a tautology and
+    /// survived a mutation that reworded a daemon sentence.
+    ///
+    /// `true` = worth interrupting someone. `false` = Ice Cube working.
+    static let safetyVocabulary: [String: Bool] = [
+        "SAFETY: awake ": false,
+        "SAFETY: control lost (read-back failed twice) — reverting to auto": true,
+        "SAFETY: could not read the fans to park them for sleep — they may still be forced": true,
+        "SAFETY: curve control lost (read-back failed twice) — reverting to auto": true,
+        "SAFETY: fan write failed mid-sequence — reverting (": true,
+        "SAFETY: fan write raced a revert — reverting again": false,
+        "SAFETY: fan(s) orphaned in mode 0 — re-parking, handing back, resetting SMC connection": false,
+        "SAFETY: forcing maximum cooling — ": true,
+        "SAFETY: over the temperature ceiling while parked for sleep (": true,
+        "SAFETY: parking for sleep while the temperature ceiling is active — the firmware owns cooling now": false,
+        "SAFETY: parking the fans for sleep failed (": true,
+        "SAFETY: revert could not be applied (": true,
+        "SAFETY: reverting to auto — ": true,
+        "SAFETY: sensor probe unusable (": true,
+        "SAFETY: system did not resume control — holding fans at minimum RPM ourselves": false,
+        "SAFETY: wake re-assert failed — reverting to auto": true,
+    ]
+
+    /// Reads the daemon's **actual source** and requires its safety vocabulary
+    /// to match the table above exactly.
+    ///
+    /// This is what makes substring matching safe: a new or reworded `SAFETY:`
+    /// line fails here, and whoever wrote it has to decide, in the table,
+    /// whether it should interrupt somebody. Without it an unlisted sentence
+    /// silently defaults to "interrupt", which is how a notifier gets muted.
+    @Test("The daemon's safety vocabulary has not changed behind this feature's back")
+    func safetyVocabularyIsPinned() throws {
+        let sources = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/IceCubeKit/Helper")
+
+        let files = try FileManager.default.contentsOfDirectory(at: sources, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "swift" }
+        #expect(!files.isEmpty, "could not find the daemon sources at \(sources.path)")
+
+        var inSource: Set<String> = []
+        for file in files {
+            for line in try String(contentsOf: file, encoding: .utf8).split(separator: "\n") {
+                guard line.contains("\"SAFETY: "), !line.trimmingCharacters(in: .whitespaces).hasPrefix("///")
+                else { continue }
+                guard let start = line.range(of: "\"SAFETY: ") else { continue }
+                let literal = String(line[start.lowerBound...].dropFirst().prefix { $0 != "\"" && $0 != "\\" })
+                if literal != "SAFETY: " {
+                    inSource.insert(literal)
+                }
+            }
+        }
+
+        let expected = Set(Self.safetyVocabulary.keys)
+        let added = inSource.subtracting(expected)
+        let removed = expected.subtracting(inSource)
+        #expect(
+            inSource == expected,
+            "the daemon's safety vocabulary changed — added \(added), removed \(removed). Update "
+        )
+    }
+
+    /// And the implementation must agree with the table.
+    @Test("Each safety sentence is classified the way the table says")
+    func classificationMatchesTheTable() {
+        for (sentence, shouldNotify) in Self.safetyVocabulary {
+            let event = DecisionEvent(text: sentence + "x", date: Date())
+            #expect(
+                ControlAlertRules.isNotifiable(event) == shouldNotify,
+                "\(sentence) — expected notifiable=\(shouldNotify)"
+            )
+        }
+    }
+
     // MARK: - The part that decides whether this feature survives contact with a user
 
     /// The storm this feature could cause during the failure it exists to
@@ -123,6 +264,8 @@ struct ControlAlertRulesTests {
             1500, 1502, 1504, 1506, // day 2 afternoon
             2900, 2902, 2904, // day 3
         ]
+        // All five of the week's SAFETY lines were the SAME sentence — the
+        // guardian's floor hold — which is why the expectation below is zero.
         let safetyAt: [Double] = [200, 1600, 3000, 4400, 5800]
         let routineAt: [Double] = [10, 500, 1000, 2000, 3500, 5000]
 
@@ -147,9 +290,14 @@ struct ControlAlertRulesTests {
         let lost = alerts.filter { $0.category == .lostControl }.count
         let guarded = alerts.filter { $0.category == .guardianEngaged }.count
 
-        #expect(lost == 5, "every safety event was >10 min apart, so all five are genuinely separate")
+        // Zero, and this is the correction that matters. All five of the week's
+        // SAFETY lines were `holdAtFloor` — the guardian holding the fans after
+        // a revert because macOS had not taken them back. Ice Cube working.
+        // The first version of this feature would have sent five banners for it,
+        // and did send one, five seconds after an update.
+        #expect(lost == 0, "the week's safety lines were all the routine floor hold")
         #expect(guarded == 3, "ten guardian events in three bursts collapse to three")
-        #expect(alerts.count == 8, "fifteen silent events become eight notifications across a week")
+        #expect(alerts.count == 3, "fifteen silent events are worth three notifications, not eight")
         #expect(alerts.allSatisfy { $0.category != .fansPinned }, "the fans were never pinned in this replay")
     }
 
