@@ -43,8 +43,46 @@ fi
 # layout alone no longer proves it — the orchestration is in the app binary and
 # only the concrete writer is not. That makes this check the actual guarantee,
 # and it is one careless `import` away from silently regressing.
+#
+# WHICH FILE TO INSPECT. Not `Contents/MacOS/Ice Cube` — or not only.
+#
+# Xcode's "debug dylib" build (the default for Debug since Xcode 16) leaves that
+# path as a ~59 KB launcher stub and puts every line of the app's own code in
+# `Ice Cube.debug.dylib` beside it. This check ran against the stub for as long
+# as that was true, which is to say it verified nothing: staged as a test on
+# 2026-08-07, an `SMCWritePort` linked into the app produced **28 symbols in the
+# dylib, 0 in the stub**, and this script printed "ok: app binary contains no
+# SMC writer". CI builds Debug, so every green run reported a guarantee it had
+# not tested.
+#
+# Resolve the file that actually holds the code, and refuse to proceed if it
+# looks like a stub — a check that silently inspects the wrong file is worse
+# than no check, because "ok" is why nobody looks again.
 APP_BIN="$APP/Contents/MacOS/Ice Cube"
+if [ -f "$APP/Contents/MacOS/Ice Cube.debug.dylib" ]; then
+    APP_BIN="$APP/Contents/MacOS/Ice Cube.debug.dylib"
+    echo "note: Debug dylib build — inspecting $(basename "$APP_BIN")"
+fi
 HELPER_BIN="$APP/$HELPER_REL"
+
+# A stub tripwire, in symbols rather than bytes: a future toolchain may split
+# the binary some other way, and the failure mode is always the same — a tiny
+# file with almost nothing in it, passing every grep. The real app links
+# SwiftUI, IceCubeKit and Foundation and carries tens of thousands of symbols;
+# the stub carried well under a hundred. 1000 is far below any plausible real
+# build and far above any plausible launcher.
+MIN_SYMBOLS=1000
+if [ -f "$APP_BIN" ]; then
+    symbols=$(nm -a "$APP_BIN" 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$symbols" -lt "$MIN_SYMBOLS" ]; then
+        echo "FAIL: $(basename "$APP_BIN") has only $symbols symbols — this is a stub, not the app" >&2
+        echo "      The capability checks below would pass trivially against it." >&2
+        echo "      The toolchain has moved the code somewhere this script does not know about." >&2
+        fail=1
+    else
+        echo "ok: inspecting $symbols symbols in $(basename "$APP_BIN")"
+    fi
+fi
 
 if [ -f "$APP_BIN" ]; then
     writers=$(nm -a "$APP_BIN" 2>/dev/null | grep -c "SMCWritePort" || true)
@@ -57,7 +95,7 @@ if [ -f "$APP_BIN" ]; then
         fail=1
     fi
 else
-    echo "FAIL: app binary missing at Contents/MacOS/Ice Cube" >&2
+    echo "FAIL: no app binary to inspect at Contents/MacOS/" >&2
     fail=1
 fi
 
