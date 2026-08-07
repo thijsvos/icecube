@@ -80,7 +80,23 @@ public enum HelperConstants {
     ///     and classifies), and because an app expecting decisions from a v22
     ///     helper would show an empty timeline with no explanation. Same rule
     ///     as v21 and v22.
-    public static let protocolVersion = "23"
+    /// v24: the curve deadband is bounded at both ends. `CurveFollower` clamped
+    ///     `hysteresisCelsius` with `max(0, …)` — a lower bound only — so a
+    ///     deadband wider than the range a die actually moves through left the
+    ///     follower **inert**: `effectiveTemp` never updated and the output
+    ///     stayed wherever the first tick put it while the die climbed. It is
+    ///     the one tuning value that can silently disable a curve, and not
+    ///     every value reaching it comes from the editor's 0…8 slider — a
+    ///     hand-edited config or a `FanConfig` off the wire decodes through
+    ///     `decodeIfPresent ?? 4`, which applies no bound at all.
+    ///
+    ///     **The XPC surface is byte-identical.** The bump is here because
+    ///     `CurveFollower` runs *inside the daemon*, so a new app beside a v23
+    ///     helper is still the unfixed follower driving the fans — precisely
+    ///     the failure the rule above was written after. Nothing in the app
+    ///     could report it either, because from the app's side the curve was
+    ///     accepted.
+    public static let protocolVersion = "24"
     /// How often the app sends a heartbeat while connected.
     public static let heartbeatInterval: TimeInterval = 5
     /// SAFETY: no heartbeat for this long → the daemon's watchdog reverts to
