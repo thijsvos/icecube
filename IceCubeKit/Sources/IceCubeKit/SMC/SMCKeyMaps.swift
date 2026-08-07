@@ -86,6 +86,33 @@ public enum SMCKeyMaps {
     ///
     /// Keys beyond the M2 list are the P/E-core and GPU blocks that recur
     /// across M1/M3/M4 with shifted suffixes, plus the stable non-core sensors.
+    ///
+    /// ## The `Te`/`Tf` gap, and what it cost
+    ///
+    /// Until 2026-08-07 this list contained **no `Te`, `Tf` or `Tc` key at
+    /// all** — while `docs/SMC-KEYS.md` recorded, one file away, that M3's die
+    /// sensors are `Te0*`/`Tf*` and M4's are `Te0*`/`Tp0*`/`Tm*p`.
+    ///
+    /// On such a Mac the probe below could only ever find airflow, battery, SSD
+    /// and wireless keys, so `SensorReader`'s `hasDie` guard was never
+    /// satisfied. The daemon read as **blind on every tick**, `SafetyMonitor`
+    /// reverted manual and curve control after three of them, and every curve
+    /// the user applied came undone about six seconds later — while the app
+    /// showed correct temperatures throughout, because the app enumerates keys
+    /// and the daemon cannot. Silent, and the exact shape of the bug the note
+    /// above says already shipped once.
+    ///
+    /// ## The suffixes are a sweep, not knowledge
+    ///
+    /// Nobody here has an M3. The suffix sets follow the shape the M2 map uses
+    /// (`0` then a digit or letter) rather than any observed key list, and that
+    /// is safe because of how they are consumed: candidates are **existence
+    /// probed**, so a wrong guess costs one read and produces nothing, and
+    /// `SensorReader` refuses to cache a set that contains no die key — so a
+    /// sweep that finds nothing leaves the daemon exactly where it was rather
+    /// than worse. A diagnostics report from a real M3 should replace this
+    /// guesswork with a curated map, which is what `curatedSensors(forModel:)`
+    /// is for.
     public static let fallbackCandidateSensors: [SensorDescriptor] = {
         var candidates = m2GenerationSensors
         let extraCores = [
@@ -97,6 +124,15 @@ public enum SMCKeyMaps {
         candidates += extraCores.map { SensorDescriptor(key: $0, label: "CPU core \($0)") }
         candidates += extraGPU.map { SensorDescriptor(key: $0, label: "GPU \($0)") }
         candidates += extraOther.map { SensorDescriptor(key: $0, label: $0) }
+
+        // M3/M4 die blocks. Generated rather than listed: 36 suffixes per prefix
+        // is a wide enough sweep to land on whatever the shipping keys are, and
+        // spelling them out would be 100 lines of invented constants that read
+        // as though someone had measured them.
+        let sweep = (0 ... 9).map(String.init) + (UnicodeScalar("A").value ... UnicodeScalar("Z").value)
+            .compactMap { UnicodeScalar($0).map { String(Character($0)) } }
+        candidates += sweep.map { SensorDescriptor(key: "Te0\($0)", label: "CPU E-core Te0\($0)") }
+        candidates += sweep.map { SensorDescriptor(key: "Tf0\($0)", label: "Die Tf0\($0)") }
         return candidates
     }()
 
