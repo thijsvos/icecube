@@ -44,9 +44,6 @@ struct DiagnosisView: View {
                 } else {
                     SectionRow(copy: DiagnosisCopy.waiting)
                 }
-
-                Divider()
-                Caption(copy: DiagnosisCopy.footer)
             }
             .padding(Theme.Metrics.popoverPadding)
             .frame(maxWidth: .infinity, alignment: .leading)

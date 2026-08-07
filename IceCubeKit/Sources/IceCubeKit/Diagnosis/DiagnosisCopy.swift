@@ -205,6 +205,8 @@ public enum DiagnosisCopy {
         hover += unreadable > 0
             ? ", plus \(unreadable) processes Ice Cube cannot read without root."
             : "."
+        hover += " Ice Cube also cannot see GPU work per process. docs/DIAGNOSIS.md has the full "
+            + "accounting."
         return Row(title: "", metric: parts.joined(separator: " · "), hover: hover)
     }
 
@@ -255,16 +257,15 @@ public enum DiagnosisCopy {
         }
     }
 
-    // MARK: - Footer
-
-    /// The one permanently-visible honesty line, and the mechanism behind it.
-    public static let footer = Row(
-        title: "",
-        note: "These numbers never add up to the whole machine, and are not meant to.",
-        hover: "Ice Cube reads the SMC and the kernel's per-process energy counters. It cannot see "
-            + "GPU work per process, and processes owned by root are invisible without privilege. "
-            + "docs/DIAGNOSIS.md has the full accounting."
-    )
+    // There is deliberately no footer.
+    //
+    // A standing line reading "these numbers never add up to the whole machine,
+    // and are not meant to" was cut on 2026-08-07: it told the user nothing,
+    // because it editorialised about a fact the accounting line above it already
+    // states as data. "processes 9.9 W · rest of machine 31.7 W · 205 more need
+    // root" shows both that the figures do not sum and that some are unreadable,
+    // in the place the numbers actually are. The mechanism lives on that line's
+    // hover. A disclaimer that repeats a visible fact in prose is furniture.
 
     /// Shown before the first differenced sample exists.
     public static let waiting = Row(

@@ -35,7 +35,7 @@ struct DiagnosisCopyTests {
 
     /// Every row the window can show, for the invariants below to sweep.
     static var everyRow: [DiagnosisCopy.Row] {
-        var rows: [DiagnosisCopy.Row] = [DiagnosisCopy.footer, DiagnosisCopy.waiting]
+        var rows: [DiagnosisCopy.Row] = [DiagnosisCopy.waiting]
         let loads: [Load] = [
             .noPowerSignal, .measuring(watts: 25),
             .explained(watts: 38, riseCelsius: 44, resistance: 1.16),
@@ -174,6 +174,20 @@ struct DiagnosisCopyTests {
 
         let withoutRoot = try #require(DiagnosisCopy.accounting(Self.source(unreadable: 0)))
         #expect(withoutRoot.metric?.contains("root") == false)
+    }
+
+    /// The constraint a standing footer used to carry redundantly.
+    ///
+    /// "These numbers never add up to the whole machine" was cut for saying
+    /// nothing — it editorialised about a fact this line already states as
+    /// data. That only holds while the remainder is genuinely on screen, so
+    /// that is what is pinned here rather than a sentence about it.
+    @Test("The remainder is visible whenever there is one, without a disclaimer to explain it")
+    func remainderIsVisibleAsData() throws {
+        let row = try #require(DiagnosisCopy.accounting(Self.source(attributed: 9.9, unattributed: 31.7)))
+        let metric = try #require(row.metric)
+        #expect(metric.contains("9.9 W"), "what Ice Cube can attribute")
+        #expect(metric.contains("31.7 W"), "and what it cannot — the two shown side by side is the point")
     }
 
     @Test("With no system power figure there is no remainder claimed")
