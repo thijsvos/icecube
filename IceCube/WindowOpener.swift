@@ -35,6 +35,8 @@ enum WindowOpener {
         static let about = "about"
         /// The guided fan-control setup flow.
         static let setup = "setup"
+        /// "Why is it hot?" — the live diagnosis.
+        static let diagnosis = "diagnosis"
     }
 
     /// The windows the menu bar may close on the user's behalf.
@@ -60,7 +62,11 @@ enum WindowOpener {
     /// than this one. ``ID/setup`` is absent for the reason `IceCubeApp` gives
     /// for it being a window at all: that flow has to survive the user leaving
     /// for System Settings and coming back.
-    static let closableFromMenuBar: Set<String> = [ID.sensors, ID.settings, ID.about]
+    ///
+    /// ``ID/diagnosis`` is a member: it holds nothing and commits nothing — it
+    /// is a live readout of this instant — and closing it is what stops the
+    /// per-process sampling and discards the process names it collected.
+    static let closableFromMenuBar: Set<String> = [ID.sensors, ID.settings, ID.about, ID.diagnosis]
 
     /// Which currently-open windows to close before `summoning` goes on screen.
     ///

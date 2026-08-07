@@ -33,6 +33,16 @@ struct PopoverFooter: View {
                 )
             }
             .help("All Ice Cube settings")
+            // Last of the three, after the two nouns (owner preference,
+            // 2026-08-07). Deliberately worded as the question rather than as a
+            // noun ("Diagnostics", "Analysis"): it is the sentence people
+            // actually arrive with, and the window's whole job is to answer it.
+            Button("Why is it hot?") {
+                WindowOpener.openFromPopover(
+                    WindowOpener.ID.diagnosis, using: openWindow, dismissing: dismissPopover
+                )
+            }
+            .help("What is drawing power, and whether cooling has anything left to give")
             Spacer()
             Button("Quit") {
                 NSApplication.shared.terminate(nil)

@@ -41,6 +41,7 @@ dependencies**; small footprint is a design goal, not an accident.
 | Curve keeps running at boot, app closed — daemon-side, opt-in | ✅ |
 | Sensors browser (every SMC key, live) + JSON diagnostics export | ✅ |
 | Power draw, and a cooling-efficiency index in °C/W — *is it hot, or is cooling failing?* | ✅ |
+| **"Why is it hot?"** — per-process watts, which silicon leads, and whether your curve has anything left | ✅ |
 | Decision timeline: the charts mark *why* the fans moved, in the daemon's words | ✅ |
 | CSV history export, temperature alerts, launch at login, °C/°F | ✅ |
 | Update check via GitHub Releases (link only, never auto-install) | ✅ |
@@ -140,6 +141,26 @@ the reference is a sensor inside the case, not the room. The physics, every
 constant, the measurements behind them and the limits are in
 [docs/THERMAL.md](docs/THERMAL.md). As with everything else here, the numbers come
 from one verified Mac.
+
+### Why is it hot?
+
+The popover's **Why is it hot?** button opens a window that answers the question
+directly rather than handing you more numbers: how hot the die is against the
+104 °C limit the daemon enforces, whether the power being drawn accounts for that
+heat, **which processes are drawing it in watts**, and whether your curve still
+has cooling left to give.
+
+Per-process watts come from the kernel's own energy counters (`ri_energy_nj`),
+differenced over an interval — real watts, not a made-up "impact" score. They
+deliberately do **not** sum to the machine's total: the difference is the
+display, the GPU, the SSD, and the processes that need root to read. Ice Cube
+shows that remainder instead of hiding it, because a list that appeared to
+account for everything would be lying.
+
+Process names never leave your Mac: they are absent from the diagnostics export,
+never written to disk, and collected only while the window is open. A simulated
+run reads no real process at all. [docs/DIAGNOSIS.md](docs/DIAGNOSIS.md) has the
+full accounting, including what the app cannot see.
 
 ## Safety design
 

@@ -28,6 +28,13 @@ enum CompositionRoot {
         /// in-memory store when simulated, so a simulated session cannot steer
         /// the real app's next launch.
         let defaults: any KeyValueStore
+        /// Who is drawing power. Real `proc_pid_rusage` reads normally; fixed
+        /// fiction when simulated, so a simulated session reads **no real PID**.
+        ///
+        /// Process names say what a person works on, which makes this the one
+        /// seam in the graph whose simulated substitute is a privacy guarantee
+        /// rather than a convenience.
+        let processes: any ProcessSampling
     }
 
     /// Picks the graph for this launch.
@@ -67,7 +74,8 @@ enum CompositionRoot {
             isSimulated: false,
             helper: HelperManager(),
             presets: PresetStore(),
-            defaults: UserDefaults.standard
+            defaults: UserDefaults.standard,
+            processes: SystemProcessSampler()
         )
     }
 
@@ -101,7 +109,8 @@ enum CompositionRoot {
                 powerSource: SimulatedEnvironment.PowerSource()
             ),
             presets: PresetStore(file: presetsFile),
-            defaults: defaults
+            defaults: defaults,
+            processes: MockProcessSampler()
         )
     }
 

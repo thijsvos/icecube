@@ -303,6 +303,49 @@ A third sample that session read 1.89 while the die was still falling, and is
 recorded in docs/THERMAL.md as the settle rule earning its keep — an unsettled
 quotient measures nothing and looks exactly like a real reading.
 
+### "Why is it hot?" — the diagnosis window (2026-08-07)
+
+Turned the readings into an answer. `ThermalDiagnosis` (pure, in IceCubeKit)
+takes a snapshot, the settled `R`, a per-process sample and the daemon's active
+curve, and answers four questions — how hot against the 104 °C ceiling, whether
+the power drawn explains it, what is producing it, and whether the curve has
+cooling left. Shown in its own window, opened from the popover.
+
+**The one new primitive is `proc_pid_rusage`'s `ri_energy_nj`** — cumulative
+per-process energy in nanojoules, public SDK surface (`sys/resource.h`), no
+entitlement and no root. Differenced over an interval it yields real **watts**,
+which is why it was chosen over Activity Monitor's unitless "Energy Impact":
+putting a made-up score beside genuine SMC watts would invite a comparison
+neither figure supports. Measured on Mac14,9: **410 of 616 PIDs readable
+unprivileged, 205 denied** (root-owned, including `kernel_task` and
+`WindowServer`).
+
+**The design constraint is that the two power figures must never be conflated.**
+System watts come from the SMC (`PSTR`, the whole machine); attributed watts come
+from the kernel (CPU energy, readable processes only). They do not sum, and the
+window states the remainder rather than hiding it — a real reading was 41.6 W
+system against 9.9 W attributed. A truncation bug that summed only the *displayed*
+twelve processes instead of all 408 was caught during development; it would have
+inflated "unattributed" and understated what the app can account for.
+
+**Two claims are deliberately not made.** Degradation ("your cooling is 18 %
+worse") still needs persistence and is still a follow-up. And the one
+load-versus-cooling judgement — a hot die below 15 W — is keyed on **watts, not
+on `R`**, because `R` is not comparable between machines and this has to hold on
+hardware nobody here has measured.
+
+Privacy is a first-class constraint, not a footnote: process names are absent
+from the diagnostics JSON, never written to disk, collected only while the window
+is open, and discarded on close. `MockProcessSampler` numbers its fake PIDs from
+900001 — above Darwin's PID ceiling of 99999 — so a simulated run cannot name a
+real process even by coincidence; the first version numbered from 1000, which
+this machine reaches (observed to 99423), and the isolation test passed by luck.
+Full accounting in docs/DIAGNOSIS.md.
+
+The feature found its own motivating case while being built: two orphaned `yes`
+processes had been pinning 100 % CPU for 2 h 52 m, holding the fans at 6800 RPM,
+with no screen in the app able to name them.
+
 ## 7. Risks & mitigations
 - **SMC keys vary wildly per model** → curated map + fallback enumeration + community diagnostics pipeline (§3.3). Biggest ongoing cost; design for it.
 - **Free-Apple-ID helper approval unproven** → Phase 0.5 spike with the fallback documented *before* it runs (manual `sudo launchctl bootstrap` install for Phases 3–5).
