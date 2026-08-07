@@ -88,6 +88,10 @@ enum SimulatedEnvironment {
             values[defaultName] as? Bool ?? false
         }
 
+        func object(forKey defaultName: String) -> Any? {
+            values[defaultName]
+        }
+
         func integer(forKey defaultName: String) -> Int {
             values[defaultName] as? Int ?? 0
         }

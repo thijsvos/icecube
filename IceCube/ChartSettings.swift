@@ -117,13 +117,20 @@ final class ChartSettings {
         didSet { defaults.set(smoothReadings, forKey: Key.smooth) }
     }
 
-    private let defaults = UserDefaults.standard
+    private let defaults: any KeyValueStore
 
-    init() {
+    /// - Parameter defaults: where the twelve preferences live. Injected, and
+    ///   that is load-bearing: this used to read `UserDefaults.standard`
+    ///   directly while every other seam in the graph was substituted, so a
+    ///   simulated launch wrote chart settings into the owner's real
+    ///   preferences domain — the same hole `CompositionRoot` was rebuilt to
+    ///   close for the daemon, the presets file and the power watcher.
+    init(defaults: any KeyValueStore = UserDefaults.standard) {
+        self.defaults = defaults
         // Use a local `d` (not `self.defaults`) so the helper doesn't capture
         // self before stored properties are initialized. `object(forKey:) == nil`
         // distinguishes "never set" from "set false" for first-run defaults.
-        let d = UserDefaults.standard
+        let d = defaults
         func bool(_ key: String, _ def: Bool) -> Bool {
             d.object(forKey: key) == nil ? def : d.bool(forKey: key)
         }

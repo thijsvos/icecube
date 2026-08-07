@@ -116,6 +116,37 @@ struct SimulatedIsolationTests {
         #expect(live.deliversNotificationsForTesting, "a real launch must still be able to speak")
     }
 
+    /// Twelve chart preferences were exempt from isolation until 2026-08-07.
+    ///
+    /// `AppState` held `let chartSettings = ChartSettings()`, and `ChartSettings`
+    /// read `UserDefaults.standard` directly — so while the daemon channel, the
+    /// registrar, the power watcher, the presets file and the preferences store
+    /// were all substituted, toggling any chart setting in a simulated run wrote
+    /// into the owner's real preferences domain. The same defect class as the
+    /// 2026-08-02 incident, and invisible for the same reason: neither file was
+    /// compiled into this bundle, so no test could reference them.
+    ///
+    /// Asserted on `ChartSettings` itself, because `AppState` is still not in
+    /// this bundle. What that leaves unguarded is the one line wiring them
+    /// together (`ChartSettings(defaults: defaults)`) — a review item, stated
+    /// rather than pretended away, exactly as `simulatedAlertsAreNotDelivered`
+    /// does for `AlertManager`.
+    @Test("Chart settings write to the store they are given, never to the real domain")
+    func chartSettingsAreIsolated() {
+        let store = SimulatedEnvironment.Defaults()
+        let settings = ChartSettings(defaults: store)
+
+        settings.showPower = true
+        settings.showCharts = false
+
+        #expect(store.object(forKey: "charts.power") as? Bool == true, "the write must land in the injected store")
+        #expect(store.object(forKey: "charts.show") as? Bool == false)
+        #expect(
+            !(CompositionRoot.makeSimulatedForTesting().defaults is UserDefaults),
+            "and the store a simulated launch hands it must not be the real one"
+        )
+    }
+
     /// The presets file is redirected rather than disabled, so saving a preset
     /// stays demonstrable while the owner's real catalog is unreachable.
     @Test("The simulated presets file is not the real one")

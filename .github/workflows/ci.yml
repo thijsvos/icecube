@@ -110,6 +110,13 @@ jobs:
           CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=YES DEVELOPMENT_TEAM=""
           SWIFT_TREAT_WARNINGS_AS_ERRORS=YES
 
+      # Reports, never gates — see the header of scripts/coverage.sh for why.
+      # Runs after the gating test steps and in its own step, so a coverage
+      # tooling failure can never fail the warnings gate for unrelated reasons.
+      - name: Coverage (report only)
+        continue-on-error: true
+        run: sh scripts/coverage.sh
+
       - name: Verify bundle
         run: sh scripts/verify-bundle.sh
 

@@ -142,6 +142,7 @@ targets:
       - IceCube/CompositionRoot.swift
       - IceCube/SimulatedEnvironment.swift
       - IceCube/AlertManager.swift
+      - IceCube/ChartSettings.swift
     dependencies:
       - package: IceCubeKit
     settings:

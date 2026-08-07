@@ -87,6 +87,13 @@ final class AlertManager {
         deliversNotifications
     }
 
+    /// Exposed for `AlertManagerTests`: whether the fever alarm may fire again.
+    /// The hysteresis is the whole difference between an alarm and a nag, and
+    /// it is otherwise unobservable without a notification centre.
+    var isArmedForTesting: Bool {
+        armed
+    }
+
     private let defaults: any KeyValueStore
 
     init(defaults: any KeyValueStore = UserDefaults.standard, deliversNotifications: Bool = true) {
@@ -189,7 +196,19 @@ final class AlertManager {
         }
     }
 
+    /// Asks macOS for permission, unless this instance is suppressed.
+    ///
+    /// **The gate belongs here as much as on delivery**, and until 2026-08-07
+    /// it was missing. The comment on `deliversNotifications` says the
+    /// suppression exists so a simulated run cannot "raise a real permission
+    /// prompt the user never asked for" — but only `deliver` consulted it, so
+    /// changing the alert threshold in a simulated launch did exactly that.
+    ///
+    /// It also made the type untestable: `UNUserNotificationCenter.current()`
+    /// traps in a host-less bundle, so every test that so much as *set* a
+    /// threshold crashed the suite rather than failing it.
     private func requestPermissionIfNeeded() {
+        guard deliversNotifications else { return }
         Task {
             let granted = await (try? UNUserNotificationCenter.current()
                 .requestAuthorization(options: [.alert, .sound])) ?? false
