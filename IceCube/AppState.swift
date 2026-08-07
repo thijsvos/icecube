@@ -83,6 +83,14 @@ final class AppState: PopoverLifecycleObserving {
     /// window arithmetic during layout.
     private(set) var coolingResistance: Double?
 
+    /// Decisions the daemon has made since the last poll tick.
+    ///
+    /// Buffered rather than acted on immediately: they arrive on the helper's
+    /// 5 s status refresh, and the alert rules also need the fan readings, which
+    /// arrive on the 1 s poll. Draining here gives the rules exactly one
+    /// evaluation point per tick with both inputs current.
+    @ObservationIgnored private var pendingDecisions: [DecisionEvent] = []
+
     /// The rolling window behind ``coolingResistance``.
     @ObservationIgnored private var cooling = CoolingEfficiency.Tracker()
 
@@ -364,6 +372,9 @@ final class AppState: PopoverLifecycleObserving {
             guard let self, let inventory = try? await provider.sensorInventory() else { return }
             sensorInventoryCount = inventory.count
         }
+        helper.onFreshDecisions = { [weak self] fresh in
+            self?.pendingDecisions.append(contentsOf: fresh)
+        }
         let events = poller.events()
         pollTask = Task { [weak self] in
             for await event in events {
@@ -401,6 +412,12 @@ final class AppState: PopoverLifecycleObserving {
                     consecutiveFailures = 0
                     errorMessage = nil
                     alerts.evaluate(dieCelsius: hottestDie)
+                    // The other half: the daemon losing control, the guardian
+                    // stepping in, or the fans stuck at maximum. Silent until
+                    // 2026-08-07 — see `ControlAlertRules`.
+                    let fresh = pendingDecisions
+                    pendingDecisions.removeAll()
+                    alerts.evaluateControl(freshDecisions: fresh, fans: new.fans, now: new.date)
                     // History records even while the display is paused, and
                     // while the popover is closed — pause freezes the picture,
                     // not the recording.

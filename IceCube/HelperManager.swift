@@ -972,6 +972,17 @@ final class HelperManager {
     /// and reassigning an identical array every 5 s would invalidate the view
     /// for nothing. `nil` means a daemon that predates v23, which is not an
     /// error — it simply contributes nothing.
+    /// Called with decisions this app has **never seen before**.
+    ///
+    /// A callback rather than a direct call into `AlertManager`, because this
+    /// type is already 985 lines and owns the daemon lifecycle — it has no
+    /// business knowing what a notification is. `AppState` connects the two.
+    ///
+    /// The freshness is the whole value: the same decision arrives in several
+    /// consecutive status payloads, so anything acting on `decisions` wholesale
+    /// would fire once every 5 s for as long as the daemon kept repeating it.
+    var onFreshDecisions: (([DecisionEvent]) -> Void)?
+
     private func mergeDecisions(_ incoming: [DecisionEvent]?) {
         guard let incoming, !incoming.isEmpty else { return }
         let known = Set(decisions.map(\.id))
@@ -981,5 +992,6 @@ final class HelperManager {
         if decisions.count > Self.decisionHistoryLimit {
             decisions.removeFirst(decisions.count - Self.decisionHistoryLimit)
         }
+        onFreshDecisions?(fresh)
     }
 }
