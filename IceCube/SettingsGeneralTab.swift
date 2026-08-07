@@ -52,6 +52,16 @@ struct SettingsGeneralTab: View {
                         .tag(threshold)
                     }
                 }
+                // A separate switch from the threshold above, on purpose. That
+                // one asks "tell me when the Mac is hot"; this one asks "tell me
+                // when Ice Cube stopped being able to do anything about it".
+                // Someone can reasonably want the second without the first.
+                Toggle("Tell me if fan control stops working", isOn: $alerts.reportsControlLoss)
+                    .help(
+                        "The daemon handing the fans back, a failed write, Ice Cube having to cool "
+                            + "the Mac itself, or the fans stuck at maximum for an hour. "
+                            + "Grouped so a busy afternoon is one notification, not ten."
+                    )
                 if state.alerts.permissionDenied {
                     Text("Notifications are denied — allow Ice Cube in System Settings → Notifications.")
                         .font(.caption).foregroundStyle(Theme.warning)

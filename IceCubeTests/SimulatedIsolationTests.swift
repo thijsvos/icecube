@@ -84,6 +84,38 @@ struct SimulatedIsolationTests {
         }
     }
 
+    /// A simulated run must not post real banners about a machine that is fine.
+    ///
+    /// The simulated thermal model is a sine wave with random spikes, so an
+    /// ungated run would fire the temperature alert repeatedly — and, since
+    /// 2026-08-07, the loss-of-control alerts too, about a daemon that does not
+    /// exist. It would also raise a real permission prompt the user never asked
+    /// for.
+    ///
+    /// Asserted on `AlertManager` rather than through `AppState`, which is not
+    /// compiled into this bundle. What that leaves unguarded is the single line
+    /// `AppState` uses to wire it (`deliversNotifications: !isSimulated`) — so
+    /// the test below pins the half that has behaviour, and the wiring stays a
+    /// one-line review item rather than a silent assumption.
+    @Test("Suppressed delivery still evaluates the rules, so simulated mode stays demonstrable")
+    func simulatedAlertsAreEvaluatedButNotDelivered() {
+        let defaults = SimulatedEnvironment.Defaults()
+        let quiet = AlertManager(defaults: defaults, deliversNotifications: false)
+        #expect(!quiet.deliversNotificationsForTesting)
+        #expect(quiet.reportsControlLoss, "the rules must still be on, or nothing is demonstrable")
+
+        // Runs the whole rule path. It must not touch UNUserNotificationCenter,
+        // and it must not throw or trap on the way.
+        quiet.evaluateControl(
+            freshDecisions: [DecisionEvent(text: "SAFETY: fan write failed mid-sequence", date: Date())],
+            fans: [],
+            now: Date()
+        )
+
+        let live = AlertManager(defaults: SimulatedEnvironment.Defaults(), deliversNotifications: true)
+        #expect(live.deliversNotificationsForTesting, "a real launch must still be able to speak")
+    }
+
     /// The presets file is redirected rather than disabled, so saving a preset
     /// stays demonstrable while the owner's real catalog is unreachable.
     @Test("The simulated presets file is not the real one")
