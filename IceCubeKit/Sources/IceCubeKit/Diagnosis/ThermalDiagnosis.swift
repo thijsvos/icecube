@@ -105,6 +105,14 @@ public enum ThermalDiagnosis {
         case measuring
         case measured(
             leading: SMCKeyMaps.SensorClass,
+            // Whether **both** a CPU-class and a GPU-class sensor were read.
+            //
+            // Without it, `leading` is not a claim this type can support. The
+            // comparison used to substitute `-.infinity` for a missing class,
+            // and `-.infinity > -.infinity` is `false` — so a Mac reporting
+            // neither sensor was told "the CPU is leading the GPU", a verdict
+            // derived from no data at all.
+            comparedBoth: Bool,
             top: [ProcessEnergySample],
             attributedWatts: Double,
             // System watts minus attributed, when a system figure exists.
@@ -226,14 +234,20 @@ public enum ThermalDiagnosis {
         // process list cannot give. `ri_energy_nj` is CPU energy only, so a
         // graphics load shows small process figures and a large remainder, and
         // this row is what names it.
-        let cpu = snapshot.temperatures.hottestCelsius(in: .cpu) ?? -.infinity
-        let gpu = snapshot.temperatures.hottestCelsius(in: .gpu) ?? -.infinity
-        let leading: SMCKeyMaps.SensorClass = gpu > cpu ? .gpu : .cpu
+        //
+        // Both classes must have been read for the comparison to mean anything.
+        // Substituting `-.infinity` for a missing one silently answered ".cpu"
+        // on a Mac reporting neither, which is a verdict from no evidence.
+        let cpu = snapshot.temperatures.hottestCelsius(in: .cpu)
+        let gpu = snapshot.temperatures.hottestCelsius(in: .gpu)
+        let comparedBoth = cpu != nil && gpu != nil
+        let leading: SMCKeyMaps.SensorClass = (gpu ?? -.infinity) > (cpu ?? -.infinity) ? .gpu : .cpu
 
         let unattributed = snapshot.power.map { max(0, $0 - processes.attributedWatts) }
 
         return .measured(
             leading: leading,
+            comparedBoth: comparedBoth,
             top: processes.processes,
             attributedWatts: processes.attributedWatts,
             unattributedWatts: unattributed,

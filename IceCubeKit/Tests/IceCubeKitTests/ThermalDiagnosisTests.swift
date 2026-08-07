@@ -164,7 +164,7 @@ struct ThermalDiagnosisTests {
     /// process list cannot give.
     @Test("The leading silicon comes from the SMC, not from the process list")
     func leadingSiliconFromSensors() {
-        guard case let .measured(gpuLed, _, _, _, _) = ThermalDiagnosis
+        guard case let .measured(gpuLed, _, _, _, _, _) = ThermalDiagnosis
             .source(in: Self.snapshot(cpu: 60, gpu: 88), processes: Self.processes())
         else {
             Issue.record("expected a measured source")
@@ -172,7 +172,7 @@ struct ThermalDiagnosisTests {
         }
         #expect(gpuLed == .gpu)
 
-        guard case let .measured(cpuLed, _, _, _, _) = ThermalDiagnosis
+        guard case let .measured(cpuLed, _, _, _, _, _) = ThermalDiagnosis
             .source(in: Self.snapshot(cpu: 88, gpu: 60), processes: Self.processes())
         else {
             Issue.record("expected a measured source")
@@ -183,7 +183,7 @@ struct ThermalDiagnosisTests {
 
     @Test("The unattributed remainder is system power minus everything readable")
     func unattributedRemainder() {
-        guard case let .measured(_, _, attributed, unattributed, unreadable) = ThermalDiagnosis
+        guard case let .measured(_, _, _, attributed, unattributed, unreadable) = ThermalDiagnosis
             .source(in: Self.snapshot(watts: 30), processes: Self.processes(attributed: 8))
         else {
             Issue.record("expected a measured source")
@@ -199,7 +199,7 @@ struct ThermalDiagnosisTests {
     /// machine producing power, so it is floored rather than shown.
     @Test("Attribution above system power floors at zero rather than going negative")
     func remainderNeverNegative() {
-        guard case let .measured(_, _, _, unattributed, _) = ThermalDiagnosis
+        guard case let .measured(_, _, _, _, unattributed, _) = ThermalDiagnosis
             .source(in: Self.snapshot(watts: 5), processes: Self.processes(attributed: 8))
         else {
             Issue.record("expected a measured source")
@@ -210,7 +210,7 @@ struct ThermalDiagnosisTests {
 
     @Test("With no system power there is no remainder to claim")
     func noRemainderWithoutSystemPower() {
-        guard case let .measured(_, _, _, unattributed, _) = ThermalDiagnosis
+        guard case let .measured(_, _, _, _, unattributed, _) = ThermalDiagnosis
             .source(in: Self.snapshot(watts: nil), processes: Self.processes())
         else {
             Issue.record("expected a measured source")
@@ -289,7 +289,7 @@ struct ThermalDiagnosisTests {
         #expect(verdict.heat == .measured(celsius: 92, label: "CPU P-core 1", band: .hot, headroom: 12))
         #expect(verdict.load == .explained(watts: 38, riseCelsius: 44, resistance: 1.16))
         #expect(verdict.cooling == .atMaximum(rpm: 6700))
-        guard case let .measured(leading, top, attributed, unattributed, _) = verdict.source else {
+        guard case let .measured(leading, _, top, attributed, unattributed, _) = verdict.source else {
             Issue.record("expected a measured source")
             return
         }
