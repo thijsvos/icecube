@@ -96,7 +96,18 @@ public enum HelperConstants {
     ///     the failure the rule above was written after. Nothing in the app
     ///     could report it either, because from the app's side the curve was
     ///     accepted.
-    public static let protocolVersion = "24"
+    /// v25: the revert-on-invalidation rule counts connections. The daemon
+    ///     reverted on **any** dropped connection, having no idea whether
+    ///     another app was still attached — so two instances (a dev build
+    ///     beside the installed one, or a double launch) meant quitting either
+    ///     one dropped fan control for both. It now reverts when the last
+    ///     connection goes, which is what "nobody is supervising the fans any
+    ///     more" actually means.
+    ///
+    ///     **The XPC surface is byte-identical.** The bump is here because a
+    ///     v24 daemon behind a v25 app still drops the fans on the first
+    ///     disconnect, and nothing on the app side can see that it did.
+    public static let protocolVersion = "25"
     /// How often the app sends a heartbeat while connected.
     public static let heartbeatInterval: TimeInterval = 5
     /// SAFETY: no heartbeat for this long → the daemon's watchdog reverts to

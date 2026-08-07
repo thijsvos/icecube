@@ -45,6 +45,9 @@ public actor DaemonCore {
     var config: FanConfig = .auto
     /// Monotonic instant of the app's last heartbeat; see ``heartbeatAge()``.
     private var lastHeartbeatAt: ContinuousClock.Instant?
+    /// Live app connections. See ``connectionEstablished()``; deliberately not
+    /// consulted by the watchdog, which is this counter's backstop.
+    private var liveConnections = 0
     private var status = HelperStatus()
     private var tickTask: Task<Void, Never>?
     /// Read-back mismatches since the last good verification.
@@ -263,9 +266,43 @@ public actor DaemonCore {
         await revertEverything(reason: "daemon shutdown", clearsPersistence: false)
     }
 
+    /// A new app connected.
+    ///
+    /// Counted so that ``connectionInvalidated()`` can tell "the app quit" from
+    /// "one of two apps quit". Without this the daemon reverted on **any**
+    /// disconnect, so with a second instance running — a dev build beside the
+    /// installed one, or a double launch — quitting either dropped fan control
+    /// while the other was still connected and heartbeating.
+    public func connectionEstablished() {
+        liveConnections += 1
+        record("an app connected (\(liveConnections) now connected)")
+    }
+
     /// XPC connection dropped. Manual mode reverts immediately (faster than
     /// waiting out the watchdog); persistent curve mode would keep running.
+    ///
+    /// Reverts only when the **last** connection goes. The invariant this
+    /// serves is "nobody is supervising the fans any more", and that is false
+    /// while another app is still connected.
+    ///
+    /// **The counter is allowed to be wrong, in one direction.** Both ends hop
+    /// through `Task { await … }` from a nonisolated listener callback, so an
+    /// accept and an invalidation can land out of order. If a decrement
+    /// overtakes a pending increment the count reaches zero early and the
+    /// daemon reverts when it did not strictly need to — the surviving app
+    /// re-applies on its next pass. That is the safe direction, and it is the
+    /// only one this race can produce.
+    ///
+    /// A *leaked* count is the dangerous shape, and it is covered: the watchdog
+    /// runs off ``heartbeat()`` alone and knows nothing about connections, so a
+    /// count stuck above zero with no app behind it still reverts after 15 s.
+    /// That is why the count may gate this path and must never gate that one.
     public func connectionInvalidated() async {
+        liveConnections = max(0, liveConnections - 1)
+        guard liveConnections == 0 else {
+            record("an app disconnected, \(liveConnections) still connected — fan control continues")
+            return
+        }
         // Parked: the fans are already with macOS — the strongest form of what
         // this invariant asks for — and `keepFansSpinning` would take them
         // straight back, into the sleep this exists to prevent. The watchdog

@@ -300,6 +300,81 @@ struct DaemonCoreRevertTests {
         #expect(await smc.resetCount > 0, "SMC connection released so thermalmonitord resumes")
     }
 
+    /// Two instances of Ice Cube — a dev build beside the installed one, or a
+    /// double launch — used to mean that quitting **either** dropped fan
+    /// control for both. The daemon reverted on any invalidation, having no
+    /// idea another app was still connected and heartbeating.
+    @Test("One of two apps quitting does not hand the fans back")
+    func secondAppKeepsControl() async throws {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        await core.connectionEstablished()
+        await core.connectionEstablished()
+        await core.heartbeat()
+        try await core.apply(manualConfig())
+
+        await core.connectionInvalidated()
+        #expect(await core.config.mode == .manual, "one app left, so nobody has stopped supervising")
+        #expect(await smc.modeWrites(fan: 0).contains(0) == false, "the fans were not handed back")
+    }
+
+    @Test("The last app quitting still hands the fans back")
+    func lastAppRevertsAsBefore() async throws {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        await core.connectionEstablished()
+        await core.connectionEstablished()
+        await core.heartbeat()
+        try await core.apply(manualConfig())
+
+        await core.connectionInvalidated()
+        await core.connectionInvalidated()
+        #expect(await core.config.mode == .auto)
+        #expect(await smc.modeWrites(fan: 0).contains(0), "fan handed back to the system")
+    }
+
+    /// The counter must never make the daemon *less* willing to revert than it
+    /// was. An invalidation with no matching connect — a reorder, or a caller
+    /// that never announced itself — has to behave exactly as it always did.
+    @Test("An unmatched invalidation still reverts rather than going negative")
+    func unmatchedInvalidationStillReverts() async throws {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(manualConfig())
+
+        await core.connectionInvalidated()
+        #expect(await core.config.mode == .auto, "no connect was counted, so this is still the last one")
+
+        // And a second one cannot drive the count below zero into a state where
+        // a later genuine disconnect is swallowed.
+        await core.connectionInvalidated()
+        await core.connectionEstablished()
+        try await core.apply(manualConfig())
+        await core.connectionInvalidated()
+        #expect(await core.config.mode == .auto, "the count did not go negative and strand control")
+    }
+
+    /// The backstop that makes the counter safe to have at all.
+    ///
+    /// If a count ever leaks — an increment with no matching decrement — the
+    /// invalidation path stops reverting. The watchdog is what covers that: it
+    /// runs off `heartbeat()` alone and knows nothing about connections, so a
+    /// phantom connection with no app behind it still loses the fans after 15 s.
+    @Test("A leaked connection count cannot outlive the watchdog")
+    func watchdogIgnoresTheConnectionCount() async throws {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        // Two phantom connections, and deliberately no heartbeat ever.
+        await core.connectionEstablished()
+        await core.connectionEstablished()
+        try await core.apply(manualConfig())
+        #expect(await core.config.mode == .manual)
+
+        await core.tick(sleptFor: .zero)
+        #expect(await core.config.mode == .auto, "the watchdog must not consult the connection count")
+    }
+
     /// The reason leaving macOS mode used to take four and a half seconds: the
     /// hand-back let the fans stop, and a stopped fan cannot be hurried. Traced
     /// on a Mac14,9, they coast to a standstill in ~2.5 s — faster than the 2 s

@@ -100,8 +100,22 @@ jobs:
       - name: Lint
         run: swiftformat --lint .
 
+      # Both suites, on the same terms as ci.yml.
+      #
+      # This used to be `swift test` alone, without warnings-as-errors and
+      # without the app target — so 180 tests that gate every pull request did
+      # not gate a release, and a tag could ship code that `main` would have
+      # rejected. A release is the one build where running less than CI makes
+      # no sense at all.
       - name: Run IceCubeKit tests
-        run: cd IceCubeKit && swift test
+        run: cd IceCubeKit && swift test -Xswiftc -warnings-as-errors
+
+      - name: Run app-target tests
+        run: >
+          xcodebuild test -project IceCube.xcodeproj -scheme IceCube
+          -configuration Debug -derivedDataPath build
+          CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=YES DEVELOPMENT_TEAM=""
+          SWIFT_TREAT_WARNINGS_AS_ERRORS=YES
 
       - name: Detect signing capability
         id: signing
