@@ -57,8 +57,15 @@ final class HelperService: NSObject, NSXPCListenerDelegate, HelperProtocol, Send
         connection.exportedInterface = NSXPCInterface(with: HelperProtocol.self)
         connection.exportedObject = self
         let core = core
+        // Counted before `resume()`, so the increment is queued on the core
+        // before this connection is able to invalidate. The core tolerates the
+        // remaining reorder — see `DaemonCore.connectionInvalidated()`.
+        Task { await core.connectionEstablished() }
         connection.invalidationHandler = {
-            // §4.3: invalidation with a non-persistent config → revert.
+            // §4.3: invalidation with a non-persistent config → revert, but only
+            // once the LAST app has gone. A second instance (a dev build beside
+            // the installed one) used to drop fan control for both when either
+            // one quit.
             Task { await core.connectionInvalidated() }
         }
         connection.resume()
