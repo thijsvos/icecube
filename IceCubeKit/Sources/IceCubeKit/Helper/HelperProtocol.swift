@@ -107,7 +107,22 @@ public enum HelperConstants {
     ///     **The XPC surface is byte-identical.** The bump is here because a
     ///     v24 daemon behind a v25 app still drops the fans on the first
     ///     disconnect, and nothing on the app side can see that it did.
-    public static let protocolVersion = "25"
+    /// v26: the daemon can finally see an M3's die sensors. Its candidate probe
+    ///     list held 28 `Tp*` and 8 `Tg*` keys and **no `Te`, `Tf` or `Tc` key
+    ///     at all**, while `docs/SMC-KEYS.md` had recorded since 2026-07-28 that
+    ///     M3's die sensors are `Te0*`/`Tf*`. On that hardware `SensorReader`'s
+    ///     `hasDie` guard could never pass: the daemon read as blind every tick,
+    ///     `SafetyMonitor` reverted after three of them, and every curve came
+    ///     undone about six seconds after the user applied it — while the app
+    ///     showed correct temperatures the whole time, because the app
+    ///     enumerates keys and the daemon deliberately cannot.
+    ///
+    ///     **The XPC surface is byte-identical.** The bump is here because the
+    ///     daemon now admits sensors it previously could not, which is a
+    ///     behaviour change on every unmapped Mac — and a v25 daemon behind a
+    ///     v26 app is still the blind one. Nothing changes on M2, which uses the
+    ///     curated map and never reaches this list.
+    public static let protocolVersion = "26"
     /// How often the app sends a heartbeat while connected.
     public static let heartbeatInterval: TimeInterval = 5
     /// SAFETY: no heartbeat for this long → the daemon's watchdog reverts to

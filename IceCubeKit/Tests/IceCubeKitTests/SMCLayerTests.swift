@@ -89,6 +89,51 @@ struct SMCKeyMapsTests {
         #expect(Set(keys).count == keys.count, "no duplicate keys")
     }
 
+    /// The gap that made an M3 unusable, pinned against the document that
+    /// described it.
+    ///
+    /// `docs/SMC-KEYS.md` has recorded since 2026-07-28 that M3's die sensors
+    /// are `Te0*`/`Tf*`. The daemon's candidate list contained neither until
+    /// 2026-08-07, so `SensorReader`'s `hasDie` guard could never pass on that
+    /// hardware: it read as blind every tick and `SafetyMonitor` reverted every
+    /// curve about six seconds after the user applied it — while the app showed
+    /// correct temperatures throughout, because the app enumerates keys and the
+    /// daemon cannot.
+    ///
+    /// Asserted on the **prefix**, not on individual keys: the suffixes are a
+    /// sweep and nobody here has the hardware to pin them. What must not
+    /// regress is that each documented die prefix is probed at all, and that
+    /// `classify` still calls it a die when found — together, that is exactly
+    /// what `hasDie` needs.
+    @Test(
+        "Every die prefix docs/SMC-KEYS.md names is probed, and classifies as a die",
+        arguments: ["Tp", "Tg", "Te", "Tf"]
+    )
+    func documentedDiePrefixesAreProbedAndClassified(prefix: String) {
+        let probed = SMCKeyMaps.fallbackCandidateSensors.filter { $0.key.hasPrefix(prefix) }
+        #expect(!probed.isEmpty, "\(prefix)* is a documented die prefix the daemon cannot probe")
+        for sensor in probed {
+            #expect(
+                SMCKeyMaps.isDieKey(sensor.key),
+                "\(sensor.key) is probed but classifies as ambient, so it cannot satisfy hasDie"
+            )
+        }
+    }
+
+    /// `SensorReader` caches its admitted set only when it contains a die key,
+    /// so a candidate list without one is the difference between working and
+    /// silently reverting every curve.
+    @Test("The fallback list can satisfy the daemon's die requirement")
+    func fallbackContainsDieKeys() {
+        let dieKeys = SMCKeyMaps.fallbackCandidateSensors.filter { SMCKeyMaps.isDieKey($0.key) }
+        #expect(dieKeys.count > 50, "a thin die list is how an unmapped Mac ends up blind")
+        #expect(
+            Set(SMCKeyMaps.fallbackCandidateSensors.map(\.key)).count
+                == SMCKeyMaps.fallbackCandidateSensors.count,
+            "no duplicate candidates — each one costs a probe"
+        )
+    }
+
     @Test("Unknown models get nil — the enumeration fallback takes over")
     func unknownModelFallsBack() {
         #expect(SMCKeyMaps.curatedSensors(forModel: "Mac99,1") == nil)
