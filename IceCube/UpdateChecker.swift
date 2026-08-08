@@ -26,8 +26,26 @@ final class UpdateChecker {
 
     private(set) var status: Status = .idle
 
+    private let defaults: any KeyValueStore
+
     /// The repository the app was released from (owner/name).
     static let repository = "thijsvos/icecube"
+
+    /// The project page. Derived from ``repository`` rather than typed again,
+    /// so a fork or a rename moves every link at once.
+    static var repositoryURL: URL {
+        URL(string: "https://github.com/\(repository)")!
+    }
+
+    /// The issue picker, not a blank issue: the templates are how a new Mac
+    /// model gets reported, and Settings already tells people to file one.
+    static var issuesURL: URL {
+        URL(string: "https://github.com/\(repository)/issues/new/choose")!
+    }
+
+    static var licenseURL: URL {
+        URL(string: "https://github.com/\(repository)/blob/main/LICENSE")!
+    }
 
     /// The running app's marketing version.
     static var currentVersion: String {
@@ -89,12 +107,65 @@ final class UpdateChecker {
     /// matter what the comparison did.
     private let version: String
 
+    // MARK: - Checking without being asked
+
+    /// How long an automatic check waits before it is willing to run again.
+    ///
+    /// A day, not a launch: a menu-bar app that is quit and reopened four times
+    /// in a morning must not make four requests, and GitHub's unauthenticated
+    /// API allows 60 an hour per address shared with everything else on it.
+    static let automaticInterval: TimeInterval = 24 * 60 * 60
+
+    /// Whether an automatic check is due.
+    ///
+    /// Pure, so the calendar arithmetic is testable — the alternative is a rule
+    /// that only runs on a real launch and can only be verified by waiting a
+    /// day. A `lastChecked` in the *future* (a clock that moved backwards,
+    /// which happens on wake and after a timezone change) counts as due rather
+    /// than locking checks out until the clock catches up.
+    static func isAutomaticCheckDue(lastChecked: Date?, now: Date, enabled: Bool) -> Bool {
+        guard enabled else { return false }
+        guard let lastChecked else { return true }
+        let elapsed = now.timeIntervalSince(lastChecked)
+        return elapsed >= automaticInterval || elapsed < 0
+    }
+
+    /// User-facing switch. Defaults to **on**, and the default matters: every
+    /// release so far is unsigned and installed by hand, so a user who never
+    /// opens Settings has no other way to learn a fix exists.
+    var automaticChecksEnabled: Bool {
+        didSet { defaults.set(automaticChecksEnabled, forKey: Self.automaticKey) }
+    }
+
+    private(set) var lastChecked: Date?
+
+    private static let automaticKey = "updatesCheckAutomatically"
+    private static let lastCheckedKey = "updatesLastChecked"
+
+    /// Runs a check only if one is due. Silent when it is not.
+    func checkIfDue(now: Date = Date()) async {
+        guard Self.isAutomaticCheckDue(
+            lastChecked: lastChecked, now: now, enabled: automaticChecksEnabled
+        ) else { return }
+        lastChecked = now
+        defaults.set(now.timeIntervalSince1970, forKey: Self.lastCheckedKey)
+        await check()
+    }
+
     init(
         fetch: @escaping Fetch = { try await URLSession.shared.data(for: $0) },
-        version: String = UpdateChecker.currentVersion
+        version: String = UpdateChecker.currentVersion,
+        defaults: any KeyValueStore = UserDefaults.standard
     ) {
         self.fetch = fetch
         self.version = version
+        self.defaults = defaults
+        // Absent means on, so the switch is opt-*out*. `bool(forKey:)` returns
+        // false for a key never written, which would have shipped it off.
+        automaticChecksEnabled = defaults.object(forKey: Self.automaticKey) as? Bool ?? true
+        if let stamp = defaults.object(forKey: Self.lastCheckedKey) as? Double {
+            lastChecked = Date(timeIntervalSince1970: stamp)
+        }
     }
 
     func check() async {

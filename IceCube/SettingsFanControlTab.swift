@@ -19,11 +19,11 @@ struct SettingsFanControlTab: View {
             Section {
                 if case .connected = state.helper.connection {
                     Picker("Active preset", selection: presetBinding) {
-                        ForEach(PresetStore.builtins) { Text($0.name).tag($0.kind) }
-                        // A user curve, an edited curve or manual mode matches
-                        // no built-in. Without a row carrying this tag the
-                        // picker renders blank on an out-of-range selection.
-                        Text("Custom").tag(Preset.Kind.custom)
+                        ForEach(state.presets.all) { Text($0.name).tag(Optional($0.id)) }
+                        // An edited curve or manual mode matches no preset at
+                        // all. Without a row carrying this tag the picker
+                        // renders blank on an out-of-range selection.
+                        Text("Custom").tag(Preset.ID?.none)
                     }
                     Button("Edit curves…") {
                         WindowOpener.open(WindowOpener.ID.curves, using: openWindow)
@@ -100,6 +100,12 @@ struct SettingsFanControlTab: View {
         )
         VStack(alignment: .leading, spacing: 6) {
             Toggle("Switch presets when I plug in or unplug", isOn: rule.isEnabled)
+            // Built-ins only, deliberately, and the one preset surface that
+            // still is. `PowerProfilePolicy.Rule` **persists** a `Preset.Kind`,
+            // so pointing this at a saved curve means changing a stored Codable
+            // shape and migrating what is already on disk — a different kind of
+            // change from the rest, and one this project does not make in
+            // passing. Everywhere else now offers `presets.all`.
             HStack(spacing: 6) {
                 Text("On battery use").font(.callout)
                 Picker("", selection: rule.onBattery) {
@@ -181,20 +187,26 @@ struct SettingsFanControlTab: View {
         return "\(registration) · \(connection)"
     }
 
-    private var presetBinding: Binding<Preset.Kind> {
+    /// Selection is a **preset id**, not a `Preset.Kind`.
+    ///
+    /// Every saved preset carries `kind == .custom`, so a picker tagged by kind
+    /// could not tell two of them apart — which is why saved curves could not
+    /// appear here at all. Nothing persists this value (it is derived from the
+    /// applied config each time), so the built-ins' per-launch UUIDs are fine.
+    private var presetBinding: Binding<Preset.ID?> {
         Binding(
             get: {
                 // Nothing applied yet lands on "Custom", the picker's catch-all
                 // row. It used to fall back to `.auto`, which stopped being a
                 // preset when macOS mode was removed — and "Custom" is the
-                // honest label for "not one of the built-ins" anyway.
-                guard state.helper.lastAppliedConfig != nil else { return .custom }
+                // honest label for "not one of these" anyway.
+                guard state.helper.lastAppliedConfig != nil else { return nil }
                 return PresetHighlight.matching(
-                    PresetStore.builtins, applied: state.helper.lastAppliedConfig
-                )?.kind ?? .custom
+                    state.presets.all, applied: state.helper.lastAppliedConfig
+                )?.id
             },
-            set: { kind in
-                guard let preset = PresetStore.builtins.first(where: { $0.kind == kind }) else { return }
+            set: { id in
+                guard let id, let preset = state.presets.all.first(where: { $0.id == id }) else { return }
                 Task { await state.helper.applyPreset(preset, persistCurve: persistCurve) }
             }
         )

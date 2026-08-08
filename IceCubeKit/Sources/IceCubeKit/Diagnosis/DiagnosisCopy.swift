@@ -56,7 +56,11 @@ public enum DiagnosisCopy {
     /// hot die and no load to explain it, the reassuring qualifier "within
     /// design range" must not sit directly above a warning that says the
     /// opposite. The window would be arguing with itself.
-    public static func heat(_ heat: ThermalDiagnosis.Heat, load: ThermalDiagnosis.Load) -> Row {
+    public static func heat(
+        _ heat: ThermalDiagnosis.Heat,
+        load: ThermalDiagnosis.Load,
+        style: TemperatureStyle = .celsius
+    ) -> Row {
         switch heat {
         case .unknown:
             Row(
@@ -69,17 +73,21 @@ public enum DiagnosisCopy {
         case let .measured(celsius, label, band, headroom):
             Row(
                 title: title(for: band, load: load),
-                metric: "\(whole(headroom)) °C to limit",
+                // `difference`, not `reading`: headroom is a gap between two
+                // temperatures, so Fahrenheit scales it without the +32 offset.
+                metric: "\(style.difference(headroom)) to limit",
                 // The only band that keeps a visible sentence: it is the one
                 // where Ice Cube is about to override the user's curve, which
                 // is a thing the app does *to* them and must be said out loud.
-                note: band == .nearCeiling ? "At \(ceiling) °C Ice Cube forces maximum cooling." : nil,
-                hover: "Hottest die sensor: \(label) at \(whole(celsius)) °C. Ice Cube forces "
-                    + "maximum cooling at \(ceiling) °C whatever your curve asks for, so this "
-                    + "reading has \(whole(headroom)) °C of headroom."
+                note: band == .nearCeiling
+                    ? "At \(style.reading(dieCeiling)) Ice Cube forces maximum cooling."
+                    : nil,
+                hover: "Hottest die sensor: \(label) at \(style.reading(celsius)). Ice Cube forces "
+                    + "maximum cooling at \(style.reading(dieCeiling)) whatever your curve asks "
+                    + "for, so this reading has \(style.difference(headroom)) of headroom."
                     + (band == .hot
-                        ? " Apple Silicon dies legitimately run 95–105 °C under load, which is why "
-                        + "this band is hot rather than a fault."
+                        ? " Apple Silicon dies legitimately run \(style.range(95, 105)) under load, "
+                        + "which is why this band is hot rather than a fault."
                         : "")
             )
         }
@@ -101,7 +109,7 @@ public enum DiagnosisCopy {
     // MARK: - Power
 
     /// The load headline. States the measured fact, never a cause.
-    public static func load(_ load: ThermalDiagnosis.Load) -> Row {
+    public static func load(_ load: ThermalDiagnosis.Load, style: TemperatureStyle = .celsius) -> Row {
         switch load {
         case .noPowerSignal:
             Row(
@@ -121,9 +129,12 @@ public enum DiagnosisCopy {
         case let .explained(watts, rise, resistance):
             Row(
                 title: "Drawing \(oneDecimal(watts)) W",
-                metric: "\(whole(rise)) °C above airflow · \(twoDecimals(resistance)) °C/W",
-                hover: "The die sits \(whole(rise)) °C above its own airflow while the machine "
-                    + "draws \(oneDecimal(watts)) W. Lower °C/W is better, and it falls as the fans "
+                // Both are differences: a rise above airflow, and a rise per
+                // watt. Neither takes the Fahrenheit offset.
+                metric: "\(style.difference(rise)) above airflow · \(style.perWatt(resistance))",
+                hover: "The die sits \(style.difference(rise)) above its own airflow while the "
+                    + "machine draws \(oneDecimal(watts)) W. Lower \(style.symbol)/W is better, and "
+                    + "it falls as the fans "
                     + "speed up. The reference is a sensor inside this Mac rather than the room, "
                     + "so compare it with your own past readings — not with another Mac."
             )
@@ -132,7 +143,7 @@ public enum DiagnosisCopy {
             // for, and it keeps its sentence at full weight.
             Row(
                 title: "Hot with no load to explain it",
-                metric: "\(whole(celsius)) °C while drawing \(oneDecimal(watts)) W",
+                metric: "\(style.reading(celsius)) while drawing \(oneDecimal(watts)) W",
                 hover: "Below \(whole(ThermalDiagnosis.idleWattsCeiling)) W this Mac is not working "
                     + "hard — measured at 7.9 W at true idle. A die this hot on that little power "
                     + "points at airflow rather than work: a blocked vent, a stopped fan, or dust "
@@ -278,8 +289,12 @@ public enum DiagnosisCopy {
     // MARK: - Formatting
 
     /// The die ceiling, read from the safety rule rather than typed in.
-    private static var ceiling: String {
-        whole(SafetyMonitor.Limits().dieCeiling)
+    ///
+    /// A `Double`, not a formatted string: the caller renders it through the
+    /// active ``TemperatureStyle``, and a pre-formatted "104" would have to be
+    /// parsed back to convert.
+    private static var dieCeiling: Double {
+        SafetyMonitor.Limits().dieCeiling
     }
 
     /// Formatted through `String(format:)` rather than interpolated into a

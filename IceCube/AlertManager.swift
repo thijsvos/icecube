@@ -116,12 +116,14 @@ final class AlertManager {
     }
 
     /// Called once per snapshot with the hottest die reading.
-    func evaluate(dieCelsius: Double?) {
+    /// - Parameter style: the user's unit. Passed in rather than read from
+    ///   `defaults` so the key is not duplicated — `AppState` owns it.
+    func evaluate(dieCelsius: Double?, style: TemperatureStyle = .celsius) {
         guard let limit = threshold.celsius, let die = dieCelsius else { return }
         if die >= limit, armed {
             armed = false
             guard deliversNotifications else { return }
-            deliver(die: die, threshold: limit)
+            deliver(die: die, threshold: limit, style: style)
         } else if die < limit - 5 {
             armed = true // re-arm only after a real cooldown
         }
@@ -169,10 +171,23 @@ final class AlertManager {
         }
     }
 
-    private func deliver(die: Double, threshold: Double) {
+    /// The sentence the notification carries.
+    ///
+    /// `static` and pure so it can be tested: everything below
+    /// `deliversNotifications` is switched off in the test bundle (calling
+    /// `UNUserNotificationCenter.current()` from a host-less bundle traps), so
+    /// a body built inside `deliver` would never be exercised by anything.
+    ///
+    /// Both figures are points on the scale, so both take the Fahrenheit
+    /// offset. This said °C whatever the user had chosen until 2026-08-08.
+    static func alertBody(die: Double, threshold: Double, style: TemperatureStyle) -> String {
+        "Hottest sensor reached \(style.reading(die)) (threshold \(style.reading(threshold)))."
+    }
+
+    private func deliver(die: Double, threshold: Double, style: TemperatureStyle) {
         deliver(
             title: "Ice Cube temperature alert",
-            body: "Hottest sensor reached \(Int(die.rounded())) °C (threshold \(Int(threshold)) °C).",
+            body: Self.alertBody(die: die, threshold: threshold, style: style),
             id: "temp-alert-\(Int(die))"
         )
     }

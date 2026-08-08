@@ -29,7 +29,7 @@ struct SettingsWindowView: View {
     /// compute a value `onAppear` immediately overwrites anyway.
     @State private var launchAtLogin = false
     @State private var loginItemError: String?
-    @State private var updates = UpdateChecker()
+
     @Environment(\.openWindow) private var openWindow
 
     private enum Tab: String, CaseIterable, Identifiable {
@@ -110,7 +110,7 @@ struct SettingsWindowView: View {
         case .general:
             SettingsGeneralTab(
                 state: state, launchAtLogin: $launchAtLogin,
-                loginItemError: $loginItemError, updates: updates
+                loginItemError: $loginItemError, updates: state.updates
             )
         case .menu:
             SettingsMenuTab(state: state, silentOptionClick: $silentOptionClick)

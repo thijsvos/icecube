@@ -184,4 +184,27 @@ struct AlertManagerTests {
     func permissionStartsUndenied() {
         #expect(!Self.manager().permissionDenied)
     }
+
+    // MARK: - The unit reaches the notification
+
+    /// A user who picked °F was told °C by the one surface that reaches them
+    /// when the app is not on screen. Fixed 2026-08-08.
+    @Test("The alert body honours the temperature unit")
+    func alertBodyFollowsTheUnit() {
+        let celsius = AlertManager.alertBody(die: 95, threshold: 90, style: .celsius)
+        #expect(celsius == "Hottest sensor reached 95 °C (threshold 90 °C).")
+
+        let fahrenheit = AlertManager.alertBody(die: 95, threshold: 90, style: .fahrenheit)
+        #expect(fahrenheit == "Hottest sensor reached 203 °F (threshold 194 °F).")
+        #expect(!fahrenheit.contains("°C"))
+    }
+
+    /// Both numbers are absolute readings, so both take the offset. Converting
+    /// only one is the asymmetry worth pinning — it would read as a threshold
+    /// the machine had blown past by 100 degrees.
+    @Test("Both figures convert, not just the reading")
+    func bothFiguresConvert() {
+        let body = AlertManager.alertBody(die: 100, threshold: 100, style: .fahrenheit)
+        #expect(body == "Hottest sensor reached 212 °F (threshold 212 °F).", "equal in °C stays equal in °F")
+    }
 }

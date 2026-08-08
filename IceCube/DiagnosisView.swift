@@ -22,7 +22,11 @@ struct DiagnosisView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Metrics.sectionSpacing) {
                 if let verdict = state.diagnosis {
-                    SectionRow(copy: DiagnosisCopy.heat(verdict.heat, load: verdict.load)) {
+                    SectionRow(copy: DiagnosisCopy.heat(
+                        verdict.heat,
+                        load: verdict.load,
+                        style: state.temperatureUnit.style
+                    )) {
                         if case let .measured(celsius, label, _, _) = verdict.heat {
                             HStack(alignment: .firstTextBaseline, spacing: 8) {
                                 Text(temperature(celsius))
@@ -36,7 +40,10 @@ struct DiagnosisView: View {
                         }
                     }
                     Divider()
-                    SectionRow(copy: DiagnosisCopy.load(verdict.load), isWarning: isAnomalous(verdict.load))
+                    SectionRow(
+                        copy: DiagnosisCopy.load(verdict.load, style: state.temperatureUnit.style),
+                        isWarning: isAnomalous(verdict.load)
+                    )
                     Divider()
                     ProcessSection(source: verdict.source, isSimulated: state.isSimulated)
                     Divider()
@@ -54,8 +61,11 @@ struct DiagnosisView: View {
 
     /// Formatted before it reaches `Text`, so a locale that groups thousands
     /// cannot turn a reading into "1.013 °C".
+    ///
+    /// Honours the unit setting. It did not until 2026-08-08: this was the one
+    /// window in the app that showed a Fahrenheit user Celsius.
     private func temperature(_ celsius: Double) -> String {
-        "\(Int(celsius.rounded())) °C"
+        state.temperatureUnit.style.reading(celsius)
     }
 
     private func isAnomalous(_ load: ThermalDiagnosis.Load) -> Bool {

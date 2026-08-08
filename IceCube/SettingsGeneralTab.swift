@@ -69,6 +69,11 @@ struct SettingsGeneralTab: View {
             }
             Section("Updates") {
                 LabeledContent("Version", value: UpdateChecker.currentVersion)
+                // Opt-out, not opt-in: an unsigned build installed by hand has
+                // no other route to telling its user a fix exists. It is one
+                // request a day and never downloads anything.
+                Toggle("Check for updates automatically", isOn: Bindable(updates).automaticChecksEnabled)
+                    .help("One check a day against GitHub Releases. Ice Cube never downloads or installs on its own.")
                 HStack(spacing: 8) {
                     Button("Check for Updates…") { Task { await updates.check() } }
                         .controlSize(.small)

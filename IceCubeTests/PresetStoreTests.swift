@@ -213,4 +213,110 @@ struct PresetStoreTests {
             #expect(try Data(contentsOf: backup) == original)
         }
     }
+
+    // MARK: - Saved presets are pickable, not just bookmarks
+
+    /// Until 2026-08-08 `userPresets` was read by exactly one UI site — the
+    /// curve editor's Load menu — while nine surfaces named `builtins`
+    /// directly. `all` is the accessor those surfaces use now.
+    @Test("Saved presets join the built-ins, and the built-ins keep their order")
+    func allIncludesSavedPresets() throws {
+        try withTempFile { file in
+            let store = PresetStore(file: file)
+            #expect(store.all.map(\.name) == ["Quiet", "Balanced", "Cold", "Max"])
+
+            store.saveUserPreset(named: "Desk", curve: .cold)
+            #expect(store.all.map(\.name) == ["Quiet", "Balanced", "Cold", "Max", "Desk"])
+            #expect(
+                store.all.prefix(4).map(\.name) == PresetStore.builtins.map(\.name),
+                "⌥-cycling and muscle memory must not shift for someone who saved nothing"
+            )
+        }
+    }
+
+    /// The reason the Settings picker had to stop tagging by `Preset.Kind`:
+    /// every saved preset is `.custom`, so a kind-tagged picker cannot tell two
+    /// of them apart. Ids can.
+    @Test("Saved presets share a kind but never an id")
+    func savedPresetsAreDistinguishableById() throws {
+        try withTempFile { file in
+            let store = PresetStore(file: file)
+            store.saveUserPreset(named: "Desk", curve: .cold)
+            store.saveUserPreset(named: "Lap", curve: .quiet)
+
+            let saved = store.userPresets
+            #expect(saved.allSatisfy { $0.kind == .custom }, "which is why kind cannot be the tag")
+            #expect(Set(saved.map(\.id)).count == saved.count, "ids must be unique")
+        }
+    }
+
+    /// `PresetHighlight` decides "which preset is active" by comparing configs,
+    /// so a saved curve highlights with no new state — this is the property
+    /// that made the change cheap, and it is worth pinning.
+    @Test("An applied saved curve highlights as the active preset")
+    func savedPresetHighlights() throws {
+        try withTempFile { file in
+            let store = PresetStore(file: file)
+            store.saveUserPreset(named: "Desk", curve: .cold)
+            let saved = try #require(store.userPresets.first)
+
+            let matched = PresetHighlight.matching(store.all, applied: saved.config)
+            #expect(matched?.config == saved.config)
+        }
+    }
+
+    // MARK: - Deleting, which had no caller at all
+
+    @Test("A saved preset can be removed, and stays removed across a reload")
+    func removeSurvivesReload() throws {
+        try withTempFile { file in
+            let store = PresetStore(file: file)
+            store.saveUserPreset(named: "Desk", curve: .cold)
+            store.saveUserPreset(named: "Lap", curve: .quiet)
+            try store.removeUserPreset(#require(store.userPresets.first { $0.name == "Desk" }))
+
+            #expect(store.userPresets.map(\.name) == ["Lap"])
+            #expect(PresetStore(file: file).userPresets.map(\.name) == ["Lap"], "the delete was persisted")
+        }
+    }
+
+    @Test("Removing never touches the built-ins")
+    func removeLeavesBuiltinsAlone() throws {
+        try withTempFile { file in
+            let store = PresetStore(file: file)
+            store.saveUserPreset(named: "Desk", curve: .cold)
+            try store.removeUserPreset(#require(store.userPresets.first))
+            #expect(store.all.map(\.name) == PresetStore.builtins.map(\.name))
+        }
+    }
+
+    // MARK: - Saving over a name
+
+    /// Saving under an existing name replaces it outright, and that is also the
+    /// only way to edit a preset — so the behaviour stays and the caller asks
+    /// first instead.
+    @Test("A colliding name is reported before it destroys anything")
+    func collisionIsDetectable() throws {
+        try withTempFile { file in
+            let store = PresetStore(file: file)
+            store.saveUserPreset(named: "Desk", curve: .cold)
+
+            #expect(store.wouldReplace(name: "Desk"))
+            #expect(store.wouldReplace(name: "  Desk  "), "the same name, trimmed, is the same name")
+            #expect(!store.wouldReplace(name: "Lap"))
+            #expect(!store.wouldReplace(name: "Quiet"), "a built-in is not replaced — a save adds beside it")
+        }
+    }
+
+    @Test("Replacing keeps one preset, with the new curve")
+    func replacingDoesNotDuplicate() throws {
+        try withTempFile { file in
+            let store = PresetStore(file: file)
+            store.saveUserPreset(named: "Desk", curve: .quiet)
+            store.saveUserPreset(named: "Desk", curve: .max)
+
+            #expect(store.userPresets.count == 1)
+            #expect(store.userPresets.first?.config.sharedCurve == FanCurve.max)
+        }
+    }
 }
