@@ -43,13 +43,26 @@ actor SensorReader {
     private let port: any SMCControlPort
     private let sleep: @Sendable (Duration) async -> Void
 
+    /// This Mac's `hw.model`, injected for the same reason the app side injects
+    /// it: `readTemperatures()` picks the curated map or the fallback superset
+    /// from this string, so read straight from `sysctl` it decides **which
+    /// branch a test takes based on the machine running the suite**. The app
+    /// side proved that is not theoretical when two of its tests passed on the
+    /// owner's Mac14,9 and failed on CI.
+    private let model: @Sendable () -> String
+
     /// The admitted sensor set, resolved once and cached. `nil` means
     /// unresolved — never "this Mac has no sensors".
     private var sensorKeys: [String]?
 
-    init(port: any SMCControlPort, sleep: @escaping @Sendable (Duration) async -> Void) {
+    init(
+        port: any SMCControlPort,
+        sleep: @escaping @Sendable (Duration) async -> Void,
+        model: @escaping @Sendable () -> String = HostInfo.modelIdentifier
+    ) {
         self.port = port
         self.sleep = sleep
+        self.model = model
     }
 
     /// Matches `hottestDieRetrying()`: enough to ride out a connection reopen,
@@ -179,7 +192,9 @@ actor SensorReader {
             // instead of resolving to nothing — an unknown Mac used to leave
             // the daemon permanently blind, which disables the ceiling and the
             // guardian while the app's UI still shows correct temperatures.
-            let model = HostInfo.modelIdentifier()
+            // Bound once: the notices below name it, and the daemon's log is
+            // the audit trail for every write it makes.
+            let model = model()
             let candidates = SMCKeyMaps.curatedSensors(forModel: model)
                 ?? SMCKeyMaps.fallbackCandidateSensors
             // Membership comes from key EXISTENCE, never from a reading — the

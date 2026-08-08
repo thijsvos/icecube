@@ -143,6 +143,8 @@ targets:
       - IceCube/SimulatedEnvironment.swift
       - IceCube/AlertManager.swift
       - IceCube/ChartSettings.swift
+      - IceCube/AppState.swift
+      - IceCube/PollErrorPolicy.swift
     dependencies:
       - package: IceCubeKit
     settings:
