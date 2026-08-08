@@ -243,6 +243,129 @@ struct MockSMCProviderTests {
         }
     }
 
+    // MARK: Settle capability (the °C/W demo path)
+
+    /// The first sustained-load window on the timeline (a spike that fills
+    /// its whole bucket), for tests that need a long flat plateau.
+    private static func firstSustainedWindow() -> MockSMCProvider.SpikeWindow? {
+        for offset in 0 ..< 200 {
+            let bucket = (Self.epochSeconds / MockSMCProvider.spikeBucketLength).rounded(.down)
+                + Double(offset)
+            if let window = MockSMCProvider.spikeWindow(inBucket: bucket),
+               window.duration == MockSMCProvider.spikeBucketLength - 24
+            {
+                return window
+            }
+        }
+        return nil
+    }
+
+    /// CLAUDE.md ground rule 3: every feature must be demonstrable in
+    /// simulated mode. Cooling efficiency needs the settle rule to pass —
+    /// 20 s of steady die and power — and before the flat-hold damping the
+    /// model never held still: ~1 % of ticks settled, in runs of a few
+    /// seconds, so the °C/W readout read "—" in every demo and screenshot.
+    /// The two RPM bands mirror THERMAL.md's real measurement table, which
+    /// has exactly those two shapes: readings at rest and at speed.
+    @Test("The simulated machine settles at idle and under sustained load, like the real one")
+    func simulatedMachineSettles() {
+        var tracker = CoolingEfficiency.Tracker()
+        var settledTicks = 0
+        var settledAtRest = false
+        var atSpeedRun = 0
+        var longestAtSpeedRun = 0
+        // The fan's first-order lag, advanced incrementally: same law as
+        // `laggedDemand`, cheap enough to run per second for three hours.
+        var lagged = MockSMCProvider.demand(at: Self.epochSeconds)
+        let ticks = 3 * 3600
+        for step in 0 ..< ticks {
+            let t = Self.epochSeconds + Double(step)
+            let target = MockSMCProvider.demand(at: t)
+            lagged = target + (lagged - target) * exp(-1.0 / MockSMCProvider.fanTimeConstant)
+            tracker.ingest(SMCSnapshot(
+                date: Date(timeIntervalSince1970: t),
+                fans: [],
+                temperatures: MockSMCProvider.temperatures(at: t),
+                power: MockSMCProvider.power(at: t)
+            ))
+            let spec = MockSMCProvider.fanSpecs[0]
+            let fraction = (spec.minRPM + lagged * (spec.maxRPM - spec.minRPM)) / spec.maxRPM
+            guard tracker.isSettled else {
+                atSpeedRun = 0
+                continue
+            }
+            settledTicks += 1
+            if fraction < 0.5 {
+                settledAtRest = true
+            }
+            if fraction > 0.8 {
+                atSpeedRun += 1
+                longestAtSpeedRun = max(longestAtSpeedRun, atSpeedRun)
+            } else {
+                atSpeedRun = 0
+            }
+        }
+        let fraction = Double(settledTicks) / Double(ticks)
+        // 0.5 sits between the two measured states of this model: 0.39
+        // settled with the damping deleted (the trailing-window fix alone
+        // gets that far) and 0.69 with it in place. The floor is what makes
+        // this test fail if the flat-hold ever quietly disappears.
+        #expect(fraction > 0.5, "the machine must hold still often enough to demo °C/W; settled \(fraction)")
+        #expect(settledAtRest, "a settled reading with the fans at rest")
+        // A minute, not a blip: THERMAL.md's high-band rows are minute-long
+        // holds, and only a sustained bucket can produce one — a 30–60 s
+        // spike's plateau is eaten by the fan lag and the settle window.
+        #expect(
+            longestAtSpeedRun >= 60,
+            "a minute-long settled hold at speed, like the real table; longest \(longestAtSpeedRun) s"
+        )
+    }
+
+    /// Sustained loads exist so the fans can settle at speed, and are rare so
+    /// the timeline still reads as a desktop, not a stress test.
+    @Test("About one spiking bucket in seven holds its plateau for the whole bucket")
+    func sustainedBucketsAreRare() {
+        var spiking = 0
+        var sustained = 0
+        let firstBucket = (Self.epochSeconds / MockSMCProvider.spikeBucketLength).rounded(.down)
+        for offset in 0 ..< 400 {
+            guard let window = MockSMCProvider.spikeWindow(inBucket: firstBucket + Double(offset))
+            else { continue }
+            spiking += 1
+            if window.duration == MockSMCProvider.spikeBucketLength - 24 {
+                sustained += 1
+                #expect(
+                    window.plateauEnd - window.plateauStart > 120,
+                    "a sustained plateau must outlast the fan lag plus the settle window"
+                )
+            }
+        }
+        let share = Double(sustained) / Double(spiking)
+        #expect(share > 0.05 && share < 0.30, "roughly one in seven, got \(share)")
+    }
+
+    /// The damping must never put an edge in the temperature trace: within
+    /// 10 s of an envelope transition the scale is exactly 1, so the ramps
+    /// and their surroundings are untouched, and only a machine deep inside
+    /// a steady stretch quiets down.
+    @Test("The wander damps only deep inside a steady stretch, never near a transition")
+    func wanderDampsOnlyAwayFromTransitions() throws {
+        let window = try #require(Self.firstSustainedWindow(), "no sustained bucket in 200?")
+
+        // 5 s before the spike starts: a transition is near, full wander.
+        #expect(MockSMCProvider.wanderScale(at: window.start - 5) == 1)
+        // Mid-rise: the envelope is moving, full wander.
+        #expect(MockSMCProvider.wanderScale(at: window.start + 4) == 1)
+        // Deep inside the plateau: damped to 15 %.
+        let mid = (window.plateauStart + window.plateauEnd) / 2
+        #expect(abs(MockSMCProvider.wanderScale(at: mid) - 0.15) < 1e-12)
+        // Deep inside a long quiet stretch: damped the same way.
+        let quiet = Self.firstQuietTime()
+        if MockSMCProvider.envelopeSteadiness(at: quiet) > 25 {
+            #expect(abs(MockSMCProvider.wanderScale(at: quiet) - 0.15) < 1e-12)
+        }
+    }
+
     // MARK: Composition
 
     @Test("snapshot() composes fans and temperatures from the same instant")
