@@ -34,7 +34,7 @@ dependencies**; small footprint is a design goal, not an accident.
 | Menu-bar popover with live stacked charts (CPU, GPU, per-fan RPM) | ✅ |
 | 1/5/15/60-min windows, pause, hover crosshair, min/avg/max | ✅ |
 | Fan-curve editor: drag points, double-click add, keyboard nudge, live marker | ✅ |
-| Presets: Quiet · Balanced · Cold · Max, plus your own curves saved in the editor | ✅ |
+| Presets: Quiet · Balanced · Cold · Max, plus your own saved curves — selectable everywhere a built-in is, and deletable | ✅ |
 | Manual per-fan sliders (watchdogged, never persisted) | ✅ |
 | Switch presets automatically when you plug in or unplug | ✅ |
 | ⌥-click the menu bar icon to jump to the next preset | ✅ |
@@ -44,7 +44,7 @@ dependencies**; small footprint is a design goal, not an accident.
 | **"Why is it hot?"** — per-process watts, which silicon leads, and whether your curve has anything left | ✅ |
 | Decision timeline: the charts mark *why* the fans moved, in the daemon's words | ✅ |
 | CSV history export, temperature alerts, launch at login, °C/°F | ✅ |
-| Update check via GitHub Releases (link only, never auto-install) | ✅ |
+| Update check via GitHub Releases — once a day, link only, never auto-install, switchable off | ✅ |
 
 <p align="center">
   <img src="docs/img/curve-editor.png" alt="The fan-curve editor: draggable temperature-to-RPM points with a live marker showing the current die temperature." width="620">
@@ -327,6 +327,13 @@ for exactly that reason: when a build expects a newer service than the one
 installed, Ice Cube opens **Finish updating Ice Cube** by itself, and the one
 **Update Now** click is what actually ships the fix. `scripts/install.sh` prints
 the same reminder at the end of a source build.
+
+Ice Cube checks for a new release **once a day**, and tells you in the popover
+if there is one. That is the only request it ever makes: one unauthenticated
+GET to the GitHub Releases API, carrying nothing about you or your Mac, and it
+never downloads or installs anything on its own. Turn it off in Settings →
+General if you would rather check by hand — the button stays either way. A
+simulated run (`ICECUBE_SIMULATED=1`) never makes the request at all.
 
 ## Uninstall
 
