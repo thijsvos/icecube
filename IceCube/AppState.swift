@@ -215,6 +215,18 @@ final class AppState: PopoverLifecycleObserving {
 
     /// Where readings come from. Injected so tests and simulated mode swap freely.
     private let provider: any SMCProviding
+    /// Makes the menu-bar host when polling starts.
+    ///
+    /// Injected because the real one — `StatusItemController` — reaches AppKit
+    /// and pulls `PopoverView` and the whole popover tree behind it. That
+    /// single reference is what kept this 420-line type out of the test bundle
+    /// entirely, at 0 % coverage, while every rule in it went unpinned.
+    ///
+    /// Required rather than defaulted: a default would have to name
+    /// `StatusItemController` here and re-create the dependency, and an
+    /// optional would let a caller silently ship without a menu bar. There is
+    /// exactly one production call site, in `IceCubeApp`.
+    @ObservationIgnored private let menuBarHost: @MainActor (AppState) -> any MenuBarHosting
     /// Who is drawing power. Injected via ``CompositionRoot`` so a simulated
     /// launch reads no real PID — see ``ProcessSampling``.
     @ObservationIgnored private let processSampler: any ProcessSampling
@@ -238,14 +250,18 @@ final class AppState: PopoverLifecycleObserving {
 
     /// Takes the whole graph rather than assembling it, so that simulated mode
     /// is decided in exactly one place. See ``CompositionRoot``.
-    convenience init(graph: CompositionRoot.Graph) {
+    convenience init(
+        graph: CompositionRoot.Graph,
+        menuBarHost: @escaping @MainActor (AppState) -> any MenuBarHosting
+    ) {
         self.init(
             provider: graph.provider,
             isSimulated: graph.isSimulated,
             helper: graph.helper,
             presets: graph.presets,
             defaults: graph.defaults,
-            processes: graph.processes
+            processes: graph.processes,
+            menuBarHost: menuBarHost
         )
     }
 
@@ -255,8 +271,10 @@ final class AppState: PopoverLifecycleObserving {
         helper: HelperManager,
         presets: PresetStore,
         defaults: any KeyValueStore,
-        processes: any ProcessSampling = MockProcessSampler()
+        processes: any ProcessSampling = MockProcessSampler(),
+        menuBarHost: @escaping @MainActor (AppState) -> any MenuBarHosting
     ) {
+        self.menuBarHost = menuBarHost
         self.provider = provider
         self.isSimulated = isSimulated
         self.helper = helper
@@ -284,7 +302,7 @@ final class AppState: PopoverLifecycleObserving {
         // whole session and never got the energy win the setting promises.
         poller = SMCPoller(
             provider: provider,
-            interval: .seconds(Self.effectiveSeconds(interval: interval, display: display))
+            interval: .seconds(interval.effectiveSeconds(display: display))
         )
         pollInterval = interval
         menuBarDisplay = display
@@ -300,12 +318,8 @@ final class AppState: PopoverLifecycleObserving {
     /// Rebuilds the polling stream with the effective cadence. Icon-only
     /// display needs no 1 Hz updates while the popover is closed, so it
     /// polls at ≥ 5 s — a real energy win for a menu-bar resident.
-    private static func effectiveSeconds(interval: PollInterval, display: MenuBarDisplayMode) -> Int {
-        display == .iconOnly ? max(interval.rawValue, 5) : interval.rawValue
-    }
-
     private func restartPolling() {
-        let seconds = Self.effectiveSeconds(interval: pollInterval, display: menuBarDisplay)
+        let seconds = pollInterval.effectiveSeconds(display: menuBarDisplay)
         pollTask?.cancel()
         pollTask = nil
         poller = SMCPoller(provider: provider, interval: .seconds(seconds))
@@ -360,9 +374,7 @@ final class AppState: PopoverLifecycleObserving {
     func start() {
         guard pollTask == nil else { return }
         if menuBar == nil {
-            menuBar = MenuBarModeCoordinator(
-                host: StatusItemController(state: self), lifecycle: self
-            )
+            menuBar = MenuBarModeCoordinator(host: menuBarHost(self), lifecycle: self)
         }
         if isSimulated {
             // No daemon in simulated mode, so nothing would ever populate the
@@ -445,17 +457,12 @@ final class AppState: PopoverLifecycleObserving {
                     // three ticks to say so — and saying nothing about what to
                     // do — was the cost of flattening this to a String.
                     consecutiveFailures += 1
-                    switch error {
-                    case .smcKeyNotFound, .smcDecodingFailed:
-                        errorMessage = error.localizedDescription
-                            + " Export Diagnostics to help map this Mac."
-                    case .smcNotPrivileged:
-                        // Documented as "the app should never see this".
-                        errorMessage = error.localizedDescription
-                    default:
-                        if consecutiveFailures >= 3 {
-                            errorMessage = error.localizedDescription
-                        }
+                    // The rule itself lives in `PollErrorPolicy`, pure and
+                    // tested. Only the counter belongs to the tick.
+                    if let message = PollErrorPolicy.message(
+                        for: error, consecutiveFailures: consecutiveFailures
+                    ) {
+                        errorMessage = message
                     }
                 }
             }

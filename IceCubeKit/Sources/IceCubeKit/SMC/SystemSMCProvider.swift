@@ -16,7 +16,10 @@ import Foundation
 ///   the provider falls back to enumerating every `T***` key of type `flt`
 ///   whose value passes the plausibility filter, labeled by key.
 public actor SystemSMCProvider: SMCProviding {
-    private let connection: SMCConnection
+    /// The SMC, behind ``SMCReadPort`` rather than as a concrete
+    /// `SMCConnection`, so the decisions in this file can be exercised against
+    /// a scripted fake instead of a Mac.
+    private let connection: any SMCReadPort
 
     /// Resolved once on first use.
     private var discoveredFans: [FanDescriptor]?
@@ -55,6 +58,15 @@ public actor SystemSMCProvider: SMCProviding {
     /// no AppleSMC service to talk to.
     public init() throws(IceCubeError) {
         connection = try SMCConnection()
+    }
+
+    /// Builds a provider over an arbitrary read port.
+    ///
+    /// For tests, and for a future Intel or remote provider. Production keeps
+    /// using ``init()``, which owns the real connection — nothing about the
+    /// capability boundary changes, because this port cannot write.
+    public init(connection: any SMCReadPort) {
+        self.connection = connection
     }
 
     // MARK: - SMCProviding

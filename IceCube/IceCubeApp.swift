@@ -35,7 +35,12 @@ struct IceCubeApp: App {
         // It now returns the WHOLE graph, not just a provider — deciding only
         // the provider here is what let a simulated launch reach the real
         // daemon.
-        let state = AppState(graph: CompositionRoot.make())
+        let state = AppState(
+            graph: CompositionRoot.make(),
+            // The only place the real menu-bar host is named. Keeping it here
+            // rather than inside AppState is what lets AppState be tested.
+            menuBarHost: { StatusItemController(state: $0) }
+        )
         state.start() // begin 1 Hz polling immediately so the label is live
         _appState = State(initialValue: state)
     }

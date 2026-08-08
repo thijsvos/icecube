@@ -14,13 +14,17 @@
 #
 # Two reasons, and both matter more than they look.
 #
-# 1. The raw Kit number is wrong by about eight points, in a way that is nobody's
-#    fault. SMCConnection and SystemSMCProvider ARE the IOKit syscalls — they sit
-#    at a flat 0 % because reaching them needs a read-side seam the project has
-#    deliberately declined to build ("a refactor, not a test"). Gating on the
-#    unfiltered figure would demand exactly the coverage-chasing PR that PR #62
-#    was written to prevent. They are excluded below, and that exclusion is the
-#    single most important line in this script.
+# 1. SMCConnection IS the IOKit syscalls — `IOConnectCallStructMethod` and the
+#    80-byte param struct. It sits at a flat 0 % and there is no honest way to
+#    change that without a Mac in the loop, so it is excluded below and that
+#    exclusion is the most important line in this script.
+#
+#    SystemSMCProvider used to be excluded beside it, on the same grounds. That
+#    stopped being true on 2026-08-08: the `SMCReadPort` seam made its ~140
+#    lines of decision logic reachable and they now sit at ~70 %. Leaving it
+#    filtered would have hidden both that gain and any later regression, so it
+#    is back in the figure. Worth remembering the general lesson — an exclusion
+#    list is a claim about what is possible, and claims go stale.
 #
 # 2. PLAN.md calls app-target coverage "best-effort" on purpose: most of those
 #    files are SwiftUI view bodies, which cannot be usefully unit-tested and
@@ -40,7 +44,7 @@ echo "==> IceCubeKit"
     xcrun llvm-cov report \
         "$BIN/IceCubeKitPackageTests.xctest/Contents/MacOS/IceCubeKitPackageTests" \
         -instr-profile "$BIN/codecov/default.profdata" \
-        -ignore-filename-regex='(Tests|\.build|SMCConnection\.swift|SystemSMCProvider\.swift)/?' \
+        -ignore-filename-regex='(Tests|\.build|SMCConnection\.swift)/?' \
         2>/dev/null | tail -3
 )
 
@@ -55,4 +59,4 @@ xcrun xccov view --report --only-targets build/coverage.xcresult 2>/dev/null \
 rm -rf build/coverage.xcresult
 
 echo
-echo "Excluded from the Kit figure: SMCConnection, SystemSMCProvider — see the header."
+echo "Excluded from the Kit figure: SMCConnection — see the header."

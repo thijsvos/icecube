@@ -69,3 +69,17 @@ enum MenuBarDisplayMode: String, CaseIterable, Identifiable {
         }
     }
 }
+
+extension PollInterval {
+    /// The cadence actually used, which is not always the one the user picked.
+    ///
+    /// An icon-only menu bar shows no reading, so polling faster than every
+    /// five seconds buys nothing a user can see and costs CPU all day. Moved
+    /// here from `AppState` on 2026-08-08: it lived as a private static on a
+    /// type with 0 % coverage, and its own doc comment recorded a bug where two
+    /// call sites computed the cadence differently — precisely the failure an
+    /// untestable shared rule invites.
+    func effectiveSeconds(display: MenuBarDisplayMode) -> Int {
+        display == .iconOnly ? max(rawValue, 5) : rawValue
+    }
+}
