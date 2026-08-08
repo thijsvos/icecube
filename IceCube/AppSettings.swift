@@ -1,6 +1,7 @@
 // AppSettings.swift — user-preference enums shared by the settings UI and display code.
 
 import Foundation
+import IceCubeKit
 
 /// Display unit for temperatures. Storage and all math stay in °C — this
 /// only converts at the last moment, in UI.
@@ -30,6 +31,19 @@ enum TemperatureUnit: String, CaseIterable, Identifiable {
     /// Compact reading like `"62°"` (unit implied by context).
     func text(_ celsius: Double) -> String {
         "\(Int(display(celsius).rounded()))°"
+    }
+
+    /// The Kit-side renderer for this unit.
+    ///
+    /// `display(_:)` above converts an **absolute** reading and is the only
+    /// conversion most of the app needs. Anything that also prints a
+    /// *difference* — headroom, a rise above airflow, °C/W — must go through
+    /// this instead, because the Fahrenheit offset does not apply to a gap.
+    var style: TemperatureStyle {
+        switch self {
+        case .celsius: .celsius
+        case .fahrenheit: .fahrenheit
+        }
     }
 }
 

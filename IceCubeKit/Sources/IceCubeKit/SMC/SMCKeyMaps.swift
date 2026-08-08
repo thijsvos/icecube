@@ -145,15 +145,6 @@ public enum SMCKeyMaps {
         celsius > 10 && celsius < 120
     }
 
-    /// Key prefixes for **die-class** silicon sensors (CPU/GPU cores) — they
-    /// legitimately run hotter than proximity/airflow sensors, which is why
-    /// the safety ceiling and the curve input treat them as a class.
-    ///
-    /// SINGLE SOURCE OF TRUTH: this classification is safety-relevant (it
-    /// selects the higher temperature ceiling), so it must live in exactly
-    /// one place. Do not re-inline the prefix list anywhere.
-    public static let dieKeyPrefixes = ["Tp", "Tg", "Te", "Tf", "Tc"]
-
     /// What kind of thing a sensor key measures.
     ///
     /// The die/ambient split selects the safety ceiling; the CPU/GPU split
@@ -177,6 +168,16 @@ public enum SMCKeyMaps {
     }
 
     /// Classifies a sensor key. The one place prefixes are matched.
+    /// SINGLE SOURCE OF TRUTH for the die/ambient split, which is
+    /// safety-relevant: it selects the higher temperature ceiling. Do not
+    /// re-inline these prefixes anywhere.
+    ///
+    /// That note used to sit on a `dieKeyPrefixes` array declared beside this
+    /// function — and **nothing referenced it**, while this function inlined
+    /// the same five prefixes. Adding a die prefix there, exactly as its
+    /// comment instructed, would have changed no ceiling and no curve input.
+    /// A flat array could not have worked anyway: these five prefixes map to
+    /// three different classes, which is the shape the array could not carry.
     public static func classify(_ key: String) -> SensorClass {
         if key.hasPrefix("Tp") || key.hasPrefix("Te") {
             return .cpu

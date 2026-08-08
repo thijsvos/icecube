@@ -428,7 +428,7 @@ final class AppState: PopoverLifecycleObserving {
                     }
                     consecutiveFailures = 0
                     errorMessage = nil
-                    alerts.evaluate(dieCelsius: hottestDie)
+                    alerts.evaluate(dieCelsius: hottestDie, style: temperatureUnit.style)
                     // The other half: the daemon losing control, the guardian
                     // stepping in, or the fans stuck at maximum. Silent until
                     // 2026-08-07 — see `ControlAlertRules`.

@@ -22,17 +22,6 @@ extension View {
         }
     }
 
-    /// A translucent glass button on macOS 26; `.bordered` below. Use for
-    /// secondary actions.
-    @ViewBuilder
-    func secondaryGlassButton() -> some View {
-        if #available(macOS 26, *) {
-            buttonStyle(.glass)
-        } else {
-            buttonStyle(.bordered)
-        }
-    }
-
     /// Glass surface for a small **floating** control cluster (a pod that hovers
     /// over content).
     ///
