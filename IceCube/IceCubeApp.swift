@@ -187,6 +187,16 @@ struct IceCubeApp: App {
         }
         .defaultSize(width: 460, height: 560)
 
+        // Cooling history — months of °C/W per fan-speed band, and the
+        // degradation verdict. Its own window for the Diagnosis window's
+        // reason: the Sensors window is sized to a computed ceiling that two
+        // earlier additions broke, and a weeks-wide chart is 150+ pt of
+        // chrome that would break it a third time.
+        Window("Cooling History", id: WindowOpener.ID.coolingHistory) {
+            CoolingHistoryWindow(state: appState)
+        }
+        .defaultSize(width: 560, height: 420)
+
         // Full settings. Fixed content size (the tabbed view is 480×380) and
         // non-resizable — one `.windowResizability(.contentSize)` only. (A
         // stray second `.contentMinSize` here previously let the window grow

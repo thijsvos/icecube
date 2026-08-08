@@ -128,6 +128,22 @@ final class AppState: PopoverLifecycleObserving {
     /// value type, held like the tracker above it.
     @ObservationIgnored private var historyRecorder = CoolingRecorder()
 
+    /// Clears the history and re-evaluates at once — the verdict must not
+    /// keep claiming "worse than June" about readings that no longer exist.
+    func clearCoolingHistory() {
+        history.clear()
+        coolingTrend = history.history
+            .map { CoolingTrend.evaluate($0, now: Date()) } ?? .noHistory
+    }
+
+    /// Records an "I cleaned it" boundary and re-evaluates: the baseline
+    /// moves, so the sentence built on it must move in the same breath.
+    func markCoolingServiced() {
+        history.markServiced(at: Date())
+        coolingTrend = history.history
+            .map { CoolingTrend.evaluate($0, now: Date()) } ?? .noHistory
+    }
+
     // MARK: - Diagnosis ("why is it hot?")
 
     /// The live verdict, or `nil` while the Diagnose window is closed.

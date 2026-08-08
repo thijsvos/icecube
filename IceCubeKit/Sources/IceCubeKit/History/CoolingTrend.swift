@@ -122,18 +122,19 @@ public enum CoolingTrend {
 
     // MARK: - Evaluation
 
-    /// The verdict for a history at an instant. Pure: same inputs, same
-    /// verdict — deliberately independent of when `compact` last ran, which
-    /// is what keeps a quit-and-relaunch from changing the answer.
-    public static func evaluate(_ history: CoolingHistory, now: Date) -> Verdict {
+    /// One comparable day-median series per band — the exact data the
+    /// verdict judges, public so the history chart draws what was judged and
+    /// the two can never disagree. Stored aggregates serve the days before
+    /// the oldest surviving raw record; raw is folded on the fly at and
+    /// after it. Never both for one day.
+    public static func seriesByBand(
+        _ history: CoolingHistory, now: Date
+    ) -> [FanBand: [CoolingDayAggregate]] {
         let today = CoolingStatistics.dayIndex(now)
         let records = history.records
             .filter { $0.date <= now + CoolingHistory.maximumFutureSkew }
             .sorted { $0.date < $1.date }
 
-        // One comparable day-median series per band. Stored aggregates serve
-        // the days before the oldest surviving raw record; raw is folded on
-        // the fly at and after it. Never both for one day.
         let rawCutoffDay = records.first?.day ?? Int.max
         var series: [FanBand: [CoolingDayAggregate]] = [:]
         for aggregate in history.days where aggregate.day < rawCutoffDay && aggregate.day <= today {
@@ -145,6 +146,19 @@ public enum CoolingTrend {
         for band in series.keys {
             series[band]?.sort { $0.day < $1.day }
         }
+        return series
+    }
+
+    /// The verdict for a history at an instant. Pure: same inputs, same
+    /// verdict — deliberately independent of when `compact` last ran, which
+    /// is what keeps a quit-and-relaunch from changing the answer.
+    public static func evaluate(_ history: CoolingHistory, now: Date) -> Verdict {
+        let today = CoolingStatistics.dayIndex(now)
+        let records = history.records
+            .filter { $0.date <= now + CoolingHistory.maximumFutureSkew }
+            .sorted { $0.date < $1.date }
+
+        let series = seriesByBand(history, now: now)
         guard !series.isEmpty else { return .noHistory }
 
         // Bands by evidence, most first; sortKey breaks ties deterministically.

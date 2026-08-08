@@ -3,12 +3,17 @@
 import IceCubeKit
 import SwiftUI
 
-/// The Diagnose window: four verdicts, their numbers, and nothing else.
+/// The Diagnose window: five verdicts, their numbers, and nothing else.
 ///
 /// Its own window rather than a section of the Sensors browser. That window is
 /// sized to a computed ceiling (`SensorsWindowMetrics`) that two earlier
 /// additions broke, and this content is a different job: Sensors answers *what
 /// are the numbers*, this answers *what do they mean*.
+///
+/// Four of the five describe *this moment* and wait for the first sample; the
+/// fifth — the cooling trend — is read from months of history and renders
+/// outside the `if let`, so it answers the instant the window opens. It is
+/// the one section that never says "measuring".
 ///
 /// **This view holds no copy.** Every string comes from ``DiagnosisCopy``,
 /// which is pure and tested — a `switch` inside a `View` body cannot be
@@ -17,6 +22,19 @@ import SwiftUI
 /// read as two slices of one pie) that deserve tests rather than review.
 struct DiagnosisView: View {
     @Bindable var state: AppState
+
+    @Environment(\.openWindow) private var openWindow
+
+    /// Question 5's words — computed in `CoolingTrendCopy`, tested there.
+    private var trendCopy: DiagnosisCopy.Row {
+        CoolingTrendCopy.row(
+            state.coolingTrend,
+            capabilities: .init(snapshot: state.snapshot),
+            readings: state.history.readingCount(),
+            style: state.temperatureUnit.style,
+            now: Date()
+        )
+    }
 
     var body: some View {
         ScrollView {
@@ -50,6 +68,19 @@ struct DiagnosisView: View {
                     SectionRow(copy: DiagnosisCopy.cooling(verdict.cooling), isWarning: isStalled(verdict.cooling))
                 } else {
                     SectionRow(copy: DiagnosisCopy.waiting)
+                }
+                Divider()
+                SectionRow(
+                    copy: trendCopy,
+                    isWarning: CoolingTrendCopy.isWarning(state.coolingTrend)
+                ) {
+                    Button {
+                        WindowOpener.open(WindowOpener.ID.coolingHistory, using: openWindow)
+                    } label: {
+                        Label("Cooling History", systemImage: "chart.xyaxis.line")
+                            .font(.callout)
+                    }
+                    .buttonStyle(.link)
                 }
             }
             .padding(Theme.Metrics.popoverPadding)

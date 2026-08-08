@@ -16,6 +16,19 @@ struct SensorsBrowserView: View {
     /// The shared observable state; owned by `IceCubeApp`.
     let state: AppState
 
+    @Environment(\.openWindow) private var openWindow
+
+    /// The trend row's words — computed in `CoolingTrendCopy`, tested there.
+    private var trendCopy: DiagnosisCopy.Row {
+        CoolingTrendCopy.row(
+            state.coolingTrend,
+            capabilities: .init(snapshot: state.snapshot),
+            readings: state.history.readingCount(),
+            style: state.temperatureUnit.style,
+            now: Date()
+        )
+    }
+
     /// Advanced: reveal every raw SMC key (off by default).
     @State private var showAllKeys = false
     /// The raw key dump; loaded only while `showAllKeys` is on.
@@ -144,6 +157,30 @@ struct SensorsBrowserView: View {
                     watts: state.snapshot?.power,
                     resistance: state.coolingResistance
                 )
+                // The verdict in one line; the data lives in its own window
+                // (this one is sized by arithmetic, and a weeks-wide chart is
+                // 150+ pt of chrome — the third break of a computed ceiling
+                // two earlier additions already broke). Adding this row costs
+                // exactly the 28 pt `SensorsWindowMetrics.coolingSectionHeight`
+                // grew by.
+                HStack {
+                    Text("Trend")
+                    Spacer()
+                    Button {
+                        WindowOpener.open(WindowOpener.ID.coolingHistory, using: openWindow)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(trendCopy.title)
+                                .foregroundStyle(.secondary)
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .help(trendCopy.hover ?? "The full history, in its own window.")
+                    .accessibilityLabel("Cooling trend: \(trendCopy.title). Opens the history window.")
+                }
             }
             // Omitted entirely when empty: the window's height is computed
             // from its content, and an empty box would cost the sensor list

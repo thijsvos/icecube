@@ -57,8 +57,8 @@ struct SensorsWindowMetricsTests {
     func heightFollowsTheSensorCount() {
         let simulated = height(SensorsWindowMetrics.rowCount(temperatures: 6, fans: 2))
         let sensorRich = height(SensorsWindowMetrics.rowCount(temperatures: 20, fans: 2))
-        #expect(simulated == 501, "309 pt of chrome and slack, plus eight 24 pt rows")
-        #expect(sensorRich == 837, "the same chrome, plus twenty-two rows")
+        #expect(simulated == 529, "337 pt of chrome and slack, plus eight 24 pt rows")
+        #expect(sensorRich == 865, "the same chrome, plus twenty-two rows")
         // The original assertion here was `simulated < 480`, recording that a
         // six-sensor Mac used to open at a hardcoded 480 pt and now opens
         // *smaller*. That is no longer true and the change is legitimate: the
@@ -77,7 +77,7 @@ struct SensorsWindowMetricsTests {
     /// whole type replaced: no worse than what came before.
     @Test("An unknown sensor count opens near the old fixed height, not at the floor")
     func theUnmeasuredCaseIsNotTheEmptyCase() {
-        #expect(height(nil) == 597)
+        #expect(height(nil) == 625)
         #expect(height(nil) > SensorsWindowMetrics.minimumFrameHeight)
         #expect(height(nil) == height(SensorsWindowMetrics.unmeasuredRowCount))
         #expect(height(nil) > height(SensorsWindowMetrics.rowCount(temperatures: 0, fans: 0)))
@@ -166,7 +166,7 @@ struct SensorsWindowMetricsTests {
         for screen in [CGFloat.nan, .signalingNaN, .infinity] {
             #expect(height(40, screen: screen) == SensorsWindowMetrics.maximumFrameHeight)
         }
-        #expect(height(nil, screen: .nan) == 597, "and it leaves smaller windows alone")
+        #expect(height(nil, screen: .nan) == 625, "and it leaves smaller windows alone")
     }
 }
 
@@ -331,7 +331,8 @@ struct SensorsWindowCoolingMetricsTests {
     /// and macOS saved the clipped frame. Cooling is section number four.
     @Test("The cooling section is paid for in the window height")
     func coolingCostsHeight() {
-        let expected: CGFloat = 76
+        // 76 until 2026-08-08; +28 for the trend row and its gap.
+        let expected: CGFloat = 104
         #expect(SensorsWindowMetrics.coolingSectionHeight == expected)
         // Two known row counts, both clear of either clamp, must both include it.
         for rows in [8, 12] {
