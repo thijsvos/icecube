@@ -171,12 +171,59 @@ public enum CoolingEfficiency {
     /// Averages the **same trailing window** ``isSettled(_:)`` judged. Anything
     /// older was excused by the settle rule and must not leak into the number.
     public static func settledResistance(_ samples: [Sample]) -> Double? {
-        guard isSettled(samples), let window = settleSuffix(samples) else { return nil }
+        settledWindow(samples)?.resistance
+    }
+
+    /// A settled window's full evidence, not just its quotient.
+    ///
+    /// ``settledResistance(_:)`` answers the question the UI asks — what is
+    /// `R` right now. Persistence asks a second question the UI never has to:
+    /// **how good is this reading**. A record kept for a year is worth more
+    /// than a glyph replaced next second, so the caller that writes one needs
+    /// the inputs, the sample count, the span and the widest gap — all of
+    /// which this window already computed and then threw away.
+    public struct SettledWindow: Sendable, Equatable {
+        public let endedAt: Date
+        /// °C/W over the window's means.
+        public let resistance: Double
+        public let dieCelsius: Double
+        public let ambientCelsius: Double
+        public let watts: Double
+        public let sampleCount: Int
+        /// Wall-clock span of the window, seconds.
+        public let duration: TimeInterval
+        /// The widest gap between consecutive samples, seconds. The poll
+        /// interval is user-configurable (1, 2 or 5 s), so a bare sample
+        /// count cannot distinguish "a clean 5 s cadence" from "a throttled
+        /// loop that surfaced twice" — the gap can.
+        public let maxGapSeconds: TimeInterval
+    }
+
+    /// The trailing window's full evidence, or `nil` while unsettled.
+    public static func settledWindow(_ samples: [Sample]) -> SettledWindow? {
+        guard isSettled(samples), let window = settleSuffix(samples),
+              let first = window.first, let last = window.last
+        else { return nil }
         let count = Double(window.count)
         let die = window.reduce(0) { $0 + $1.dieCelsius } / count
         let ambient = window.reduce(0) { $0 + $1.ambientCelsius } / count
         let watts = window.reduce(0) { $0 + $1.watts } / count
-        return resistance(dieCelsius: die, ambientCelsius: ambient, watts: watts)
+        guard let r = resistance(dieCelsius: die, ambientCelsius: ambient, watts: watts) else {
+            return nil
+        }
+        let maxGap = zip(window, window.dropFirst())
+            .map { $1.date.timeIntervalSince($0.date) }
+            .max() ?? 0
+        return SettledWindow(
+            endedAt: last.date,
+            resistance: r,
+            dieCelsius: die,
+            ambientCelsius: ambient,
+            watts: watts,
+            sampleCount: window.count,
+            duration: last.date.timeIntervalSince(first.date),
+            maxGapSeconds: maxGap
+        )
     }
 
     /// The ambient reference: the coolest of the airflow sensors.
@@ -218,6 +265,12 @@ public enum CoolingEfficiency {
         /// The window's resistance, or `nil` while it is unsettled.
         public var resistance: Double? {
             CoolingEfficiency.settledResistance(samples)
+        }
+
+        /// The window's full evidence, or `nil` while it is unsettled — what
+        /// the cooling-history recorder consumes. See ``SettledWindow``.
+        public var settledWindow: SettledWindow? {
+            CoolingEfficiency.settledWindow(samples)
         }
 
         /// Whether a value is currently available — the UI shows `—` when false.
