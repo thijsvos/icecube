@@ -1,6 +1,7 @@
 // Diagnostics.swift — the exportable machine report: host info + fans + sensors + full SMC key dump.
 
 import Foundation
+import IOKit
 
 /// One SMC key as captured for the sensors browser and diagnostics export.
 public struct SMCKeyDump: Sendable, Codable, Equatable, Identifiable {
@@ -50,6 +51,24 @@ public enum HostInfo {
         let v = ProcessInfo.processInfo.operatingSystemVersion
         return "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
     }
+
+    /// `IOPlatformSerialNumber`, or `nil` when unreadable.
+    ///
+    /// Exists for exactly one consumer: `MachineFingerprint`, which stores a
+    /// **salted hash** of it so a cooling history cannot follow `~/Library`
+    /// onto a different Mac. The serial itself must never be written to disk,
+    /// logged, or included in the diagnostics export — the export goes on
+    /// public GitHub issues.
+    public static func serialNumber() -> String? {
+        let service = IOServiceGetMatchingService(
+            kIOMainPortDefault, IOServiceMatching("IOPlatformExpertDevice")
+        )
+        guard service != 0 else { return nil }
+        defer { IOObjectRelease(service) }
+        return IORegistryEntryCreateCFProperty(
+            service, "IOPlatformSerialNumber" as CFString, kCFAllocatorDefault, 0
+        )?.takeRetainedValue() as? String
+    }
 }
 
 /// The full diagnostics report — what the "new Mac model" GitHub issue
@@ -65,6 +84,14 @@ public enum HostInfo {
 /// Both matter, because a new-model report is usually about fan control rather
 /// than sensor labels — and for a while this report could not describe the
 /// thing it was being collected for.
+///
+/// **Cooling history is deliberately excluded.** This report is designed to
+/// be attached to a public GitHub issue, and a months-long timestamp series
+/// is a record of when a machine was in use — working hours, weekends,
+/// holidays. `R` is also not comparable between machines, so a stranger's
+/// history answers no question the report exists for; the live
+/// `coolingResistance` value is the right amount. Adding history here should
+/// be a considered override of this paragraph, never an oversight.
 public struct DiagnosticsReport: Sendable, Codable, Equatable {
     /// Bump when the report's shape changes, so tooling can dispatch.
     public let schemaVersion: Int

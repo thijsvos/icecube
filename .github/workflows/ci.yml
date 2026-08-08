@@ -163,6 +163,16 @@ jobs:
             exit 1
           fi
           echo "ok: no reference to the real mach service"
+          # SimulatedIsolationTests asserts the *composition* (the history
+          # store is bound to a temp path); this asserts the runtime
+          # consequence in the one place a real launch actually happens. A
+          # simulated run that wrote fabricated cooling records into the real
+          # file would silently poison a baseline read months later.
+          if [ -e "$HOME/Library/Application Support/IceCube/cooling-history.json" ]; then
+            echo "::error::a simulated run created the real cooling-history file" >&2
+            exit 1
+          fi
+          echo "ok: the real cooling-history file was not created"
 
       - name: Upload simulated-mode log on failure
         if: failure()

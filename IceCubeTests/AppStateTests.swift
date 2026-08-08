@@ -198,6 +198,7 @@ struct AppStateTests {
             isSimulated: true,
             helper: graph.helper,
             presets: graph.presets,
+            history: graph.history,
             defaults: graph.defaults,
             processes: sampler,
             menuBarHost: { _ in SpyHost() }

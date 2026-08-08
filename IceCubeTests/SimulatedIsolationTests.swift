@@ -159,6 +159,30 @@ struct SimulatedIsolationTests {
         )
     }
 
+    /// The history file follows the presets pattern: redirected, never
+    /// disabled. A simulated launch writing fabricated records into the
+    /// owner's real baseline would be the same incident this suite exists
+    /// for, made worse by being silent and permanent — a poisoned baseline
+    /// yields a false "your cooling degraded" months later.
+    @Test("The simulated cooling-history file is not the real one, and arrives seeded")
+    func historyFileIsRedirectedAndSeeded() {
+        let graph = simulatedGraph()
+        #expect(graph.history.fileURL != CoolingHistoryStore.defaultFile)
+        #expect(
+            graph.history.fileURL.path.hasPrefix(FileManager.default.temporaryDirectory.path),
+            "simulated history belongs in a temporary directory, got \(graph.history.fileURL.path)"
+        )
+        // Demonstrable, not merely isolated (CLAUDE.md rule 3): months of
+        // fabricated records so the trend has something to say, fingerprinted
+        // simulated so a real run could never load them even by hand.
+        let history = graph.history.history
+        #expect(
+            (history?.records.count ?? 0) + (history?.days.count ?? 0) > 50,
+            "the seed must fill months, not moments"
+        )
+        #expect(history?.machine.isSimulated == true)
+    }
+
     /// CLAUDE.md rule 3: every feature must be *demonstrable* when simulated.
     /// Isolation that left the fan-control UI dead would trade one violation
     /// for another, so the stand-in behaves like a healthy, approved daemon.

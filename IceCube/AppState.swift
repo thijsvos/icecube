@@ -41,6 +41,11 @@ final class AppState: PopoverLifecycleObserving {
     let helper: HelperManager
     /// Built-in + user presets (Phase 4). Injected for the same reason.
     let presets: PresetStore
+    /// Persisted cooling-efficiency records and their trend. Injected with
+    /// **no default value**: a default would have to name the real file and
+    /// would re-create exactly the isolation hole `CompositionRoot` exists
+    /// to close (the documented 2026-08-02 incident's shape).
+    let history: CoolingHistoryStore
 
     /// Owned here rather than by the Settings window, where it used to be a
     /// `@State`.
@@ -107,6 +112,21 @@ final class AppState: PopoverLifecycleObserving {
 
     /// The rolling window behind ``coolingResistance``.
     @ObservationIgnored private var cooling = CoolingEfficiency.Tracker()
+
+    /// The degradation verdict, re-evaluated **only** on load and on a new
+    /// record — the deliberate inverse of `refreshDiagnosis`, which runs
+    /// every tick because it describes this instant and is stale a second
+    /// later. The trend describes months and is a pure function of the
+    /// record set, so recomputing between records would burn cycles to
+    /// produce the identical answer. Main-actor evaluation is fine because
+    /// records arrive at most every five minutes over a retention-capped
+    /// set (`CoolingHistory.maximumDayAggregates` — the cap's comment says
+    /// this dependency out loud).
+    private(set) var coolingTrend: CoolingTrend.Verdict = .noHistory
+
+    /// The gate between the live settle window and the history file. Kit
+    /// value type, held like the tracker above it.
+    @ObservationIgnored private var historyRecorder = CoolingRecorder()
 
     // MARK: - Diagnosis ("why is it hot?")
 
@@ -269,6 +289,7 @@ final class AppState: PopoverLifecycleObserving {
             isSimulated: graph.isSimulated,
             helper: graph.helper,
             presets: graph.presets,
+            history: graph.history,
             defaults: graph.defaults,
             processes: graph.processes,
             menuBarHost: menuBarHost
@@ -280,6 +301,7 @@ final class AppState: PopoverLifecycleObserving {
         isSimulated: Bool,
         helper: HelperManager,
         presets: PresetStore,
+        history: CoolingHistoryStore,
         defaults: any KeyValueStore,
         processes: any ProcessSampling = MockProcessSampler(),
         menuBarHost: @escaping @MainActor (AppState) -> any MenuBarHosting
@@ -289,6 +311,7 @@ final class AppState: PopoverLifecycleObserving {
         self.isSimulated = isSimulated
         self.helper = helper
         self.presets = presets
+        self.history = history
         self.defaults = defaults
         chartSettings = ChartSettings(defaults: defaults)
         updates = UpdateChecker(defaults: defaults)
@@ -324,6 +347,11 @@ final class AppState: PopoverLifecycleObserving {
         // own timers — see `HelperManager.start()`. The app is the only caller;
         // tests drive `maintainOnce()` directly instead.
         helper.start()
+        // Once at launch; thereafter only when a record lands (see
+        // `coolingTrend`). An empty store honestly reads `.noHistory`.
+        if let loaded = history.history {
+            coolingTrend = CoolingTrend.evaluate(loaded, now: Date())
+        }
     }
 
     /// Rebuilds the polling stream with the effective cadence. Icon-only
@@ -423,6 +451,18 @@ final class AppState: PopoverLifecycleObserving {
                     // makes a reading available the moment someone looks.
                     cooling.ingest(new)
                     coolingResistance = cooling.resistance
+                    // The recorder's spacing runs on the monotonic clock and
+                    // its stamps on the snapshot's wall clock, so an NTP step
+                    // can move a record's date but never cause a burst or a
+                    // stall (the SafetyMonitor two-clock precedent).
+                    if let record = historyRecorder.ingest(
+                        new, settled: cooling.settledWindow, elapsed: ContinuousClock().now
+                    ) {
+                        history.append(record, fans: new.fans, now: new.date)
+                        if let loaded = history.history {
+                            coolingTrend = CoolingTrend.evaluate(loaded, now: new.date)
+                        }
+                    }
                     await refreshDiagnosis(new)
                     // Assigned only on a change: see `sensorRowCount`. Writing
                     // the same number every tick would still be a mutation, and

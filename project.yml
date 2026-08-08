@@ -145,6 +145,7 @@ targets:
       - IceCube/ChartSettings.swift
       - IceCube/AppState.swift
       - IceCube/PollErrorPolicy.swift
+      - IceCube/CoolingHistoryStore.swift
     dependencies:
       - package: IceCubeKit
     settings:
