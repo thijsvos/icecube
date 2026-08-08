@@ -210,15 +210,23 @@ struct SystemSMCProviderTests {
 
     // MARK: - Sensors
 
-    @Test("A Mac with curated sensors reports them")
+    /// The model is **pinned**, and that is the point of the test rather than
+    /// a detail of it. With `HostInfo.modelIdentifier()` read straight from
+    /// `sysctl`, this test and the next one passed on the owner's Mac14,9 and
+    /// failed on CI, whose model has no curated map and so fell through to
+    /// enumeration. A test whose branch depends on the machine running it is
+    /// not pinning anything.
+    @Test("A Mac with a curated map reports the curated sensors")
     func curatedSensorsAreRead() async throws {
         var values = Self.fans()
         values["Tp01"] = 55
+        values["Tp05"] = 54
         values["Tg0f"] = 50
         values["TaLP"] = 40
-        let provider = SystemSMCProvider(connection: FakeReadPort(values: values))
+        let provider = SystemSMCProvider(connection: FakeReadPort(values: values), model: { "Mac14,9" })
         let temps = try await provider.temperatures()
         #expect(temps.contains { $0.key == "Tp01" })
+        #expect(temps.contains { $0.key == "TaLP" }, "airflow is curated too, not only the die")
     }
 
     /// Discovery treats "no such key" as an **answer** and anything else as a
@@ -238,19 +246,102 @@ struct SystemSMCProviderTests {
         let port = FakeReadPort(values: values)
         await port.breakRead("Tp01")
 
-        let provider = SystemSMCProvider(connection: port)
+        let provider = SystemSMCProvider(connection: port, model: { "Mac14,9" })
         await #expect(throws: IceCubeError.self) { try await provider.temperatures() }
     }
 
-    // NOT TESTED: the enumeration fallback for an unmapped Mac.
-    //
-    // `performSensorDiscovery` picks the curated map via
-    // `HostInfo.modelIdentifier()`, a bare `sysctlbyname` with no seam — so on
-    // the M2 this suite runs on, the curated branch always wins and the
-    // fallback is unreachable. Faking it would mean asserting against a path
-    // the test cannot actually enter.
-    //
-    // Injecting the model is a second, smaller seam (`model: @Sendable () ->
-    // String`, defaulted) and it would unlock this branch plus every non-M2
-    // shape. Recorded rather than quietly skipped.
+    // MARK: - The enumeration fallback
+
+    /// Every Mac the curated maps do not name — which is most of them, and
+    /// every Mac released after the map was last edited. Unreachable in tests
+    /// until the model was injected, so the path most users on unmapped
+    /// hardware actually take was the one path never exercised.
+    @Test("An unmapped Mac falls back to enumerating the SMC")
+    func unmappedMacEnumerates() async throws {
+        let port = FakeReadPort(
+            values: ["TxyZ": 61, "Fake": 99],
+            allKeys: ["TxyZ", "Fake"]
+        )
+        let provider = SystemSMCProvider(connection: port, model: { "Mac99,9" })
+        let temps = try await provider.temperatures()
+        #expect(temps.map(\.key) == ["TxyZ"], "only T-prefixed keys are temperatures")
+    }
+
+    /// Enumeration is a guess, so it filters on all three of prefix, type and
+    /// plausibility. Dropping any one of them puts a number on screen that is
+    /// not a temperature — the failure mode this app cannot afford, since a
+    /// bogus reading drives a curve.
+    @Test("Enumeration rejects a T-key that is not a plausible float temperature")
+    func enumerationFiltersOnTypeAndPlausibility() async throws {
+        let port = FakeReadPort(
+            values: ["TxyZ": 61, "Tbad": 900, "Tint": 44],
+            types: ["Tint": "ui16"],
+            allKeys: ["TxyZ", "Tbad", "Tint"]
+        )
+        let provider = SystemSMCProvider(connection: port, model: { "Mac99,9" })
+        let temps = try await provider.temperatures()
+        #expect(temps.map(\.key) == ["TxyZ"], "900 °C is not plausible and a ui16 is not a temperature")
+    }
+
+    /// The threshold that decides between the two branches. A curated map that
+    /// matches fewer than three keys does not describe this machine, so the
+    /// enumeration fallback is better than three labelled sensors and nothing
+    /// else — this used to fire on a badly-timed probe and drop a
+    /// well-mapped Mac to raw-key labels, which is why admission is now by
+    /// existence.
+    @Test("A curated map matching fewer than three keys is abandoned for enumeration")
+    func thinCuratedMapFallsThrough() async throws {
+        let port = FakeReadPort(
+            values: ["Tp01": 55, "Tg0f": 50, "TxyZ": 61],
+            allKeys: ["Tp01", "Tg0f", "TxyZ"]
+        )
+        let provider = SystemSMCProvider(connection: port, model: { "Mac14,9" })
+        let temps = try await provider.temperatures()
+        #expect(temps.contains { $0.key == "TxyZ" }, "an uncurated key can only come from enumeration")
+    }
+
+    /// The labels are the tell: curated sensors carry human names, enumerated
+    /// ones can only carry the raw key, because nothing knows what they are.
+    @Test("Enumerated sensors are labelled with the raw key, curated ones with a name")
+    func labelsDistinguishTheBranches() async throws {
+        var curatedValues = Self.fans()
+        for key in ["Tp01", "Tp05", "Tg0f", "TaLP"] {
+            curatedValues[key] = 50
+        }
+        let curated = SystemSMCProvider(connection: FakeReadPort(values: curatedValues), model: { "Mac14,9" })
+        let named = try await #require(curated.temperatures().first { $0.key == "Tp01" })
+        #expect(named.label != named.key, "a curated sensor has a name")
+
+        let port = FakeReadPort(values: ["TxyZ": 61], allKeys: ["TxyZ"])
+        let enumerated = SystemSMCProvider(connection: port, model: { "Mac99,9" })
+        let raw = try await #require(enumerated.temperatures().first)
+        #expect(raw.label == raw.key, "nothing knows what TxyZ is, so it must not pretend")
+    }
+
+    /// The test that actually pins the injected model, and it took a mutation
+    /// to find that the others did not.
+    ///
+    /// Hardcoding the model back to `"Mac14,9"` — reintroducing exactly the bug
+    /// this seam was added to fix — left all five tests above green, because an
+    /// unmapped Mac probed against the wrong curated map matches almost nothing,
+    /// drops under the three-key threshold, and falls through to enumeration.
+    /// Right answer, wrong reason, and no test could tell.
+    ///
+    /// So: a Mac whose keys **do** match a curated map, that is **not** that
+    /// model. Consulting the model gives raw-key labels; ignoring it gives
+    /// Mac14,9's human names for a machine that is not a Mac14,9.
+    @Test("An unmapped Mac is not given another Mac's sensor names")
+    func unmappedMacDoesNotBorrowLabels() async throws {
+        let keys = ["Tp01", "Tp05", "Tg0f", "TaLP"]
+        let port = FakeReadPort(
+            values: Dictionary(uniqueKeysWithValues: keys.map { ($0, 50.0) }),
+            allKeys: keys
+        )
+        let temps = try await SystemSMCProvider(connection: port, model: { "Mac99,9" }).temperatures()
+        #expect(temps.count == 4)
+        #expect(
+            temps.allSatisfy { $0.label == $0.key },
+            "these are Mac14,9's keys, but this is not a Mac14,9 — it must not wear its labels"
+        )
+    }
 }

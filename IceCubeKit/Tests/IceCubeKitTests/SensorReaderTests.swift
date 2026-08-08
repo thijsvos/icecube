@@ -23,8 +23,16 @@ struct SensorReaderTests {
     /// Instant, so retry budgets cost nothing. Matches `DaemonCoreTests`.
     static let noSleep: @Sendable (Duration) async -> Void = { _ in }
 
-    static func reader(_ smc: FakeSMC) -> SensorReader {
-        SensorReader(port: smc, sleep: noSleep)
+    /// The model is **pinned**, not defaulted, and that is deliberate.
+    ///
+    /// `readTemperatures()` chooses the curated map or the fallback superset
+    /// from `hw.model`, so with the default every temperature test below asked
+    /// a question of whichever Mac happened to run it. On the owner's Mac14,9
+    /// that is the curated branch; on CI it is the fallback. The app side hit
+    /// exactly this and two of its tests failed only after reaching CI, so the
+    /// daemon side is pinned before it can.
+    static func reader(_ smc: FakeSMC, model: String = "Mac14,9") -> SensorReader {
+        SensorReader(port: smc, sleep: noSleep, model: { model })
     }
 
     // MARK: - Fans
@@ -244,5 +252,33 @@ struct SensorReaderTests {
         await smc.breakRead("Tg0f")
         let read = await Self.reader(smc).readTemperatures()
         #expect(read.readings == nil)
+    }
+
+    // MARK: - Which sensor map this Mac gets
+
+    /// A mapped Mac uses its curated list, and the notice names the model —
+    /// the daemon's log is the audit trail, so "resolved N sensors (model X)"
+    /// has to say which X it actually resolved against.
+    @Test("A mapped Mac resolves against its curated list and says so")
+    func mappedMacUsesCuratedList() async {
+        let read = await Self.reader(FakeSMC(), model: "Mac14,9").readTemperatures()
+        #expect(read.readings?.isEmpty == false)
+        #expect(read.notices.contains { $0.contains("Mac14,9") }, "the log must name the map it used")
+    }
+
+    /// The case that matters most and was hardest to reach: an unmapped Mac —
+    /// every model the curated maps do not name, and every Mac released after
+    /// they were last edited.
+    ///
+    /// Resolving to nothing here is not a cosmetic failure. A blind daemon has
+    /// no temperature ceiling and no guardian, while the app's own read path
+    /// keeps showing correct numbers — so the UI looks healthy while the one
+    /// component allowed to spin the fans inside a closed lid cannot see.
+    @Test("An unmapped Mac probes the fallback superset rather than going blind")
+    func unmappedMacUsesFallbackSuperset() async throws {
+        let read = await Self.reader(FakeSMC(), model: "Mac99,9").readTemperatures()
+        let readings = try #require(read.readings, "nil here is a blind daemon")
+        #expect(!readings.isEmpty, "the superset contains this Mac's keys even though the map does not")
+        #expect(read.notices.contains { $0.contains("Mac99,9") })
     }
 }

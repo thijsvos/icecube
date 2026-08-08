@@ -21,6 +21,16 @@ public actor SystemSMCProvider: SMCProviding {
     /// a scripted fake instead of a Mac.
     private let connection: any SMCReadPort
 
+    /// This Mac's `hw.model`, injected.
+    ///
+    /// Not a detail: `performSensorDiscovery` picks the curated map or the
+    /// enumeration fallback from this string, so with it read straight from
+    /// `sysctl` **the branch a test takes depends on the machine running the
+    /// suite**. That is not hypothetical — the first version of these tests
+    /// passed on the owner's Mac14,9, where the curated branch wins, and failed
+    /// on CI, where a different model falls through to enumeration.
+    private let model: @Sendable () -> String
+
     /// Resolved once on first use.
     private var discoveredFans: [FanDescriptor]?
     private var discoveredSensors: [SMCKeyMaps.SensorDescriptor]?
@@ -58,6 +68,7 @@ public actor SystemSMCProvider: SMCProviding {
     /// no AppleSMC service to talk to.
     public init() throws(IceCubeError) {
         connection = try SMCConnection()
+        model = HostInfo.modelIdentifier
     }
 
     /// Builds a provider over an arbitrary read port.
@@ -65,8 +76,12 @@ public actor SystemSMCProvider: SMCProviding {
     /// For tests, and for a future Intel or remote provider. Production keeps
     /// using ``init()``, which owns the real connection — nothing about the
     /// capability boundary changes, because this port cannot write.
-    public init(connection: any SMCReadPort) {
+    public init(
+        connection: any SMCReadPort,
+        model: @escaping @Sendable () -> String = HostInfo.modelIdentifier
+    ) {
         self.connection = connection
+        self.model = model
     }
 
     // MARK: - SMCProviding
@@ -309,7 +324,7 @@ public actor SystemSMCProvider: SMCProviding {
 
     private func performSensorDiscovery() async throws(IceCubeError) -> [SMCKeyMaps.SensorDescriptor] {
         var resolved: [SMCKeyMaps.SensorDescriptor] = []
-        if let curated = SMCKeyMaps.curatedSensors(forModel: HostInfo.modelIdentifier()) {
+        if let curated = SMCKeyMaps.curatedSensors(forModel: model()) {
             // Membership comes from key EXISTENCE, never from a first reading.
             // Admitting on a plausible read made the sensor list a per-launch
             // lottery — five consecutive `icecube-diag` runs on an idle Mac14,9
