@@ -129,6 +129,9 @@ struct PopoverView: View {
                 PopoverTemperatureCards(state: state)
             }
             Divider()
+            if case let .available(version, url) = state.updates.status {
+                PopoverUpdateRow(version: version, url: url)
+            }
             PopoverFooter(state: state, dismissPopover: dismissPopover)
         }
         .padding(Theme.Metrics.popoverPadding)

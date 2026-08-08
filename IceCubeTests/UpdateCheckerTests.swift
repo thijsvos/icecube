@@ -135,4 +135,63 @@ struct UpdateCheckerTests {
     func versionCompare(_ case: (newer: String, older: String, expected: Bool)) {
         #expect(UpdateChecker.isVersion(`case`.newer, newerThan: `case`.older) == `case`.expected)
     }
+
+    // MARK: - Checking without being asked
+
+    /// The object used to be a `@State` on the Settings window, so it did not
+    /// exist unless somebody opened Settings. These pin the rule that replaced
+    /// that: pure, so a day of elapsed time is a parameter rather than a wait.
+    @Test("A Mac that has never checked is due")
+    func neverCheckedIsDue() {
+        #expect(UpdateChecker.isAutomaticCheckDue(lastChecked: nil, now: Date(), enabled: true))
+    }
+
+    @Test("Switching it off stops it, even when a check is long overdue")
+    func disabledIsNeverDue() {
+        let ancient = Date(timeIntervalSince1970: 0)
+        #expect(!UpdateChecker.isAutomaticCheckDue(lastChecked: ancient, now: Date(), enabled: false))
+        #expect(!UpdateChecker.isAutomaticCheckDue(lastChecked: nil, now: Date(), enabled: false))
+    }
+
+    /// Quitting and reopening four times in a morning must make one request,
+    /// not four — GitHub allows 60 an hour per address, shared with everything
+    /// else on it.
+    @Test("A second launch the same day does not check again")
+    func throttledWithinTheInterval() {
+        let now = Date()
+        let anHourAgo = now.addingTimeInterval(-3600)
+        #expect(!UpdateChecker.isAutomaticCheckDue(lastChecked: anHourAgo, now: now, enabled: true))
+    }
+
+    @Test("A day later it is due again")
+    func dueAfterTheInterval() {
+        let now = Date()
+        let stale = now.addingTimeInterval(-UpdateChecker.automaticInterval - 1)
+        #expect(UpdateChecker.isAutomaticCheckDue(lastChecked: stale, now: now, enabled: true))
+    }
+
+    /// Clocks move backwards — on wake, and after a timezone change. Treating
+    /// a future timestamp as "not due yet" would lock checks out until real
+    /// time caught up, which for a badly-set clock can be years.
+    @Test("A timestamp in the future is due, not a lockout")
+    func clockWentBackwards() {
+        let now = Date()
+        let future = now.addingTimeInterval(60 * 60 * 24 * 365)
+        #expect(UpdateChecker.isAutomaticCheckDue(lastChecked: future, now: now, enabled: true))
+    }
+
+    /// Opt-out, not opt-in. `bool(forKey:)` returns false for a key never
+    /// written, so reading it that way would have shipped the feature off.
+    @Test("Automatic checks default to on when nothing was ever stored")
+    func defaultsToEnabled() {
+        #expect(UpdateChecker(defaults: MemoryDefaults()).automaticChecksEnabled)
+    }
+
+    @Test("An explicit off survives a relaunch")
+    func offIsRemembered() {
+        let store = MemoryDefaults()
+        let first = UpdateChecker(defaults: store)
+        first.automaticChecksEnabled = false
+        #expect(!UpdateChecker(defaults: store).automaticChecksEnabled)
+    }
 }

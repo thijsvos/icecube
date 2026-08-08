@@ -41,6 +41,16 @@ final class AppState: PopoverLifecycleObserving {
     let helper: HelperManager
     /// Built-in + user presets (Phase 4). Injected for the same reason.
     let presets: PresetStore
+
+    /// Owned here rather than by the Settings window, where it used to be a
+    /// `@State`.
+    ///
+    /// That placement was the reason the check never ran on its own: the object
+    /// did not exist until somebody opened Settings, so the only code path that
+    /// could learn about a release was the button inside it. Every release so
+    /// far is unsigned and installed by hand, which makes "the user never finds
+    /// out" the expensive failure.
+    let updates: UpdateChecker
     /// Customizable chart/display preferences — the tinkerer surface.
     ///
     /// Built from the injected `defaults`, not from `UserDefaults.standard`.
@@ -281,6 +291,7 @@ final class AppState: PopoverLifecycleObserving {
         self.presets = presets
         self.defaults = defaults
         chartSettings = ChartSettings(defaults: defaults)
+        updates = UpdateChecker(defaults: defaults)
         // Defaulted to the mock rather than to `SystemProcessSampler`, so a
         // caller that forgets the argument reads fiction instead of the user's
         // real process list. The safe default is the one that touches nothing.
@@ -380,6 +391,11 @@ final class AppState: PopoverLifecycleObserving {
             // No daemon in simulated mode, so nothing would ever populate the
             // decision timeline. See `seedSimulatedDecisions`.
             helper.seedSimulatedDecisions()
+        } else {
+            // Not in simulated mode, for the same reason notifications are
+            // suppressed there: a fake run must not reach the network or leave
+            // a real timestamp behind. Throttled to once a day by `checkIfDue`.
+            Task { [weak self] in await self?.updates.checkIfDue() }
         }
         // Once, in parallel with polling: the inventory is a property of the
         // Mac, not of the moment. A failure is not worth reporting — the only
