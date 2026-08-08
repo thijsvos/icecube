@@ -103,7 +103,7 @@ struct PopoverView: View {
         // still down at that moment, which would apply a second switch here.
         guard state.menuBar?.mode != .vendored else { return }
         guard NSEvent.modifierFlags.contains(.option) else { return }
-        Task { await state.helper.cyclePreset(in: PresetStore.builtins) }
+        Task { await state.helper.cyclePreset(in: state.presets.all) }
     }
 
     private var liveContent: some View {
@@ -119,6 +119,7 @@ struct PopoverView: View {
                 if state.chartSettings.showControls {
                     FanControlSection(
                         helper: state.helper,
+                        presets: state.presets,
                         fans: state.fans,
                         dismissPopover: dismissPopover
                     )

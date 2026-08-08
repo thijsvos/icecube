@@ -10,6 +10,9 @@ struct CurveEditorView: View {
     let state: AppState
     @State private var model = CurveEditorModel()
     @State private var presetName = ""
+
+    /// The name a pending save would overwrite, driving the confirmation.
+    @State private var pendingOverwrite: String?
     @AppStorage("persistCurve") private var persistCurve = false
 
     var body: some View {
@@ -32,6 +35,24 @@ struct CurveEditorView: View {
         }
         .padding(Theme.Metrics.popoverPadding)
         .frame(minWidth: 600, minHeight: 430)
+        .confirmationDialog(
+            "Replace “\(pendingOverwrite ?? "")”?",
+            isPresented: Binding(get: { pendingOverwrite != nil }, set: {
+                if !$0 {
+                    pendingOverwrite = nil
+                }
+            }),
+            titleVisibility: .visible
+        ) {
+            Button("Replace", role: .destructive) {
+                state.presets.saveUserPreset(named: presetName, curve: model.curve)
+                presetName = ""
+                pendingOverwrite = nil
+            }
+            Button("Cancel", role: .cancel) { pendingOverwrite = nil }
+        } message: {
+            Text("The curve saved under this name will be replaced. This cannot be undone.")
+        }
         // Sliders, toggle, and buttons all take the ice-blue brand accent.
         .tint(Theme.accent)
         .onChange(of: state.snapshot) {
@@ -60,6 +81,11 @@ struct CurveEditorView: View {
                     if let curve = preset.config.sharedCurve {
                         Button(preset.name) { model.load(curve) }
                             .buttonStyle(.borderless)
+                            .contextMenu {
+                                Button("Delete \u{201C}\(preset.name)\u{201D}", role: .destructive) {
+                                    state.presets.removeUserPreset(preset)
+                                }
+                            }
                     }
                 }
             }
@@ -114,8 +140,15 @@ struct CurveEditorView: View {
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 120)
                 Button("Save Preset") {
-                    state.presets.saveUserPreset(named: presetName, curve: model.curve)
-                    presetName = ""
+                    // Saving over an existing name replaces it outright — that
+                    // is also the only way to *edit* a preset, so the action
+                    // stays, but it no longer destroys a curve silently.
+                    if state.presets.wouldReplace(name: presetName) {
+                        pendingOverwrite = presetName.trimmingCharacters(in: .whitespaces)
+                    } else {
+                        state.presets.saveUserPreset(named: presetName, curve: model.curve)
+                        presetName = ""
+                    }
                 }
                 .disabled(presetName.trimmingCharacters(in: .whitespaces).isEmpty)
                 Button("Apply Curve") {

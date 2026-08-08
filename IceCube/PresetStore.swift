@@ -28,6 +28,31 @@ final class PresetStore {
 
     private(set) var userPresets: [Preset] = []
 
+    /// Every preset the user can pick, built-ins first.
+    ///
+    /// The accessor every preset surface should use. Until 2026-08-08 nine of
+    /// them named ``builtins`` directly and `userPresets` was read by exactly
+    /// one — the curve editor's Load menu — so a saved curve could not be
+    /// applied from the popover, selected in Settings, reached by ⌥-cycling, or
+    /// deleted at all. "Save Preset" produced a bookmark, not a preset.
+    ///
+    /// Order is deliberate: the four built-ins keep their positions, so ⌥-click
+    /// cycling and muscle memory do not change for anyone who has saved
+    /// nothing.
+    var all: [Preset] {
+        Self.builtins + userPresets
+    }
+
+    /// Whether saving under this name would replace an existing saved preset.
+    ///
+    /// ``saveUserPreset(named:curve:)`` removes any same-name preset before
+    /// appending, which is the only way to edit one — and it destroys the old
+    /// curve with no warning. The caller asks first.
+    func wouldReplace(name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        return userPresets.contains { $0.name == trimmed }
+    }
+
     /// Set when `presets.json` could not be read, naming the backup we moved it
     /// to. The Curves window surfaces this so a load failure is visible rather
     /// than looking like "you never saved anything".

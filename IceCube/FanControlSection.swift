@@ -13,6 +13,10 @@ struct FanControlSection: View {
     /// A plain `let`: observation-driven redraw works without @Bindable, which
     /// exists only to project `$`-bindings — and this view forms none.
     let helper: HelperManager
+
+    /// The whole preset set, not just the built-ins. Passed in rather than
+    /// reached through `AppState` so this view keeps the narrow surface it had.
+    let presets: PresetStore
     /// Live fan readings (for slider ranges and current values).
     let fans: [Fan]
     /// Closes the popover. Injected rather than re-derived from
@@ -145,7 +149,7 @@ struct FanControlSection: View {
     /// so the grouping cue has nothing left to group and the divider went too.
     private var presetRow: some View {
         HStack(spacing: 6) {
-            ForEach(PresetStore.builtins) { preset in
+            ForEach(presets.all) { preset in
                 presetButton(preset)
             }
             Spacer(minLength: 0)
@@ -156,6 +160,18 @@ struct FanControlSection: View {
     private func presetButton(_ preset: Preset) -> some View {
         Button(preset.name) {
             Task { await helper.applyPreset(preset, persistCurve: persistCurve) }
+        }
+        // Only a saved preset can be deleted, and only from a context menu: a
+        // visible minus beside four built-ins that cannot be removed would be
+        // four dead controls. `removeUserPreset` has existed, persisted and
+        // been unit-tested since presets shipped, with no caller — the only
+        // way to drop one was editing presets.json by hand.
+        .contextMenu {
+            if preset.kind == .custom {
+                Button("Delete \u{201C}\(preset.name)\u{201D}", role: .destructive) {
+                    presets.removeUserPreset(preset)
+                }
+            }
         }
         .buttonStyle(.bordered)
         .tint(PresetHighlight.isActive(

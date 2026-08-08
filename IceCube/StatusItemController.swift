@@ -108,7 +108,7 @@ final class StatusItemController: NSObject, MenuBarHosting, NSPopoverDelegate {
     }
 
     private func quickSwitch() async {
-        guard let applied = await state.helper.cyclePreset(in: PresetStore.builtins) else {
+        guard let applied = await state.helper.cyclePreset(in: state.presets.all) else {
             // Refused, or the apply failed. Mode B has no error surface of its
             // own, so route the user to the one that already exists rather than
             // letting an ⌥-click look like a dead button.
