@@ -173,4 +173,13 @@ the exact bundle paths SMAppService needs.
   a built-in curve until things are genuinely cool.
 - **App-side stores**: presets (`~/Library/Application Support/IceCube/
   presets.json`), settings (UserDefaults), chart history (60 min ring
-  buffers, CSV-exportable), update checker (GitHub releases/latest).
+  buffers, CSV-exportable), update checker (GitHub releases/latest), and —
+  since 2026-08-08 — cooling history (`cooling-history.json` beside the
+  presets: settled °C/W readings per fan-speed band, raw for a week, day
+  summaries for two years, fingerprinted to this Mac by a salted serial
+  hash so Migration Assistant cannot transplant a baseline; the policy —
+  recorder gates, retention, the trend verdict — lives in
+  `IceCubeKit/History/`, the app owns only the file. A simulated launch is
+  redirected to a temp sandbox and seeded with fabricated months so the
+  trend UI stays demonstrable; asserted in `SimulatedIsolationTests` and
+  re-checked at runtime by CI's smoke test).

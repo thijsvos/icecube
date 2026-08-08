@@ -1,8 +1,9 @@
 # Why is it hot? — what Ice Cube can tell you, and what it cannot
 
-Ice Cube's Diagnose window answers four questions about this moment. This file
-explains where each answer comes from, why the numbers on screen deliberately do
-not add up, and the things the app cannot see at all.
+Ice Cube's Diagnose window answers four questions about this moment, and a
+fifth about the months behind it. This file explains where each answer comes
+from, why the numbers on screen deliberately do not add up, and the things the
+app cannot see at all.
 
 Every figure quoted here was measured on real hardware. Where something has not
 been measured, it says so.
@@ -23,7 +24,7 @@ hours. The fans were at 6800 RPM and the die at 71 °C. Ice Cube was fighting it
 the entire time and had no screen that could name the cause — the diagnosis took
 one API call the app was not making.
 
-## The four questions
+## The five questions
 
 ### 1. How hot is it?
 
@@ -61,8 +62,8 @@ It is keyed on **watts and not on °C/W** on purpose. `R` is not comparable
 between machines (the ambient reference is a sensor inside the case), and this
 claim has to hold on hardware nobody here has measured.
 
-**What this row will not say is "your cooling is degrading."** That needs a
-baseline, and Ice Cube keeps no history across launches. See "Not yet possible".
+**This row still will not say "your cooling is degrading"** — that needs a
+baseline rather than a moment, and it is question 5's job.
 
 ### 3. What is producing it?
 
@@ -102,6 +103,28 @@ A fan *ramping up* legitimately reads far below its target for seconds
 (`FanActivity` documents the measured ~1.5 s firmware dead time), so "stalled"
 is scoped to reading below the fan's own minimum. Calling a ramp a failure would
 fire on every preset change.
+
+### 5. Is cooling getting worse?
+
+The claim the "Not yet possible" section of this file named for three
+versions. It is possible now, and the rest of this section is the small print
+that makes it honest.
+
+The verdict comes from persisted settled °C/W readings ([THERMAL.md's
+"Tracking it over time"](THERMAL.md) has the mechanism and every constant):
+the last 14 days against the earliest qualifying 14-day window at least a
+month back, medians only, within one fan-speed band only, called only past
+10 % (a one-day jump past 15 % against the band's own recent days). Six
+states are possible — steady, worse, better, changed-abruptly, and two
+refusals that name what is missing — plus "building a baseline" with the date
+comparisons begin. Unlike the four rows above, this one is read from history
+rather than measured, so it answers the instant the window opens and never
+says "measuring". The full chart lives in the **Cooling History** window.
+
+The row is deliberately not orange for a slow rise — a months-long drift has
+no moment that deserves a warning, and colouring it would train the eye to
+ignore the one state that means *now* (the abrupt change, which does get the
+triangle). No trend state ever posts a notification.
 
 ## Why the numbers do not add up — and must not
 
@@ -155,9 +178,23 @@ Process names say what you work on. So:
 
 - **Nothing leaves the machine.** Process names are **not** in the diagnostics
   JSON export — that file is designed to be attached to a public GitHub issue.
-- **Nothing is written to disk.** This is a live view with no history.
+- **This window writes nothing.** The process list, the watts and the four
+  verdicts about this moment are computed and discarded. One thing on it is
+  read from disk rather than measured — question 5's cooling trend, which
+  comes from the record described next.
+- **The cooling history is a handful of numbers and a date.** Each settled
+  reading stores when it was taken, the °C/W figure, the watts, die and
+  airflow temperatures it was computed from, and the fan speed. It lives at
+  `~/Library/Application Support/IceCube/cooling-history.json`, in the clear,
+  and holds no process name, no file name, no serial number and no identifier
+  of any kind — a salted hash ties it to this Mac without naming it. It never
+  leaves the machine, it is **not** in the diagnostics export (a year of
+  someone's thermal history is not something to hand over by accident), and
+  **Clear History** in the Cooling History window deletes it outright.
 - **Nothing is collected while the window is closed.** Sampling starts when the
   window opens and stops when it closes, which also discards what was collected.
+  (Cooling readings record whenever the app runs — that is the point of a
+  baseline — but they are the impersonal numbers above, not process data.)
 - **A simulated run reads no real process.** `ICECUBE_SIMULATED=1` substitutes
   `MockProcessSampler`, whose fake PIDs start at 900001 — above Darwin's PID
   ceiling of 99999 — so a simulated PID cannot name a real process even by
@@ -169,10 +206,20 @@ reason.
 
 ## Not yet possible
 
-**"Your cooling is 18 % worse than in August."** This is the most valuable thing
-the underlying measurements could support, and it needs persisted history that
-does not exist yet — `ChartStore` is RAM-only and nothing thermal survives a
-quit. THERMAL.md records the same gap. It is the natural follow-up and needs
-persistence to land first.
+*"Your cooling is 18 % worse than in August"* lived here for three versions
+and is now question 5. What remains out of reach:
 
-Until then, the honest scope is *this moment*, which is what the window says.
+- **Comparing your Mac with anyone else's.** `R`'s reference is a sensor
+  inside the case and its denominator is whatever this machine powers; the
+  trend is self-comparison, forever.
+- **Naming the cause rather than ranking it.** Dust is the usual reason at a
+  slow pace, dried paste the next — but the app cannot see inside the machine
+  and its copy never claims to.
+- **Any of this on a Mac with no power key or no airflow sensor.** No watts
+  or no reference means no quotient; the row says which is missing rather
+  than collecting a baseline forever.
+- **A baseline built faster than time passes.** Readings record only while
+  the app runs and the machine holds steady, so a Mac used three hours a day
+  builds its baseline three times slower than one left on — and the first
+  verdict cannot arrive before day 44 on any machine, because the epochs need
+  a month of distance to mean anything.

@@ -175,9 +175,11 @@ the 5 W floor, so a deeply idle Mac may legitimately show `—`.
 - **Not affected by room temperature in the obvious way.** A hotter room raises
   the die *and* the airflow reference, so `R` moves less than you would expect —
   which is a feature, but it means `R` is not a proxy for how hot your room is.
-- **Not currently tracked over time.** Ice Cube keeps no history across
-  launches, so the degradation use case — the most valuable one — is not yet
-  available. It is the natural follow-up and needs persistence to land first.
+- **Not a continuous record.** Ice Cube keeps history now (see below), but
+  only of *settled* readings, and only while it is running — a persisted curve
+  keeps driving the fans with the app closed, and nothing is recorded during
+  those hours. Whole days can pass with nothing recorded. That is the settle
+  rule working, not a gap in the data.
 
 ## How to read it
 
@@ -192,6 +194,82 @@ At a **comparable fan speed**, on **your own machine**:
 The fan speed caveat is not optional. `R` genuinely differs at 2300 RPM and
 6800 RPM, so comparing a reading taken under Quiet with one taken under Max
 tells you about the presets, not about your hardware.
+
+## Tracking it over time
+
+Since 2026-08-08 the degradation use case is real: Ice Cube persists settled
+readings and the **Cooling History** window compares this machine with its own
+past. Everything below is the small print that keeps that comparison honest.
+
+### What is recorded
+
+One record per settled stretch, at most one per five minutes — not one per
+second: a Mac that idles quietly for ten minutes produces two readings with
+their evidence attached, rather than six hundred copies of the same number.
+The recording bar is deliberately **higher** than the display bar: at least
+10 W (the 8.6–9.0 W rows above showed 9 % spread — a datum that noisy cannot
+support a 10 % claim), a dense settle window, and fans that held one speed
+through it, because fan speed is the axis every comparison is grouped by.
+
+### Where it lives, and what is in it
+
+`~/Library/Application Support/IceCube/cooling-history.json`, in the clear.
+Each record holds when it was taken, the °C/W figure, the die, airflow and
+watts it was computed from, and the fan speed. There is nothing in this file
+that is about you: it is a record of how well one machine sheds heat, it never
+leaves the Mac, and it is deliberately absent from the diagnostics export —
+that file goes on public GitHub issues, and a months-long timestamp series is
+a record of when a machine was in use. A salted hash (never the serial itself)
+ties the file to this Mac, so a history that follows `~/Library` through
+Migration Assistant onto a different machine is set aside rather than merged —
+`R` is not comparable between machines, including a warranty replacement of
+the same model.
+
+### Retention
+
+Raw readings live a week; day-by-day summaries (median, quartiles, count per
+fan-speed band) live two years. If the summary cap ever binds, thinning starts
+*after* the oldest ninety days — the oldest readings are the baseline, and a
+history that evicts its own baseline first has thrown away the only thing it
+was for. The file is bounded for life at well under a megabyte in ordinary
+use.
+
+### How the verdict is computed
+
+Medians, never means — every way the settle rule can be fooled produces an
+`R` that is too *high* (the 1.89 °C/W transient above), and a mean is dragged
+in exactly the direction of the claim this feature most fears getting wrong.
+The last 14 days are compared against the **earliest** qualifying 14-day
+window at least 30 days back and at most a year old — earliest by rule, so
+the baseline is a pre-specified choice rather than a search for a result —
+and only within one fan-speed band: 1.04–1.13 °C/W at 3550 RPM against
+0.89–0.93 at 5950 is a spread from fan speed alone larger than the
+degradation being looked for, so Ice Cube will not average across bands to
+produce an answer. A slow change is not called until it clears **10 %**
+(~4× the measured noise); a one-day jump is not called until it clears 15 %
+against the same band's own recent days. Anything less reports as steady or
+as a refusal that names what is missing. **Mark as Cleaned** records a
+boundary the baseline never spans, so a repaste does not read as
+"improved" forever after.
+
+### What it still cannot tell you
+
+- **Why.** A rising trend reports that the number moved and by how much; dust
+  is the usual cause at that pace and dried paste the next, but the app
+  cannot see inside the machine and its copy never claims to.
+- **The confounds.** A warmer room across the same months moves it a little.
+  A change in what the machine powers moves it more: the denominator is
+  whole-system watts, so a display *unplugged* since the baseline reads as
+  "worse" and one *plugged in* reads as "better", without anything thermal
+  changing. The window's hover text names the applicable one on every
+  verdict.
+- **Other Macs.** Unchanged from the limits above: the trend compares one
+  machine with itself, ever.
+
+The per-machine noise-value curve this file closes on — how much cooling a
+given fan speed buys *on your Mac* — is now a matter of drawing it rather
+than measuring it again: every record already carries the fan speed it was
+taken at.
 
 ## Contributing a reading
 

@@ -138,6 +138,17 @@ of 20 — its only silicon input the two GPU dies — and ran that way for 13 ho
       macOS and `icecube-diag` confirms `auto`.
 - [ ] Reinstall works after that without a reboot.
 
+## Cooling history
+
+- [ ] After a stretch of steady use, the Sensors window's Cooling section
+      shows a trend line and the Cooling History window shows readings; quit
+      and relaunch Ice Cube — the reading count survives.
+- [ ] **Clear History** empties it after its confirmation, and the verdict
+      returns to "Building a baseline" / "No readings yet".
+- [ ] `ICECUBE_SIMULATED=1` with `ICECUBE_SIMULATED_HISTORY=jump` shows the
+      abrupt-change verdict with the warning triangle, and the real
+      `cooling-history.json` is untouched afterwards.
+
 ---
 
 ## Recording the result
