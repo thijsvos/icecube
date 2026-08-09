@@ -35,15 +35,13 @@ struct CoolingHistoryCodingTests {
     private func decode(
         _ data: Data,
         model: String = "Mac14,9",
-        fanCount: Int = 2,
         simulated: Bool = false,
         serial: String? = "C02TESTSERIAL"
     )
         -> CoolingHistory.LoadOutcome
     {
         CoolingHistory.decode(
-            data, modelIdentifier: model, fanCount: fanCount,
-            isSimulated: simulated, serialNumber: serial
+            data, modelIdentifier: model, isSimulated: simulated, serialNumber: serial
         )
     }
 
@@ -98,8 +96,11 @@ struct CoolingHistoryCodingTests {
     @Test("A history from another Mac is never merged")
     func anotherMacsHistoryIsNeverMerged() throws {
         let data = try makeHistory().encoded()
+        // The model identifier carries the fan configuration with it, so a
+        // different Mac is caught here; fanCount is deliberately not matched
+        // (it is unknowable at load time and a read glitch must not
+        // quarantine a year of history).
         #expect(decode(data, model: "Mac15,6") == .startFresh(.machineChanged))
-        #expect(decode(data, fanCount: 1) == .startFresh(.machineChanged))
         // A same-model restore — a warranty replacement — is caught by the
         // salted serial hash, because that new Mac is precisely the one most
         // likely to inherit a degraded baseline it does not deserve.

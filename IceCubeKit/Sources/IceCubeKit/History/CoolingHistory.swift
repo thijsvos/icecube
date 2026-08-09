@@ -56,14 +56,19 @@ public struct MachineFingerprint: Sendable, Codable, Equatable {
     /// enforced when the current serial could actually be read. An IOKit
     /// read that fails for one launch must degrade to "same machine", not
     /// destroy the history it was meant to protect.
+    ///
+    /// `fanCount` and `fanMaxRPM` are stored but **not matched**, for the
+    /// same fragility reason as each other: the model identifier already
+    /// implies the fan configuration, the fans are only known once a
+    /// snapshot exists (not at load time), and a per-key `Mn`/`Mx` read
+    /// glitch must not quarantine a year of history. The serial hash is the
+    /// strong discriminator.
     public func matches(
         modelIdentifier: String,
-        fanCount: Int,
         isSimulated: Bool,
         serialNumber: String?
     ) -> Bool {
         guard self.modelIdentifier == modelIdentifier,
-              self.fanCount == fanCount,
               self.isSimulated == isSimulated
         else { return false }
         guard let serialSalt, let serialHash, let serialNumber else { return true }
@@ -253,7 +258,6 @@ public struct CoolingHistory: Sendable, Codable, Equatable {
     public static func decode(
         _ data: Data,
         modelIdentifier: String,
-        fanCount: Int,
         isSimulated: Bool,
         serialNumber: String?
     ) -> LoadOutcome {
@@ -270,7 +274,6 @@ public struct CoolingHistory: Sendable, Codable, Equatable {
         }
         guard history.machine.matches(
             modelIdentifier: modelIdentifier,
-            fanCount: fanCount,
             isSimulated: isSimulated,
             serialNumber: serialNumber
         ) else {

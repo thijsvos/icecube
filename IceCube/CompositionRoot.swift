@@ -24,6 +24,10 @@ enum CompositionRoot {
         let isSimulated: Bool
         let helper: HelperManager
         let presets: PresetStore
+        /// Persisted cooling records + trend. Real file normally; a per-run
+        /// temp file seeded with fabricated months when simulated, so the
+        /// trend UI is demonstrable while the real history is untouchable.
+        let history: CoolingHistoryStore
         /// Where app-level preferences go. Real `UserDefaults` normally; an
         /// in-memory store when simulated, so a simulated session cannot steer
         /// the real app's next launch.
@@ -74,6 +78,12 @@ enum CompositionRoot {
             isSimulated: false,
             helper: HelperManager(),
             presets: PresetStore(),
+            history: CoolingHistoryStore(identity: .init(
+                modelIdentifier: HostInfo.modelIdentifier(),
+                isSimulated: false,
+                // Read once, hashed with a per-file salt, never stored raw.
+                serialNumber: HostInfo.serialNumber()
+            )),
             defaults: UserDefaults.standard,
             processes: SystemProcessSampler()
         )
@@ -91,9 +101,19 @@ enum CompositionRoot {
     /// while the owner's real `presets.json` is untouchable.
     private static func simulated() -> Graph {
         let defaults = SimulatedEnvironment.Defaults()
-        let presetsFile = FileManager.default.temporaryDirectory
+        let sandbox = FileManager.default.temporaryDirectory
             .appendingPathComponent("IceCubeSimulated-\(ProcessInfo.processInfo.processIdentifier)")
-            .appendingPathComponent("presets.json")
+
+        // Months of fabricated records, or the trend could only ever show
+        // "collecting" — the `seedSimulatedDecisions` reasoning. The story is
+        // selectable so every verdict state can be seen and screenshot:
+        //   ICECUBE_SIMULATED_HISTORY=stable|rising|jump|improved|baseline|sparse
+        // The seed applies only because the per-run sandbox has no file; the
+        // live graph passes no seed, so fabricated readings cannot reach a
+        // real install by any code path.
+        let story = SimulatedCoolingHistory.story(
+            fromEnvironment: ProcessInfo.processInfo.environment["ICECUBE_SIMULATED_HISTORY"]
+        )
 
         return Graph(
             provider: MockSMCProvider(),
@@ -108,7 +128,19 @@ enum CompositionRoot {
                 blocker: { nil },
                 powerSource: SimulatedEnvironment.PowerSource()
             ),
-            presets: PresetStore(file: presetsFile),
+            presets: PresetStore(file: sandbox.appendingPathComponent("presets.json")),
+            history: CoolingHistoryStore(
+                file: sandbox.appendingPathComponent("cooling-history.json"),
+                identity: .init(
+                    // The mock's identity, not this Mac's: a simulated run
+                    // reads no real system state, and the fingerprint's
+                    // isSimulated flag keeps the file unloadable by a real run.
+                    modelIdentifier: SimulatedCoolingHistory.machine.modelIdentifier,
+                    isSimulated: true,
+                    serialNumber: nil
+                ),
+                seed: SimulatedCoolingHistory.seed(story, endingAt: Date())
+            ),
             defaults: defaults,
             processes: MockProcessSampler()
         )
