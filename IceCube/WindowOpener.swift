@@ -37,6 +37,9 @@ enum WindowOpener {
         static let setup = "setup"
         /// "Why is it hot?" — the live diagnosis.
         static let diagnosis = "diagnosis"
+
+        /// The cooling-history chart and its controls.
+        static let coolingHistory = "cooling-history"
     }
 
     /// The windows the menu bar may close on the user's behalf.
@@ -66,7 +69,9 @@ enum WindowOpener {
     /// ``ID/diagnosis`` is a member: it holds nothing and commits nothing — it
     /// is a live readout of this instant — and closing it is what stops the
     /// per-process sampling and discards the process names it collected.
-    static let closableFromMenuBar: Set<String> = [ID.sensors, ID.settings, ID.about, ID.diagnosis]
+    static let closableFromMenuBar: Set<String> = [
+        ID.sensors, ID.settings, ID.about, ID.diagnosis, ID.coolingHistory,
+    ]
 
     /// Which currently-open windows to close before `summoning` goes on screen.
     ///

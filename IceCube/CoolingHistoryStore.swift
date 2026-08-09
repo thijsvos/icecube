@@ -100,6 +100,18 @@ final class CoolingHistoryStore {
         persist()
     }
 
+    /// Total readings on file — the copy layer's progress denominator.
+    ///
+    /// Counted through `CoolingTrend.seriesByBand`, not `records + days`:
+    /// a retained day can exist in both tiers at once (folded but not yet
+    /// pruned), and summing the tiers would double-count exactly the recent
+    /// days a user watches most closely.
+    func readingCount(now: Date = Date()) -> Int {
+        guard let history else { return 0 }
+        return CoolingTrend.seriesByBand(history, now: now)
+            .values.joined().map(\.count).reduce(0, +)
+    }
+
     /// Records an "I cleaned it" boundary; the trend's baseline never spans one.
     func markServiced(at date: Date) {
         guard !isReadOnly, history != nil else { return }

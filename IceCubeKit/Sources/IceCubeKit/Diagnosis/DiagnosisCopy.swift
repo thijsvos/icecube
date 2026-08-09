@@ -147,8 +147,8 @@ public enum DiagnosisCopy {
                 hover: "Below \(whole(ThermalDiagnosis.idleWattsCeiling)) W this Mac is not working "
                     + "hard — measured at 7.9 W at true idle. A die this hot on that little power "
                     + "points at airflow rather than work: a blocked vent, a stopped fan, or dust "
-                    + "on the heatsink. Ice Cube keeps no history across launches, so this is the "
-                    + "only cooling judgement it will make."
+                    + "on the heatsink. The cooling trend below says whether this is new or has "
+                    + "been building for months."
             )
         }
     }

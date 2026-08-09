@@ -73,21 +73,25 @@ nonisolated enum SensorsWindowMetrics {
         hasDecisions ? 28 + 20 + decisionSectionHeight : 0
     }
 
-    /// The Cooling section: two value rows plus its explanatory caption.
+    /// The Cooling section: three value rows plus its explanatory caption.
     ///
     /// Unconditional, unlike the timeline — the section is always drawn, and
     /// when there is no reading it explains *why* rather than disappearing, so
     /// there is no empty-box case to avoid paying for.
     ///
-    /// Two 22 pt value rows, a single-line 16 pt caption, and the spacing
-    /// between them.
+    /// Three 22 pt value rows, a single-line 16 pt caption, and the spacing
+    /// between them. Raised from 76 on 2026-08-08 by exactly the 28 pt the
+    /// trend row and its gap added (`maximumFrameHeight` rose in step, per
+    /// that constant's own precedent).
     ///
     /// The caption is deliberately one line with the rest on hover. At three
     /// wrapped lines this section cost 168 pt of chrome, which pushed a
     /// 24-row Mac permanently against `maximumFrameHeight` — the sensor list
     /// is what this window is for, and it should not be squeezed to hold
-    /// prose that a tooltip and `docs/THERMAL.md` carry better.
-    static let coolingSectionHeight: CGFloat = 76
+    /// prose that a tooltip and `docs/THERMAL.md` carry better. The trend
+    /// gets one line and a chevron for the same reason: the chart it points
+    /// at is 150+ pt of chrome, which is why it has its own window.
+    static let coolingSectionHeight: CGFloat = 104
 
     /// Everything in the list that is not a data row: 10 pt top inset, three
     /// 28 pt `Section` headers, the two 20 pt gaps between them, 10 pt bottom
@@ -124,16 +128,17 @@ nonisolated enum SensorsWindowMetrics {
     /// column rather than a sensor list, however many sensors there are.
     ///
     /// Raised from 860 on 2026-08-02, by exactly the 124 pt the Cooling section
-    /// and its header/gap added. The judgement this number encodes is about how
+    /// and its header/gap added; raised again 2026-08-08 by the 28 pt of the
+    /// trend row. The judgement this number encodes is about how
     /// long the *list* may get before the proportions look wrong — and chrome is
-    /// not list, so leaving it at 860 while adding chrome would have quietly
+    /// not list, so leaving it fixed while adding chrome would have quietly
     /// shortened the sensor list this window exists for. A 24-row Mac had
     /// started clamping.
     ///
     /// This is an aesthetic bound, not a fit-on-screen one: `frameHeight` also
     /// clamps to `availableHeight - screenMargin`, which is 1010 pt on the
     /// owner's 1130 pt visible frame and governs on anything smaller.
-    static let maximumFrameHeight: CGFloat = 984
+    static let maximumFrameHeight: CGFloat = 1012
 
     /// How much of the usable height to leave alone. `visibleFrame` has
     /// already excluded the menu bar and the Dock (measured here: 1169 pt of
