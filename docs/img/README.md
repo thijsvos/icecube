@@ -34,3 +34,8 @@ Guidance:
 - Use **real** data for `popover.png` — run a build or an export first so the
   charts show activity. Idle flatlines undersell the app badly. Simulated
   mode (`ICECUBE_SIMULATED=1`) is fine for the curve editor and sensors.
+- `cooling-history.png` — **not yet captured.** The Cooling History window
+  under `ICECUBE_SIMULATED=1 ICECUBE_SIMULATED_HISTORY=rising`, which seeds
+  months of physically-correct data (the medians come from THERMAL.md's
+  measured table; a *live* simulated recording would slope backwards). Not
+  linked from README.md until it exists.

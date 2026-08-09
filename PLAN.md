@@ -346,6 +346,46 @@ The feature found its own motivating case while being built: two orphaned `yes`
 processes had been pinning 100 % CPU for 2 h 52 m, holding the fans at 6800 RPM,
 with no screen in the app able to name them.
 
+### Cooling history — the degradation tracker (2026-08-08)
+
+THERMAL.md's "the most valuable one" follow-up, landed: settled °C/W readings
+persist across launches (`~/Library/Application Support/IceCube/
+cooling-history.json`), are filed under fan-speed bands, and feed a verdict —
+*"cooling is 18 % worse than in June"*, its post-cleaning twin, an abrupt-change
+warning, or a refusal that names what is missing. The discipline is the
+feature: the recording bar sits **above** the display bar (10 W floor, dense
+window, fans holding one speed), the trend runs on day-band **medians** (the
+settle rule's rare failures all push `R` up — the 1.89 °C/W transient — so a
+mean drifts toward exactly the false claim this must never make), the baseline
+is the *earliest* qualifying window by rule rather than a search, comparisons
+never cross a fan band or a **Mark as Cleaned** boundary, and nothing is
+called under 10 % (~4× the measured noise). The file is fingerprinted with a
+salted serial hash so Migration Assistant — including a same-model warranty
+replacement — sets a foreign history aside instead of inheriting its
+degradation; a newer schema loads read-only rather than being overwritten; and
+history is deliberately absent from the diagnostics export (a timestamp series
+is an attendance record). Surfaces: the Diagnose window's fifth question (the
+claim its own doc had filed under "not yet possible"), a trend row in the
+Sensors window's Cooling section (+28 pt, metrics updated per that file's
+convention), and the Cooling History window — one band at a time, dots not
+lines across gaps, axis frozen per window-open, drawn from
+`CoolingTrend.seriesByBand`, the same data the verdict judged. Landing it
+surfaced and fixed two shipped defects: the settle window was quietly ~40 s
+against five documented claims of 20 (the simulated model settled on 0.9 % of
+ticks — the °C/W readout was barely demonstrable), and a backward clock step
+wedged the tracker's window for the life of the process. The simulated model
+gained flat-holds and sustained-load buckets (69 % of ticks now settle, both
+fan bands, measured) plus seeded histories
+(`ICECUBE_SIMULATED_HISTORY=stable|rising|jump|improved|baseline|sparse`) so
+every verdict state is demonstrable and screenshot-able with no hardware.
+~150 new tests across the recorder gates, retention invariants (whole-day
+pruning exists because the outlier test caught mid-day pruning re-folding a
+day down to its own worst transient), the verdict's refusals, the file's
+custody, and the copy's honesty rules — mutation-verified per house practice.
+Deferred, deliberately: the R-vs-RPM "what the noise buys you" chart (the
+schema already carries everything it needs) and any notification for any
+trend state (#81's lesson stands).
+
 ## 7. Risks & mitigations
 - **SMC keys vary wildly per model** → curated map + fallback enumeration + community diagnostics pipeline (§3.3). Biggest ongoing cost; design for it.
 - **Free-Apple-ID helper approval unproven** → Phase 0.5 spike with the fallback documented *before* it runs (manual `sudo launchctl bootstrap` install for Phases 3–5).

@@ -41,6 +41,7 @@ dependencies**; small footprint is a design goal, not an accident.
 | Curve keeps running at boot, app closed — daemon-side, opt-in | ✅ |
 | Sensors browser (every SMC key, live) + JSON diagnostics export | ✅ |
 | Power draw, and a cooling-efficiency index in °C/W — *is it hot, or is cooling failing?* | ✅ |
+| Cooling history: whether this Mac sheds heat as well as it did in June — persisted, per fan-speed band, with a verdict that refuses when the data cannot carry it | ✅ |
 | **"Why is it hot?"** — per-process watts, which silicon leads, and whether your curve has anything left | ✅ |
 | Decision timeline: the charts mark *why* the fans moved, in the daemon's words | ✅ |
 | CSV history export, temperature alerts, launch at login, °C/°F | ✅ |
@@ -132,8 +133,14 @@ shed heat — 95 °C means one thing while exporting video and another while idl
 Ice Cube reads the machine's power draw and reports **degrees per watt**: how much
 the chip heats up for each watt the Mac pulls. Unlike temperature,
 that number is comparable to itself over time, so a slow rise across months is
-dust or dried paste rather than a busier week. Ice Cube does not keep that
-history for you yet — note a reading down now and again.
+dust or dried paste rather than a busier week. Ice Cube keeps that history now:
+every reading taken while the machine is steady is filed under the fan speed it
+was taken at, and after a few weeks the **Cooling History** window will tell you
+whether cooling has drifted — *"cooling is 18 % worse than in June"* — or refuse,
+if it has not collected enough readings at a comparable fan speed to say so
+honestly. It refuses more often than it answers, which is the same discipline
+the live number has. There is a **Mark as Cleaned** button for the day you clear
+the vents, and the trend is what tells you whether it worked.
 
 It is shown only when the machine has held steady for 20 seconds, because the
 figure is meaningless mid-transient, and it compares your Mac to *its own past* —
@@ -340,7 +347,8 @@ simulated run (`ICECUBE_SIMULATED=1`) never makes the request at all.
 1. Ice Cube popover → Settings… → Fan Control Setup → **Turn Off Fan Control**
    (hands the fans back to macOS and removes the background service).
 2. Quit Ice Cube, delete `/Applications/Ice Cube.app`.
-3. Optional leftovers: `~/Library/Application Support/IceCube` (your presets),
+3. Optional leftovers: `~/Library/Application Support/IceCube` (your presets
+   and cooling history),
    and your settings with `defaults delete io.github.thijsvos.icecube`
    and `sudo rm -rf "/Library/Application Support/IceCube"` (the daemon's
    persisted config).
