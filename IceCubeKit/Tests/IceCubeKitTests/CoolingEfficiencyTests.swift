@@ -147,6 +147,35 @@ struct CoolingEfficiencyTests {
         #expect(!CoolingEfficiency.isSettled(window))
     }
 
+    /// The regression that motivated the trailing-window rule. `Tracker`
+    /// retains **twice** the settle window of samples — so a full window
+    /// survives any poll cadence — and until 2026-08-08 settledness was
+    /// judged on that whole buffer. Every documented "20 seconds" (THERMAL.md,
+    /// the row caption, the diagnosis copy) was in truth ~40, and the
+    /// simulated thermal model settled on 0.9 % of ticks.
+    @Test("A disturbance older than the settle window does not veto a machine steady since")
+    func oldDisturbanceDoesNotVeto() {
+        var series = (0 ... 15).map { sample(Double($0), die: 78, watts: 45) }
+        series += (16 ... 40).map { sample(Double($0), die: 49, watts: 20) }
+        #expect(
+            CoolingEfficiency.isSettled(series),
+            "the trailing 20 s are steady; what happened 25 s ago is not this window's business"
+        )
+    }
+
+    /// The twin that keeps the fix honest in the other direction: the window
+    /// must still be a full ``CoolingEfficiency/settleWindow``, not merely
+    /// "steady lately".
+    @Test("Steady for less than the window since a disturbance is still unsettled")
+    func recentDisturbanceStillVetoes() {
+        var series = (0 ... 15).map { sample(Double($0), die: 78, watts: 45) }
+        series += (16 ... 30).map { sample(Double($0), die: 49, watts: 20) }
+        #expect(
+            !CoolingEfficiency.isSettled(series),
+            "14 s of steadiness is not 20, however calm it looks"
+        )
+    }
+
     // MARK: - The windowed result
 
     @Test("An unsettled window yields no resistance at all")
@@ -158,6 +187,17 @@ struct CoolingEfficiencyTests {
     func settledYieldsTheMean() throws {
         let r = try #require(CoolingEfficiency.settledResistance(steady(die: 60, ambient: 40, watts: 20)))
         #expect(abs(r - 1.0) < 0.001)
+    }
+
+    /// The average must cover the same samples the settle judgement covered.
+    /// Averaging everything remembered would let a hot prelude — 25 s old,
+    /// already excused by the settle rule — leak into the number itself.
+    @Test("The settled resistance is computed from the trailing window, not everything remembered")
+    func settledResistanceUsesTheTrailingWindow() throws {
+        var series = (0 ... 15).map { sample(Double($0), die: 100, watts: 45) }
+        series += (16 ... 40).map { sample(Double($0), die: 60, ambient: 40, watts: 20) }
+        let r = try #require(CoolingEfficiency.settledResistance(series))
+        #expect(abs(r - 1.0) < 0.001, "the hot prelude must not leak into the average, got \(r)")
     }
 
     /// Averaging the inputs and averaging the quotients are different
@@ -278,6 +318,63 @@ struct CoolingEfficiencyTrackerTests {
         }
         #expect(!tracker.isSettled)
         #expect(tracker.resistance == nil)
+    }
+
+    /// End-to-end pin of the number every doc quotes. Until 2026-08-08 the
+    /// tracker judged its whole 40 s buffer, so a machine had to hold steady
+    /// for twice the documented time before `R` appeared.
+    @Test("The window re-settles the documented 20 seconds after a load step, not 40")
+    func resettlesInTheDocumentedTime() {
+        var tracker = CoolingEfficiency.Tracker()
+        for i in 0 ... 29 {
+            tracker.ingest(snapshot(Double(i), die: 45, ambient: 40, watts: 12))
+        }
+        // Load lands: die and power jump, then hold perfectly steady.
+        for i in 30 ... 51 {
+            tracker.ingest(snapshot(Double(i), die: 78, ambient: 40, watts: 45))
+        }
+        #expect(
+            tracker.isSettled,
+            "21 s of steadiness after the step is more than the documented 20"
+        )
+    }
+
+    /// 2026-08-08: the trim was one-sided (`date < cutoff`), so a clock that
+    /// stepped backwards left future-dated samples the trim could never
+    /// reach. `first` stayed the stale pre-step sample, the window's span
+    /// read negative, and `R` showed `—` for the rest of the process's life —
+    /// no error, no log line.
+    @Test("A backward clock step cannot wedge the window permanently")
+    func backwardClockStepRecovers() throws {
+        var tracker = CoolingEfficiency.Tracker()
+        for i in 0 ... 30 {
+            tracker.ingest(snapshot(Double(i), die: 60, ambient: 40, watts: 20))
+        }
+        #expect(tracker.isSettled)
+
+        // The clock steps back ten minutes; steady polling continues.
+        for i in 0 ... 30 {
+            tracker.ingest(snapshot(Double(i) - 600, die: 60, ambient: 40, watts: 20))
+        }
+        #expect(
+            tracker.isSettled,
+            "steady readings after the step must re-earn the window, not be vetoed forever"
+        )
+        #expect(tracker.resistance != nil)
+
+        // The invariant behind the fix: the buffer never contains the future.
+        // Samples from the abandoned timeline sit where an age-only trim can
+        // never reach them, and a buffer that is not chronological makes the
+        // trailing-window walk answer differently depending on how the step
+        // interleaved with a transient.
+        let mirror = Mirror(reflecting: tracker)
+        let samples = try #require(mirror.children.first { $0.label == "samples" }?
+            .value as? [CoolingEfficiency.Sample])
+        let newest = epoch.addingTimeInterval(-570)
+        #expect(
+            samples.allSatisfy { $0.date <= newest },
+            "every sample dated after the last snapshot must have been dropped"
+        )
     }
 
     /// This runs once per poll for the life of the app. It must not grow.

@@ -105,46 +105,77 @@ public enum CoolingEfficiency {
         return delta / watts
     }
 
-    /// Whether a window of samples is stable enough for ``resistance(dieCelsius:ambientCelsius:watts:)``
-    /// to describe the cooling rather than a transient.
+    /// The shortest trailing run of samples spanning at least ``settleWindow``,
+    /// or `nil` when the series is too short to contain one.
     ///
-    /// Requires all four:
+    /// Settledness is judged on this suffix, **not** on everything a caller
+    /// happens to remember. The rule is "steady for the last 20 seconds", and
+    /// a buffer that remembers more than 20 seconds must not quietly raise
+    /// the bar. It did exactly that until 2026-08-08: ``Tracker`` retains
+    /// twice the window (so a full window survives any poll cadence), the
+    /// whole buffer was evaluated, and every documented "20 seconds" was in
+    /// truth ~40 — enough that the simulated thermal model settled on 0.9 %
+    /// of its ticks.
+    private static func settleSuffix(_ samples: [Sample]) -> ArraySlice<Sample>? {
+        guard let last = samples.last else { return nil }
+        let windowStart = last.date.addingTimeInterval(-settleWindow)
+        // Walk back from the end to the first sample at or before the window
+        // boundary, so the suffix is the shortest that still spans the full
+        // window at any poll cadence.
+        var start = samples.count - 1
+        while start > 0, samples[start].date > windowStart {
+            start -= 1
+        }
+        guard samples[start].date <= windowStart else { return nil }
+        return samples[start...]
+    }
+
+    /// Whether the trailing ``settleWindow`` of a series is stable enough for
+    /// ``resistance(dieCelsius:ambientCelsius:watts:)`` to describe the
+    /// cooling rather than a transient.
+    ///
+    /// Requires all four, over that trailing window:
     /// - the window spans at least ``settleWindow`` seconds,
     /// - every sample is above ``minimumWatts``,
     /// - power stays within ``powerTolerance`` of its mean,
     /// - the die stays within ``temperatureToleranceCelsius`` of its mean.
     ///
+    /// A disturbance older than the window does not veto a machine that has
+    /// held steady for the full window since — that is what "the last
+    /// 20 seconds" means.
+    ///
     /// Deliberately conservative in one direction only. A false "unsettled"
     /// costs a dash on screen; a false "settled" publishes a number that
     /// describes nothing, and a user cannot tell the difference by looking.
     public static func isSettled(_ samples: [Sample]) -> Bool {
-        guard samples.count >= 2 else { return false }
-        guard let first = samples.first, let last = samples.last else { return false }
-        guard last.date.timeIntervalSince(first.date) >= settleWindow else { return false }
-        guard samples.allSatisfy({ $0.watts.isFinite && $0.dieCelsius.isFinite }) else { return false }
-        guard samples.allSatisfy({ $0.watts >= minimumWatts }) else { return false }
+        guard let window = settleSuffix(samples) else { return false }
+        guard window.allSatisfy({ $0.watts.isFinite && $0.dieCelsius.isFinite }) else { return false }
+        guard window.allSatisfy({ $0.watts >= minimumWatts }) else { return false }
 
-        let meanWatts = samples.reduce(0) { $0 + $1.watts } / Double(samples.count)
+        let meanWatts = window.reduce(0) { $0 + $1.watts } / Double(window.count)
         guard meanWatts > 0 else { return false }
-        let powerDrift = samples.allSatisfy { abs($0.watts - meanWatts) / meanWatts <= powerTolerance }
+        let powerDrift = window.allSatisfy { abs($0.watts - meanWatts) / meanWatts <= powerTolerance }
         guard powerDrift else { return false }
 
-        let meanDie = samples.reduce(0) { $0 + $1.dieCelsius } / Double(samples.count)
-        return samples.allSatisfy { abs($0.dieCelsius - meanDie) <= temperatureToleranceCelsius }
+        let meanDie = window.reduce(0) { $0 + $1.dieCelsius } / Double(window.count)
+        return window.allSatisfy { abs($0.dieCelsius - meanDie) <= temperatureToleranceCelsius }
     }
 
-    /// The window's `R`, or `nil` if it is not settled.
+    /// The trailing window's `R`, or `nil` if it is not settled.
     ///
     /// Averages the inputs before dividing rather than averaging the per-sample
     /// quotients. The two differ, and this order is the correct one: `R` is
     /// defined on steady-state means, and averaging quotients would let one
     /// low-power sample dominate the result.
+    ///
+    /// Averages the **same trailing window** ``isSettled(_:)`` judged. Anything
+    /// older was excused by the settle rule and must not leak into the number.
     public static func settledResistance(_ samples: [Sample]) -> Double? {
-        guard isSettled(samples) else { return nil }
-        let count = Double(samples.count)
-        let die = samples.reduce(0) { $0 + $1.dieCelsius } / count
-        let ambient = samples.reduce(0) { $0 + $1.ambientCelsius } / count
-        let watts = samples.reduce(0) { $0 + $1.watts } / count
+        guard isSettled(samples), let window = settleSuffix(samples) else { return nil }
+        let count = Double(window.count)
+        let die = window.reduce(0) { $0 + $1.dieCelsius } / count
+        let ambient = window.reduce(0) { $0 + $1.ambientCelsius } / count
+        let watts = window.reduce(0) { $0 + $1.watts } / count
         return resistance(dieCelsius: die, ambientCelsius: ambient, watts: watts)
     }
 
@@ -169,8 +200,10 @@ public enum CoolingEfficiency {
 
     /// Turns a stream of snapshots into a settled reading, or nothing.
     ///
-    /// Keeps only the trailing ``settleWindow`` plus a small margin — this runs
-    /// at the polling cadence for the life of the app, so it must not grow.
+    /// Retains twice the ``settleWindow`` of samples — enough that a full
+    /// window survives any poll cadence — while settledness itself is judged
+    /// on the trailing window only. This runs at the polling cadence for the
+    /// life of the app, so it must not grow.
     ///
     /// A snapshot missing any of the three inputs (no power key, no airflow
     /// sensor, a failed read) **clears** the window rather than being skipped.
@@ -206,8 +239,16 @@ public enum CoolingEfficiency {
             )
             // Trim to twice the settle window: enough to keep a full window
             // after any plausible cadence, bounded so uptime cannot grow it.
+            //
+            // A sample dated *after* the snapshot is a clock that has stepped
+            // backwards. Left in place it sits at the end of the buffer where
+            // an age-only trim can never reach it, the window's span reads
+            // negative forever, and `R` shows `—` for the rest of the process
+            // with no error and no log line. Dropped instead: the step already
+            // broke the window's continuity, and re-earning it costs the same
+            // 20 seconds any other gap costs.
             let cutoff = snapshot.date.addingTimeInterval(-settleWindow * 2)
-            samples.removeAll { $0.date < cutoff }
+            samples.removeAll { $0.date < cutoff || $0.date > snapshot.date }
         }
     }
 }
