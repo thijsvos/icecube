@@ -15,6 +15,14 @@ struct CurveEditorView: View {
     @State private var pendingOverwrite: String?
     @AppStorage("persistCurve") private var persistCurve = false
 
+    /// Why the window is still here after an Apply — see ``CurveApplyPolicy``.
+    /// `nil` in the ordinary case, because the ordinary case closed the window.
+    @State private var applyResolution: CurveApplyPolicy.Resolution?
+
+    /// Closes this window. Applying a curve is the one thing the editor exists
+    /// to do, so finishing it puts the workbench away.
+    @Environment(\.dismiss) private var dismiss
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
@@ -157,8 +165,30 @@ struct CurveEditorView: View {
                 .primaryGlassButton()
                 .disabled(!canApply)
             }
+            applyNotice
         }
         .controlSize(.small)
+    }
+
+    /// The sentence that explains a window which did not close.
+    @ViewBuilder
+    private var applyNotice: some View {
+        switch applyResolution {
+        case .none, .close:
+            EmptyView()
+        case let .failed(message):
+            Label(message, systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(Theme.warning)
+                .fixedSize(horizontal: false, vertical: true)
+        case let .waiting(message):
+            // Secondary, not `Theme.warning`, for the reason `FanControlSection`
+            // gives: nothing has gone wrong and there is nothing to act on.
+            Label(message, systemImage: "clock")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private var canApply: Bool {
@@ -170,6 +200,15 @@ struct CurveEditorView: View {
         var config = FanConfig.curve(model.curve, persists: persistCurve)
         config.hysteresisCelsius = model.hysteresis
         config.rampPerTick = model.ramp
-        await state.helper.apply(config)
+        // Cleared before the send, not after: a notice left over from the last
+        // attempt sitting under a button the user just pressed again reads as
+        // this attempt's answer, arriving instantly.
+        applyResolution = nil
+        let outcome = await state.helper.apply(config)
+        let resolution = CurveApplyPolicy.resolve(outcome, error: state.helper.lastError)
+        applyResolution = resolution
+        if resolution == .close {
+            dismiss()
+        }
     }
 }

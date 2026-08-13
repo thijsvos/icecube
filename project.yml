@@ -124,6 +124,7 @@ targets:
     sources:
       - IceCubeTests
       - IceCube/CurveEditorModel.swift
+      - IceCube/CurveApplyPolicy.swift
       - IceCube/HelperManager.swift
       - IceCube/HelperDependencies.swift
       - IceCube/FanControlMemory.swift
