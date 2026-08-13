@@ -23,6 +23,9 @@ struct CurveEditorView: View {
     /// to do, so finishing it puts the workbench away.
     @Environment(\.dismiss) private var dismiss
 
+    /// Guards the one-shot seeding below.
+    @State private var didSeed = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
@@ -63,6 +66,24 @@ struct CurveEditorView: View {
         }
         // Sliders, toggle, and buttons all take the ice-blue brand accent.
         .tint(Theme.accent)
+        // Open on the curve the fans are actually running — see
+        // ``CurveEditorSeed`` for why the daemon's report outranks our own
+        // memory of what we sent.
+        //
+        // Once per window lifetime, and unconditionally latched. `.task` runs
+        // again if a window re-appears without being rebuilt, and replacing
+        // points somebody is mid-edit on is a worse failure than opening on
+        // Balanced during the second after a cold launch when no status has
+        // arrived yet — which is exactly what this window did before.
+        .task {
+            guard !didSeed else { return }
+            didSeed = true
+            if let seed = CurveEditorSeed.seed(
+                enforced: state.helper.status, applied: state.helper.lastAppliedConfig
+            ) {
+                model.load(seed)
+            }
+        }
         .onChange(of: state.snapshot) {
             if let die = state.hottestDie {
                 model.updatePreview(die: die)

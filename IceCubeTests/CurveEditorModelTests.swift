@@ -67,6 +67,33 @@ struct CurveEditorModelTests {
         #expect(editor.selected == nil)
     }
 
+    /// Opening the editor on a running curve has to bring the parameters with
+    /// it — points alone would show the right shape being followed with the
+    /// wrong smoothing — and it must go through `load(_:)` so the preview
+    /// follower is reset like any other curve change.
+    @Test("Seeding takes the curve, the hysteresis and the ramp, and resets the preview")
+    func loadSeedAdoptsParameters() {
+        let editor = model()
+        for _ in 0 ..< 40 {
+            editor.updatePreview(die: 95)
+        }
+        #expect(editor.previewFraction > 0.5, "setup: preview should have ramped up")
+
+        editor.load(CurveEditorSeed.Seed(
+            curve: FanCurve(points: [
+                CurvePoint(celsius: 40, fraction: 0),
+                CurvePoint(celsius: 110, fraction: 0),
+            ]),
+            hysteresisCelsius: 7,
+            rampPerTick: 0.25
+        ))
+        editor.updatePreview(die: 95)
+
+        #expect(editor.hysteresis == 7)
+        #expect(editor.ramp == 0.25)
+        #expect(editor.previewFraction == 0, "the follower must be reset, as in load(_ curve:)")
+    }
+
     // MARK: - move(): the monotonic invariant
 
     @Test("A point dragged past its neighbours is clamped between them")
