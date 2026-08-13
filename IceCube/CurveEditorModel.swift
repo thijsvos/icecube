@@ -30,6 +30,17 @@ final class CurveEditorModel {
         preview.reset()
     }
 
+    /// Opens the editor on a curve that is already running, parameters and all.
+    ///
+    /// Delegates the points to ``load(_:)`` rather than assigning them here:
+    /// that method's `preview.reset()` is the whole reason this file has tests,
+    /// and a second copy of the load path is a second place to forget it.
+    func load(_ seed: CurveEditorSeed.Seed) {
+        load(seed.curve)
+        hysteresis = seed.hysteresisCelsius
+        ramp = seed.rampPerTick
+    }
+
     /// Moves point `index` respecting monotonic-x and non-decreasing-y —
     /// live clamping beats "snap back on release".
     func move(_ index: Int, to raw: CurvePoint) {
