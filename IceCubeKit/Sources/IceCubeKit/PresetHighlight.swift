@@ -62,6 +62,30 @@ public enum PresetHighlight {
         return matches(preset, applied: applied)
     }
 
+    /// Whether the fans are running a curve that is **none of these presets** —
+    /// one the user drew in the editor and applied without saving it.
+    ///
+    /// The popover shows it as a lit "Custom" chip, and that chip exists because
+    /// the alternative was worse in both directions. Leaving the row blank says
+    /// "nothing is selected" while Ice Cube is driving the fans, which this type
+    /// already treats as a bug in the boot-resume case. Lighting the preset the
+    /// curve was *edited from* would be a label that says the opposite of what
+    /// it does — the failure `ControlStatus` records this project deleting an
+    /// entire preset over — and clicking it would then silently replace the
+    /// user's curve with the pristine one.
+    ///
+    /// Deliberately false when the curve cannot be seen: no connection at all,
+    /// or a daemon too old to report `activeCurve` to an app that has sent
+    /// nothing this session. "Not one of your presets" is a claim about a curve
+    /// we can read; unknown is not custom.
+    public static func isRunningCustomCurve(
+        among presets: [Preset], enforced: HelperStatus?, applied: FanConfig?
+    ) -> Bool {
+        guard let enforced, enforced.mode == .curve else { return false }
+        guard enforced.activeCurve != nil || applied?.mode == .curve else { return false }
+        return !presets.contains { isActive($0, enforced: enforced, applied: applied) }
+    }
+
     /// The config the highlight should reflect. Callers set it only when it
     /// differs from the current value, so a consistent state causes no churn.
     public static func reconcile(
