@@ -132,6 +132,19 @@ actor FakeSMC: SMCControlPort {
         values["F\(fan)Tg"] = target
     }
 
+    /// Puts a fan into the orphaned state the guardian's recovery ladder exists
+    /// for: mode 0 — nobody driving it — with the fan stopped.
+    ///
+    /// Reachable only by mutating the fake directly. `init` seeds mode 3,
+    /// `setForced` writes mode 1, and every revert path leaves mode 3, so before
+    /// this existed **no test in this file could reach `autoSafetyNet`'s
+    /// `.reparkOrphans` branch at all** — which is how that branch came to
+    /// announce a re-park it had not performed.
+    func setOrphaned(fan: Int) {
+        values["F\(fan)Md"] = Double(FanMode.auto.rawValue)
+        values["F\(fan)Ac"] = 0
+    }
+
     func interleaveWrites() {
         yieldOnWrite = true
     }
@@ -854,7 +867,7 @@ struct DaemonCoreRevertTests {
         try await core.apply(curveConfig(persists: true))
         #expect(store.load() != nil, "a persisting curve is saved when applied")
 
-        await core.shutdown()
+        _ = await core.shutdown()
         let modes = await smc.modeWrites(fan: 0)
         #expect(modes.contains(0) || modes.contains(3), "the fans are still handed back")
         #expect(store.load() != nil, "SIGTERM must NOT cancel the boot promise")
@@ -873,7 +886,7 @@ struct DaemonCoreRevertTests {
         let status = await core.currentStatus()
         #expect(status.mode == .curve)
         #expect(status.activeCurve == FanCurve.balanced, "the app needs this to highlight a preset")
-        await core.shutdown()
+        _ = await core.shutdown()
     }
 
     @Test("Manual mode and auto report no active curve")
@@ -985,7 +998,7 @@ struct DaemonCoreTickTests {
         await core.start()
         #expect(await core.config.mode == .auto)
         #expect(await smc.modeWrites(fan: 0).contains(0))
-        await core.shutdown()
+        _ = await core.shutdown()
     }
 
     /// The Phase 4 boot promise: a persisted curve is live before the app exists.
@@ -996,7 +1009,7 @@ struct DaemonCoreTickTests {
         let core = DaemonCore(port: smc, store: store, capabilities: { .fullWakeCapabilities }, sleep: instantSleep)
         await core.start()
         #expect(await core.config.mode == .curve, "the boot promise")
-        await core.shutdown()
+        _ = await core.shutdown()
     }
 
     /// INVARIANT 7: manual mode is never the persisted default.
@@ -1863,7 +1876,7 @@ struct DarkWakeTests {
         #expect(await core.currentStatus().activeCurve == FanCurve.balanced, "and reported")
         #expect(await smc.modeWrites(fan: 0).isEmpty, "but nothing was written")
         #expect(await core.sleepLatch.isAsleep, "held, pending a display")
-        await core.shutdown()
+        _ = await core.shutdown()
     }
 
     /// Unlike the sleep latch, the boot latch is bounded: no `systemWillSleep`
@@ -1884,7 +1897,7 @@ struct DarkWakeTests {
         await core.heartbeat()
         await core.tick(sleptFor: .zero)
         #expect(await !core.sleepLatch.isAsleep, "a display came up")
-        await core.shutdown()
+        _ = await core.shutdown()
     }
 
     /// An unreadable capability must never be mistaken for a wake — but it must
@@ -2484,5 +2497,204 @@ struct DaemonCoreDecisionTests {
             "the daemon no longer says 'engaged' when a curve engages"
         )
         #expect(engaged.kind == .engaged)
+    }
+}
+
+/// The hand-back paths that used to announce themselves before acting.
+///
+/// Both branches below shared one failure signature, and it is the worst state
+/// this program can reach: **the fans are physically forced (or orphaned) while
+/// the daemon's own narration says they are not.** `record()` ran first and the
+/// writes went out under `try?`, so a firmware that refused produced a decision
+/// timeline — the thing the user reads to find out what happened — describing
+/// the opposite of what happened, with nothing to notice it and nothing to retry.
+///
+/// `revertEverything` has caught, throttled and retried its write failures since
+/// the day it was written, and says so in a comment. These two never did.
+@Suite("DaemonCore — a hand-back is only recorded once it lands")
+struct DaemonHandBackHonestyTests {
+    /// Drives the guardian to `.release`: engage while hot (die ≥ 68 °C with the
+    /// fans not keeping up), then cool below the 58 °C release line.
+    private func engageThenCool(_ smc: FakeSMC, _ core: DaemonCore) async {
+        await smc.setTemperature(75)
+        for _ in 0 ..< 3 { // engageDebounceTicks is 2; one spare
+            await core.tick(sleptFor: .zero)
+        }
+        #expect(await core.currentStatus().guardianActive, "precondition: the guardian took the fans")
+        await smc.setTemperature(40) // below releaseCelsius
+    }
+
+    @Test("A guardian release that the firmware refuses is reported, not announced")
+    func failedGuardianReleaseIsReported() async {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        await engageThenCool(smc, core)
+
+        // The hand-back cannot land: the mode key refuses every write.
+        await smc.breakWrite("F0Md")
+        await core.tick(sleptFor: .zero)
+
+        let events = await core.currentStatus().recentEvents
+        #expect(
+            events.contains { $0.contains("guardian could not release the fans") },
+            "the failure must be recorded — got: \(events.suffix(4))"
+        )
+        #expect(
+            !events.contains { $0.contains("releasing the fans") },
+            "and it must NOT also claim the release happened"
+        )
+        #expect(
+            await core.revertPending,
+            "the deferred-revert retry at the top of tick() has to pick this up, or nothing ever does"
+        )
+    }
+
+    @Test("A guardian release that lands is announced exactly as before")
+    func successfulGuardianReleaseStillReads() async {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        await engageThenCool(smc, core)
+
+        await core.tick(sleptFor: .zero)
+
+        let events = await core.currentStatus().recentEvents
+        #expect(events.contains { $0.contains("releasing the fans") })
+        #expect(await core.revertPending == false, "a clean hand-back leaves nothing pending")
+    }
+
+    @Test("A re-park that lands is recorded in the past tense")
+    func successfulReparkIsRecorded() async {
+        let smc = FakeSMC(temperature: 50) // below keepSpinningCelsius, so the ladder is the orphan one
+        let core = makeCore(smc: smc)
+        await smc.setOrphaned(fan: 0)
+
+        for _ in 0 ..< 3 { // orphanDebounceTicks
+            await core.tick(sleptFor: .zero)
+        }
+
+        let events = await core.currentStatus().recentEvents
+        #expect(
+            events.contains { $0.contains("re-parked, handed back") },
+            "expected the past-tense success line — got: \(events.suffix(4))"
+        )
+        #expect(await smc.modeWrites(fan: 0).contains(3), "and the fan was actually handed back")
+    }
+
+    @Test("A re-park the firmware refuses says so instead of claiming it self-healed")
+    func failedReparkIsReported() async {
+        let smc = FakeSMC(temperature: 50)
+        let core = makeCore(smc: smc)
+        await smc.setOrphaned(fan: 0)
+        await smc.breakWrite("F0Md")
+
+        for _ in 0 ..< 3 {
+            await core.tick(sleptFor: .zero)
+        }
+
+        let events = await core.currentStatus().recentEvents
+        #expect(
+            events.contains { $0.contains("could not re-park orphaned fan(s)") },
+            "expected the failure line — got: \(events.suffix(4))"
+        )
+        #expect(
+            !events.contains { $0.contains("re-parked, handed back") },
+            "must not also claim the self-heal worked: ControlAlertRules mutes that sentence"
+        )
+    }
+}
+
+/// Shutting down is the one path with no second chance.
+///
+/// Everywhere else in the daemon, a revert that fails sets `revertPending` and
+/// the 2 s tick keeps trying until it lands. `shutdown()` cancels that tick as
+/// its first act, so from then on the only retry that exists is the one the
+/// SIGTERM handler performs — and before this suite, `shutdown()` could not even
+/// tell it whether a retry was needed, because it returned `Void`.
+///
+/// The path that makes it matter is **Turn Off Fan Control**:
+/// `SMAppService.unregister()` SIGTERMs the daemon *and* removes the launchd
+/// job. A hand-back that silently failed there left the fans at their last curve
+/// target with the watchdog, the ceiling and the guardian all disarmed, no
+/// process left to fix it, and nothing that would ever demand-launch one.
+@Suite("DaemonCore — shutdown reports whether the fans actually came back")
+struct DaemonShutdownTests {
+    @Test("A clean shutdown reports success and hands the fans back")
+    func cleanShutdownReportsSuccess() async throws {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(manualConfig())
+        #expect(await core.config.mode == .manual, "precondition: we hold the fans")
+
+        #expect(await core.shutdown(), "the hand-back landed, so shutdown says so")
+        #expect(await smc.modeWrites(fan: 0).contains(0), "and it actually wrote the hand-back")
+    }
+
+    @Test("A shutdown whose hand-back the firmware refuses reports failure")
+    func failedShutdownReportsFailure() async throws {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(manualConfig())
+        #expect(await core.config.mode == .manual)
+
+        // The firmware refuses every mode write from here on.
+        await smc.breakWrite("F0Md")
+        await smc.breakWrite("F1Md")
+
+        #expect(
+            await core.shutdown() == false,
+            "the fans are still ours — exiting 0 here is what strands them"
+        )
+        // And the daemon must not have talked itself into believing otherwise:
+        // `.auto` is the state that disarms the watchdog, the ceiling and the
+        // guardian, so claiming it while the fans are forced is the whole bug.
+        #expect(await core.config.mode == .manual, "control is retained, not quietly surrendered")
+        #expect(await core.revertPending, "and the failure is on the record")
+    }
+}
+
+/// Two documented safety invariants that survived deletion with CI green.
+///
+/// Found by mutation, which is the only way this class of gap is ever found: in
+/// both cases a test sat right beside the rule, looked like it covered it, and
+/// asserted something weaker.
+@Suite("DaemonCore — invariants that were documented but not proven")
+struct DaemonUnprovenInvariantTests {
+    /// `connectionInvalidated` reverts on `.manual` OR on a `.curve` that does
+    /// not persist. Every existing test of this path applies `manualConfig()`,
+    /// so the second clause could be deleted outright and nothing failed —
+    /// leaving a non-persisting curve running with nobody supervising it, which
+    /// is the exact condition the rule names.
+    @Test("A non-persisting curve is dropped when the last app disconnects")
+    func nonPersistingCurveRevertsOnDisconnect() async throws {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(curveConfig(persists: false))
+        #expect(await core.config.mode == .curve, "precondition: a curve is running")
+
+        await core.connectionInvalidated()
+
+        #expect(
+            await core.config.mode == .auto,
+            "nobody is supervising the fans any more, and this curve did not ask to outlive the app"
+        )
+    }
+
+    /// The counterweight, and the reason the clause is a condition rather than an
+    /// unconditional revert: a curve that DID ask to outlive the app is the whole
+    /// Phase 4 boot promise.
+    @Test("A persisting curve keeps running when the app quits")
+    func persistingCurveSurvivesDisconnect() async throws {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        try await core.apply(curveConfig(persists: true))
+        #expect(await core.config.mode == .curve)
+
+        await core.connectionInvalidated()
+
+        #expect(await core.config.mode == .curve, "the boot promise is the feature, not a leak")
     }
 }

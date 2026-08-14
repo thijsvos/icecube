@@ -145,12 +145,36 @@ public actor FanWriteSequencer {
     /// fan is attempted, `Ftst` is always cleared, and the failures are reported
     /// afterwards so the caller can escalate instead of believing it succeeded.
     public func revertAllAuto(fans: [Fan]) async throws {
-        guard let suffix = try? await resolveModeKeySuffix(fanIDs: fans.map(\.id)) else { return }
         var firstFailure: Error?
+        // SAFETY: this used to be `guard let suffix = try? … else { return }` — a
+        // silent, non-throwing exit from a `throws` method whose contract is the
+        // paragraph above: failures are reported so the caller can escalate. Every
+        // caller read that silence as a completed hand-back, and `DaemonCore` then
+        // recorded `.auto`, which disarms the watchdog, the ceiling AND the
+        // guardian while the fans stay physically forced — the exact state the
+        // comment on `revertEverything` says must never be reachable.
+        //
+        // It is reachable, not theoretical: `resolveModeKeySuffix` probes with
+        // `port.hasKey`, which is `(try? keyInfo(for:)) != nil` and so returns
+        // false for a connection that just closed as readily as for an absent key
+        // (`SensorReader` documents the same hazard and refuses to use `hasKey`
+        // for that reason). `resetPort()` is not held under the write lock, so a
+        // tick or wake task can close the connection under an in-flight revert.
+        var suffix: String?
+        do {
+            suffix = try await resolveModeKeySuffix(fanIDs: fans.map(\.id))
+        } catch {
+            firstFailure = error
+        }
         for fan in fans {
+            // Parking `Tg` at the floor needs no mode key, so it is attempted
+            // whether or not the suffix resolved: a fan sitting at its minimum is
+            // strictly better than one left at a curve target while we fail to
+            // work out how to hand it back.
             if fan.minRPM > 0 {
                 try? await port.writeDouble("F\(fan.id)Tg", value: fan.minRPM, as: .float)
             }
+            guard let suffix else { continue }
             do {
                 try await port.writeDouble("F\(fan.id)\(suffix)", value: 0, as: .uint8)
             } catch {

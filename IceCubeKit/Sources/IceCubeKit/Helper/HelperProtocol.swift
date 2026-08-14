@@ -122,7 +122,22 @@ public enum HelperConstants {
     ///     behaviour change on every unmapped Mac — and a v25 daemon behind a
     ///     v26 app is still the blind one. Nothing changes on M2, which uses the
     ///     curated map and never reaches this list.
-    public static let protocolVersion = "26"
+    /// v27: a hand-back that did not reach the firmware is no longer recorded as
+    ///     one. Four paths used to discard the write outcome and narrate success:
+    ///     `revertAllAuto` returned silently when the mode key would not resolve;
+    ///     the guardian's `.release` and `.reparkOrphans` branches recorded their
+    ///     sentence *before* writing and then swallowed the result in `try?`; and
+    ///     `shutdown()` returned `Void`, so the SIGTERM handler called `exit(0)`
+    ///     on a failed revert — after cancelling the tick that was supposed to
+    ///     retry it. All four produced the same state: fans physically forced
+    ///     while `config.mode == .auto`, which by construction disarms the
+    ///     watchdog, the temperature ceiling and all three guardian filters.
+    ///
+    ///     **The XPC surface is byte-identical.** The bump is here because a v26
+    ///     daemon behind a v27 app still strands the fans on every one of those
+    ///     paths, and nothing on the app side can see that it did — which is the
+    ///     exact shape `docs/RELEASING.md` wrote this rule for.
+    public static let protocolVersion = "27"
     /// How often the app sends a heartbeat while connected.
     public static let heartbeatInterval: TimeInterval = 5
     /// SAFETY: no heartbeat for this long → the daemon's watchdog reverts to
@@ -130,6 +145,19 @@ public enum HelperConstants {
     public static let watchdogTimeout: TimeInterval = 15
     /// The daemon's control/safety tick.
     public static let tickInterval: TimeInterval = 2
+
+    /// SAFETY: how many times SIGTERM handling retries the hand-back before it
+    /// gives up and exits non-zero.
+    ///
+    /// `shutdown()` cancels the safety tick, which is the thing that would
+    /// otherwise retry a failed revert — so if the first attempt does not land,
+    /// this loop is the only retry there is. The budget must stay inside the
+    /// `ExitTimeOut` declared in `io.github.thijsvos.icecube.helper.plist`, and
+    /// it does: four attempts, each bounded by `revertEverything`'s own three
+    /// 200 ms read retries, separated by ``shutdownRevertRetryDelay``.
+    public static let shutdownRevertAttempts = 4
+    /// Pause between the hand-back retries above.
+    public static let shutdownRevertRetryDelay: TimeInterval = 0.5
 
     /// The unified-log subsystem — redirected under test.
     ///

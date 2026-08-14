@@ -38,7 +38,31 @@ signal(SIGTERM, SIG_IGN)
 let sigterm = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
 sigterm.setEventHandler {
     Task {
-        await core.shutdown()
+        // SAFETY: a hand-back that did not land must not exit as though it had.
+        //
+        // `shutdown()` cancels the safety tick, so `revertEverything`'s usual
+        // "set `revertPending`, the tick will retry" recovery has nothing left to
+        // run it. This loop IS the retry. It matters most on the uninstall path:
+        // `SMAppService.unregister()` SIGTERMs the daemon *and* removes the job,
+        // so an `exit(0)` on a failed revert strands the fans at their last
+        // target with every safety net gone and nothing that could relaunch us.
+        var handedBack = await core.shutdown()
+        var attempts = 1
+        while !handedBack, attempts < HelperConstants.shutdownRevertAttempts {
+            try? await Task.sleep(for: .seconds(HelperConstants.shutdownRevertRetryDelay))
+            handedBack = await core.shutdown()
+            attempts += 1
+        }
+        guard handedBack else {
+            // Non-zero so launchd records it, and so `KeepAlive/SuccessfulExit`
+            // brings us straight back to try again — `start()` reverts on boot.
+            // A clean hand-back exits 0 and stays gone, which is what makes
+            // "Turn Off Fan Control" an uninstall rather than a restart loop.
+            log.fault(
+                "shutdown could not hand the fans back after \(attempts, privacy: .public) attempts — exiting non-zero"
+            )
+            exit(1)
+        }
         exit(0)
     }
 }
