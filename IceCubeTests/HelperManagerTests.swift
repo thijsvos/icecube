@@ -294,6 +294,59 @@ struct HelperManagerTests {
         #expect(manager.registration == .enabled, "still registered")
     }
 
+    /// Reinstalling the background service silently reset the user to Balanced.
+    ///
+    /// `reregister()` is unregister-then-register, and `unregister()` wiped the
+    /// app's whole memory of fan control — `lastCurveConfig` AND
+    /// `startupPreference`. Afterwards the fresh daemon reports `.auto`,
+    /// `didAutoResume` has been cleared, and `autoResumeIfNeeded` asks
+    /// `StartupPolicy.decide(daemonMode: .auto, preference: nil, storedCurve: nil,
+    /// fallback: .balanced)` — which is the "user has never chosen" answer.
+    ///
+    /// It is not a rare path. `maintain()` self-heals automatically on
+    /// `.versionMismatch`, and a `protocolVersion` bump is the *designed* upgrade
+    /// path, so this fired on every app update that touched the daemon — and on
+    /// every press of the Reinstall button XCODE_GUIDE.md §4.4 asks the owner for
+    /// after each helper rebuild.
+    @Test("Reinstalling the service keeps the curve the user chose")
+    func reregisterKeepsTheUsersCurve() async {
+        let registrar = FakeRegistrar()
+        registrar.status = .enabled
+        let defaults = makeDefaults()
+        let manager = makeManager(registrar: registrar, channel: FakeChannel(), defaults: defaults)
+
+        let memory = FanControlMemory(defaults: defaults)
+        var chosen = FanConfig(mode: .curve)
+        chosen.sharedCurve = FanCurve.quiet
+        memory.remember(applied: chosen)
+        #expect(memory.lastCurve != nil, "precondition: the user picked a curve")
+
+        await manager.reregister()
+
+        #expect(memory.lastCurve != nil, "a reinstall is a repair, not a reset to Balanced")
+    }
+
+    /// The counterweight, and the reason this is a parameter rather than a
+    /// deletion: turning fan control off IS meant to be a clean slate, so that
+    /// re-enabling later cannot resurrect a curve from a forgotten session.
+    @Test("Turning fan control off still forgets the curve")
+    func unregisterForgetsTheUsersCurve() async {
+        let registrar = FakeRegistrar()
+        registrar.status = .enabled
+        let defaults = makeDefaults()
+        let manager = makeManager(registrar: registrar, channel: FakeChannel(), defaults: defaults)
+
+        let memory = FanControlMemory(defaults: defaults)
+        var chosen = FanConfig(mode: .curve)
+        chosen.sharedCurve = FanCurve.quiet
+        memory.remember(applied: chosen)
+        #expect(memory.lastCurve != nil, "precondition")
+
+        await manager.unregister()
+
+        #expect(memory.lastCurve == nil, "turning it off is a decision, and a clean slate")
+    }
+
     @Test("A blocked register reports the blocker instead of calling launchd")
     func registerRefusesWhenBlocked() {
         let registrar = FakeRegistrar()
@@ -614,7 +667,19 @@ struct HelperManagerTests {
         #expect(channel.disconnectCount >= 1)
     }
 
-    @Test("Turning off while disconnected still unregisters")
+    /// Rewritten: this used to assert `setAllAutoCount == 0` with the comment
+    /// "nothing to tell". But `.disconnected` is a statement about the app's last
+    /// status refresh, not about whether a daemon exists — the mach service is
+    /// demand-launched, so a *registered* daemon is reachable whether or not the
+    /// app currently holds a connection.
+    ///
+    /// And `setAllAuto` is the ONLY thing that clears the daemon's persisted
+    /// curve: it routes to `revertEverything(clearsPersistence: true)`, while
+    /// `shutdown()` deliberately KEEPS the file so a reboot cannot destroy the
+    /// boot promise. Skipping the call therefore left a boot promise on disk
+    /// through an uninstall, for the next install to resume — with no preset lit,
+    /// because `forgetEverything()` had just wiped the app's half of it.
+    @Test("Turning off while disconnected still tells a registered daemon to let go")
     func unregisterWithoutConnection() async {
         let registrar = FakeRegistrar()
         registrar.status = .enabled
@@ -623,8 +688,24 @@ struct HelperManagerTests {
 
         await manager.unregister() // never connected
 
-        #expect(channel.setAllAutoCount == 0, "nothing to tell")
-        #expect(registrar.unregisterCount == 1, "but the service still goes away")
+        #expect(channel.setAllAutoCount == 1, "a registered daemon is reachable on demand")
+        #expect(registrar.unregisterCount == 1, "and the service still goes away")
+    }
+
+    /// The other half: "reachable on demand" is not "always worth calling". With
+    /// no daemon registered there is genuinely nothing to tell, and
+    /// `HelperClient.call` has no timeout — so an XPC send into a service that
+    /// does not exist is the one thing that could wedge the uninstall.
+    @Test("Turning off with no daemon registered does not try to talk to one")
+    func unregisterWithNoDaemonRegistered() async {
+        let registrar = FakeRegistrar()
+        registrar.status = .notFound
+        let channel = FakeChannel()
+        let manager = makeManager(registrar: registrar, channel: channel, defaults: makeDefaults())
+
+        await manager.unregister()
+
+        #expect(channel.setAllAutoCount == 0, "nothing to tell — there is no daemon")
     }
 
     // MARK: - Write-path self-test

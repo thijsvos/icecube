@@ -386,6 +386,57 @@ Deferred, deliberately: the R-vs-RPM "what the noise buys you" chart (the
 schema already carries everything it needs) and any notification for any
 trend state (#81's lesson stands).
 
+### The hand-back audit (2026-08-14) — protocol v27
+
+An adversarial audit of the daemon's error paths (six suspected defects sent to
+independent verifiers told to *refute* them; six confirmed or partly confirmed,
+none refuted, four more found afterwards) turned up **one defect in six places**,
+all sharing the worst failure signature this program has: **fans physically
+forced while `config.mode == .auto`**, which by construction disarms the watchdog
+(`SafetyMonitor.swift:92`), the ceiling (`:77`) and all three FanGuardian filters
+(`FanGuardian.swift:285-287`, `:316-318`, `:333-335`) — while the decision
+timeline draws the opposite of what happened.
+
+`revertEverything` has caught, throttled and retried its write failures since the
+day it was written, and its comment says why. Five siblings never got the memo.
+Fixed:
+
+- `FanWriteSequencer.revertAllAuto` returned **silently** when the mode key would
+  not resolve — zero writes, no throw, from a `throws` method whose contract is
+  that failures are reported. Now it throws, and the suffix-independent half of
+  the hand-back (parking `Tg` at the floor) happens either way.
+- The guardian's `.release` and `.reparkOrphans` branches recorded their sentence
+  *before* writing and swallowed the result in `try?`. Now they write first,
+  report what landed, and `.release` sets `revertPending` so the tick's existing
+  deferred-revert retry converges.
+- **`shutdown()` returned `Void` and `main.swift` called `exit(0)` regardless** —
+  after cancelling the tick that `revertEverything` was relying on to retry. On
+  the uninstall path (`unregister()` SIGTERMs the daemon *and* removes the job)
+  that stranded the fans with no daemon, no safety nets and no way back short of
+  a reboot. It now returns `Bool`, the SIGTERM handler retries within a declared
+  `ExitTimeOut`, and exits non-zero so `KeepAlive/SuccessfulExit` brings it back.
+- The app dropped `setAllAuto`'s failure during uninstall, and skipped the call
+  entirely when merely `.disconnected` — leaving the boot promise on disk for the
+  next install to resume.
+- **Self-heal wiped the user's chosen curve.** `reregister()` → `unregister()` →
+  `memory.forgetEverything()`, and `maintain()` self-heals automatically on
+  `.versionMismatch` — the designed upgrade path — so *every* app update that
+  bumped `protocolVersion` silently reset the user to Balanced.
+  `unregister(forgettingIntent:)` now distinguishes a repair from a decision.
+
+Also proven, having been documented but not: the ceiling debounce is
+**consecutive** (`overCeilingTicks = 0` survived deletion — the existing test's
+cool tick is followed by three more hot ones and it only inspects the third), and
+revert-on-XPC-invalidation applies to a **non-persisting curve** (every existing
+test of that path used `manualConfig()`, so the clause could be deleted with CI
+green). Every test added here was mutation-verified.
+
+Still open, and deliberately out of scope: the release-pipeline items found
+alongside — hardened runtime is off on both targets so `notarytool` will reject
+the first signed build; the DMG is never signed, notarized or stapled; and the
+`Restarting after` tripwire that commit `ee223fe`'s message claims to have added
+exists in no commit in history.
+
 ## 7. Risks & mitigations
 - **SMC keys vary wildly per model** → curated map + fallback enumeration + community diagnostics pipeline (§3.3). Biggest ongoing cost; design for it.
 - **Free-Apple-ID helper approval unproven** → Phase 0.5 spike with the fallback documented *before* it runs (manual `sudo launchctl bootstrap` install for Phases 3–5).

@@ -20,5 +20,28 @@
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
+	<!-- SAFETY: come back if we did NOT exit cleanly.
+	     `F{i}Md = 1` lives in firmware and outlives the process, so a daemon
+	     that dies abnormally leaves the fans forced with the watchdog, the
+	     ceiling and the guardian all gone with it — until a reboot. `start()`
+	     reverts everything, so a respawn is the fix.
+	     `SuccessfulExit: false` restarts ONLY on a non-zero exit or a signal,
+	     which is what keeps this out of the uninstall path: a hand-back that
+	     landed exits 0 and stays gone. See the SIGTERM handler in main.swift,
+	     which exits 1 precisely so this rule catches a failed hand-back.
+	     Note: the no-SMC bail-out in main.swift also exits 1, so an SMC that
+	     cannot be opened now respawns on launchd's throttle (10 s) instead of
+	     giving up — which is the behaviour a safety daemon should have. -->
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<!-- Declared rather than left to launchd's default, because the SIGTERM
+	     handler's retry budget (HelperConstants.shutdownRevertAttempts) has to
+	     fit inside it. Four attempts + revertEverything's own read retries is a
+	     few seconds; 25 s leaves generous headroom. -->
+	<key>ExitTimeOut</key>
+	<integer>25</integer>
 </dict>
 </plist>

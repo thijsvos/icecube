@@ -340,7 +340,26 @@ final class HelperManager {
         refreshRegistration()
     }
 
-    func unregister() async {
+    /// - Parameter forgettingIntent: whether to also erase the app's memory of
+    ///   the curve the user chose.
+    ///
+    ///   True for **Turn Off Fan Control**, which is a decision: a clean slate,
+    ///   so re-enabling later cannot silently resurrect a curve from a session
+    ///   the user has long forgotten.
+    ///
+    ///   False for **re-registering**, which is a repair. `reregister()` calls
+    ///   this as its first act, so wiping here meant every self-heal erased the
+    ///   user's curve — and `maintain()` self-heals automatically on
+    ///   `.versionMismatch`, which is the *designed* upgrade path
+    ///   (`docs/RELEASING.md`). Every app update that bumped `protocolVersion`
+    ///   therefore reset the user to Balanced, silently: with `lastCurveConfig`
+    ///   and `startupPreference` both gone and `didAutoResume` cleared,
+    ///   `StartupPolicy.decide` saw `preference: nil, storedCurve: nil` and fell
+    ///   through to the fallback. That fallback exists for a user who has *never
+    ///   chosen* — this made someone who had chosen indistinguishable from them.
+    ///   The Reinstall button in Settings, which XCODE_GUIDE.md §4.4 tells the
+    ///   owner to press after every helper rebuild, did the same thing.
+    func unregister(forgettingIntent: Bool = true) async {
         // Tell the daemon to go to auto FIRST, which also clears its persisted
         // curve. Turning fan control off must mean off — not "paused until you
         // turn it on again".
@@ -352,15 +371,32 @@ final class HelperManager {
         // Without this, turning fan control off and on again silently resumed a
         // curve the user had already dismissed — with no preset lit, because
         // the app had no memory of a curve it never sent.
-        if case .connected = connection {
-            await run { try await self.client.setAllAuto() }
+        //
+        // Attempted whenever a daemon could exist, rather than only when the last
+        // status refresh said `.connected`. The mach service is demand-launched,
+        // so a disconnected app can still reach a registered daemon — and gating
+        // on `.connected` meant turning fan control off while disconnected (a
+        // state the button is fully enabled in) skipped the only call that clears
+        // the persisted curve. It then survived the uninstall and was resumed by
+        // the next install, with no preset lit because `forgetEverything()` below
+        // had wiped the app's side of it.
+        // Decided on fresh state: whether a daemon exists is the whole question,
+        // and the cached value can predate the user opening this window.
+        refreshRegistration()
+        var handBackFailed = false
+        if registration != .notRegistered {
+            if case .failed = await run({ try await self.client.setAllAuto() }) {
+                handBackFailed = true
+            }
         }
         lastAppliedConfig = nil
         // Turning fan control off must also drop anything queued for the next
         // wake, or the app would resurrect a config the user just switched off.
         deferredConfig = nil
         deferredSince = nil
-        memory.forgetEverything()
+        if forgettingIntent {
+            memory.forgetEverything()
+        }
         // Turning the feature off is a clean slate, not a pause. Leaving a
         // preference behind would mean re-enabling later silently resurrects a
         // curve from a session the user has long forgotten.
@@ -384,6 +420,14 @@ final class HelperManager {
             lastError = nil
         } catch {
             lastError = "Unregister failed: \(error.localizedDescription)"
+        }
+        // Set LAST, because a successful unregister above clears `lastError` —
+        // which is how a failed hand-back used to vanish. The daemon being gone
+        // and the fans being back are two different facts, and this is the one
+        // the user can still act on.
+        if handBackFailed {
+            lastError = "Fan control is off, but the background service did not confirm handing the "
+                + "fans back to macOS. If they stay at one speed, restart your Mac."
         }
         refreshRegistration()
     }
@@ -414,7 +458,9 @@ final class HelperManager {
         }
         isReregistering = true
         defer { isReregistering = false }
-        await unregister()
+        // A repair, not a decision — so the user's chosen curve survives it.
+        // See `unregister(forgettingIntent:)` for what wiping it here cost.
+        await unregister(forgettingIntent: false)
         // An unregister hiccup is not final — the retries below may still
         // succeed, so it must not be shown as a failure yet.
         lastError = nil

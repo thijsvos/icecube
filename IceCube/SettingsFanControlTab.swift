@@ -10,6 +10,12 @@ struct SettingsFanControlTab: View {
     @Binding var persistCurve: Bool
     let openWindow: OpenWindowAction
 
+    /// Turning fan control off removes a root LaunchDaemon and erases both the
+    /// app's and the daemon's record of the curve the user chose. It was a
+    /// single unguarded click, sitting next to "Reinstall" — and the two look
+    /// alike enough that the destructive one deserves a sentence first.
+    @State private var confirmingTurnOff = false
+
     var body: some View {
         fanControlTab
     }
@@ -63,10 +69,23 @@ struct SettingsFanControlTab: View {
                             WindowOpener.open(WindowOpener.ID.setup, using: openWindow)
                         }
                     }
-                    Button("Turn Off Fan Control") {
-                        Task { await state.helper.unregister() }
-                    }
-                    .help("Fans go back to being managed by macOS. Monitoring keeps working.")
+                    Button("Turn Off Fan Control") { confirmingTurnOff = true }
+                        .help("Fans go back to being managed by macOS. Monitoring keeps working.")
+                        .confirmationDialog(
+                            "Turn off fan control?",
+                            isPresented: $confirmingTurnOff,
+                            titleVisibility: .visible
+                        ) {
+                            Button("Turn Off Fan Control", role: .destructive) {
+                                Task { await state.helper.unregister() }
+                            }
+                            Button("Cancel", role: .cancel) {}
+                        } message: {
+                            Text(
+                                "Your fans go back to macOS, the background service is removed, and "
+                                    + "your saved curve choice is forgotten. Monitoring keeps working."
+                            )
+                        }
                     if state.helper.isReregistering {
                         ProgressView().controlSize(.small)
                         Text("Working…").font(.caption).foregroundStyle(.secondary)

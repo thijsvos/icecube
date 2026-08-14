@@ -261,9 +261,24 @@ public actor DaemonCore {
     /// ("keep the curve running when Ice Cube quits") on exactly the event it
     /// exists to survive — a reboot. Reverting the *hardware* is still
     /// unconditional; only the on-disk intent survives.
-    public func shutdown() async {
+    /// - Returns: whether the fans actually reached automatic control.
+    ///
+    /// SAFETY: this used to return `Void`, and `main.swift` called `exit(0)`
+    /// straight after it. `revertEverything` handles a failed write by setting
+    /// `revertPending` and promising the tick will retry — but line one below
+    /// just cancelled the tick, so the promise could not be kept and the process
+    /// exited regardless. On the uninstall path (`SMAppService.unregister()`
+    /// SIGTERMs us *and* removes the job) that left the fans forced with no
+    /// daemon, no watchdog, no ceiling, no guardian, and nothing left that would
+    /// ever demand-launch us again — recoverable only by a reboot the user has
+    /// no reason to suspect they need.
+    ///
+    /// Deliberately NOT `@discardableResult`: a caller that does not care has to
+    /// say so out loud, because a caller that did not care is the entire bug.
+    public func shutdown() async -> Bool {
         tickTask?.cancel()
         await revertEverything(reason: "daemon shutdown", clearsPersistence: false)
+        return !revertPending
     }
 
     /// A new app connected.
@@ -1482,21 +1497,78 @@ public actor DaemonCore {
             record("guardian: die \(Int(die)) °C and nothing cooling — driving the fans (built-in curve)")
             await engage(targets: targets, fans: fans, since: generation)
         case let .release(die):
-            record("guardian: cooled to \(Int(die)) °C — releasing the fans")
-            await asRevert {
-                try? await self.withWriteLock { try await self.sequencer.revertAllAuto(fans: fans) }
+            // SAFETY: the write happens FIRST and the sentence reports what
+            // actually landed. This used to record "releasing the fans" and then
+            // swallow the hand-back in a bare `try?`, so a firmware that refused
+            // left the fans forced while the timeline — and the popover — said
+            // they had been released, with nothing to notice it and nothing to
+            // retry. `revertEverything` has caught, throttled and retried its
+            // failures since the day it was written; this branch never did.
+            let releaseFailure: Error? = await asRevert {
+                do {
+                    try await self.withWriteLock { try await self.sequencer.revertAllAuto(fans: fans) }
+                    return nil
+                } catch {
+                    return error
+                }
+            }
+            if let releaseFailure {
+                record(
+                    "SAFETY: guardian could not release the fans "
+                        + "(\(releaseFailure.localizedDescription)) — retrying, control retained"
+                )
+                // Hand off to the deferred-revert retry at the top of `tick()`,
+                // which is already throttled and converges. The `!revertPending`
+                // guard above then keeps this branch out of the way until it
+                // lands, so the failure is reported once rather than every 2 s.
+                revertPending = true
+                revertPendingReason = "guardian release failed"
+            } else {
+                record("guardian: cooled to \(Int(die)) °C — releasing the fans")
             }
             await resetPort()
         case let .reparkOrphans(orphaned):
-            record("SAFETY: fan(s) orphaned in mode 0 — re-parking, handing back, resetting SMC connection")
-            await asRevert {
+            // SAFETY: same correction, and the reassuring sentence is now earned
+            // rather than assumed. This used to announce the re-park first and
+            // then attempt it through two `try?`s and a `for … where` that writes
+            // nothing at all when neither mode-key spelling answers — so
+            // "re-parking, handing back" could be the entire truth of what
+            // happened. Worse, `ControlAlertRules` suppresses the alert for that
+            // line *because* it claims the daemon self-healed, so a silent
+            // failure was silent twice over.
+            //
+            // Deliberately NOT `revertPending`: these fans are orphaned in mode 0
+            // (nobody driving them), not held by us, so the thing that should
+            // escalate is the guardian's own ladder on the next ticks — which
+            // `revertPending` would suppress by gating this branch off.
+            let reparkFailures: [String] = await asRevert {
+                var failed: [String] = []
                 for fan in orphaned {
-                    try? await self.port.writeDouble("F\(fan.id)Tg", value: fan.minRPM, as: .float)
-                    for suffix in ["Md", "md"] where await self.port.hasKey("F\(fan.id)\(suffix)") {
-                        try? await self.port.writeDouble("F\(fan.id)\(suffix)", value: 3, as: .uint8)
-                        break
+                    do {
+                        try await self.port.writeDouble("F\(fan.id)Tg", value: fan.minRPM, as: .float)
+                        var modeKey: String?
+                        for suffix in ["Md", "md"] where await self.port.hasKey("F\(fan.id)\(suffix)") {
+                            modeKey = "F\(fan.id)\(suffix)"
+                            break
+                        }
+                        guard let modeKey else {
+                            failed.append("fan \(fan.id): no mode key answered")
+                            continue
+                        }
+                        try await self.port.writeDouble(modeKey, value: 3, as: .uint8)
+                    } catch {
+                        failed.append("fan \(fan.id): \(error.localizedDescription)")
                     }
                 }
+                return failed
+            }
+            if reparkFailures.isEmpty {
+                record("SAFETY: fan(s) orphaned in mode 0 — re-parked, handed back, resetting SMC connection")
+            } else {
+                record(
+                    "SAFETY: could not re-park orphaned fan(s): "
+                        + reparkFailures.joined(separator: "; ") + " — they may still be orphaned"
+                )
             }
             await resetPort()
         case let .holdAtFloor(floors):

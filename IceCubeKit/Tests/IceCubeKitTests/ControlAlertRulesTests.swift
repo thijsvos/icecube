@@ -159,12 +159,20 @@ struct ControlAlertRulesTests {
     static let safetyVocabulary: [String: Bool] = [
         "SAFETY: awake ": false,
         "SAFETY: control lost (read-back failed twice) — reverting to auto": true,
+        "SAFETY: could not re-park orphaned fan(s): ": true,
         "SAFETY: could not read the fans to park them for sleep — they may still be forced": true,
         "SAFETY: curve control lost (read-back failed twice) — reverting to auto": true,
         "SAFETY: fan write failed mid-sequence — reverting (": true,
         "SAFETY: fan write raced a revert — reverting again": false,
-        "SAFETY: fan(s) orphaned in mode 0 — re-parking, handing back, resetting SMC connection": false,
+        // Past tense, and only recorded once the writes landed. The re-park
+        // SUCCEEDING is Ice Cube working; the failure above is not, which is why
+        // they are two sentences and not one with a suffix.
+        "SAFETY: fan(s) orphaned in mode 0 — re-parked, handed back, resetting SMC connection": false,
         "SAFETY: forcing maximum cooling — ": true,
+        // The guardian failing to hand the fans back is the headline failure this
+        // whole class of bug produces: fans physically forced while every safety
+        // net believes the firmware owns them. Always worth interrupting someone.
+        "SAFETY: guardian could not release the fans ": true,
         "SAFETY: over the temperature ceiling while parked for sleep (": true,
         "SAFETY: parking for sleep while the temperature ceiling is active — the firmware owns cooling now": false,
         "SAFETY: parking the fans for sleep failed (": true,

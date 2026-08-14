@@ -284,6 +284,45 @@ struct FanWriteSequencerTests {
         #expect(try await firmware.readDouble("F1Md") == 3, "and fan 1")
     }
 
+    /// The silent-return bug. `revertAllAuto` used to open with
+    /// `guard let suffix = try? await resolveModeKeySuffix(...) else { return }`
+    /// — a `throws` method returning **normally** after writing nothing at all.
+    /// Every caller read that as a completed hand-back: `DaemonCore` set
+    /// `reverted = true`, recorded `.auto`, and disarmed the watchdog, the
+    /// ceiling and the guardian while the fans stayed physically forced. That is
+    /// precisely the state `revertEverything`'s own SAFETY comment says must
+    /// never be reachable, and its two defences — the `!fans.isEmpty` guard and
+    /// `revertAllAuto` throwing — both missed this path.
+    ///
+    /// Reachable rather than theoretical: the probe uses `port.hasKey`, which is
+    /// `(try? keyInfo(for:)) != nil`, so a connection that `resetPort()` just
+    /// closed answers `false` for every key exactly as an absent key would.
+    /// `resetPort()` is not taken under the write lock, so it can land between
+    /// `readFans()` and the probe on a cold cache.
+    ///
+    /// `noModeKey` below is the neighbouring test that did NOT cover this: it
+    /// makes the same resolve throw, but calls `engageManual` — the safe half.
+    /// `revertIsBestEffortAcrossFans` engages first, so its cache is warm and its
+    /// throw comes from the write, not the probe.
+    @Test("An unresolvable mode key fails the revert loudly, and still parks the fans")
+    func revertReportsAnUnresolvableModeKey() async throws {
+        let firmware = FakeFirmware(generation: .m2, fans: testFans)
+        // A cold sequencer: nothing has engaged, so the suffix cache is empty and
+        // the probe has to reach the firmware. Both spellings answer false, which
+        // is what a just-closed connection looks like from `hasKey`.
+        let sequencer = FanWriteSequencer(port: firmware, sleep: instantSleep)
+        await firmware.removeKey("F0Md")
+        await firmware.removeKey("F1Md")
+
+        await #expect(throws: IceCubeError.self) {
+            try await sequencer.revertAllAuto(fans: testFans)
+        }
+        // And the half of the hand-back that needs no mode key must still have
+        // happened — a fan at its floor beats a fan left at a curve target.
+        #expect(try await firmware.readDouble("F0Tg") == 2317, "fan 0 parked at its floor anyway")
+        #expect(try await firmware.readDouble("F1Tg") == 2317, "and fan 1")
+    }
+
     @Test("A machine with no mode key at all refuses manual mode")
     func noModeKey() async throws {
         // A `FakeFirmware` seeded with no fans has no `F{i}Md`/`F{i}md` key at
@@ -502,6 +541,49 @@ struct SafetyMonitorTests {
         var monitor = SafetyMonitor()
         for _ in 0 ..< 5 {
             #expect(monitor.evaluate(heartbeatAge: nil, config: .auto, temperatures: temps(108)) == .ok)
+        }
+    }
+}
+
+@Suite("SafetyMonitor — the ceiling debounce is consecutive")
+struct SafetyMonitorDebounceTests {
+    private func temps(_ celsius: Double, key: String = "Tp01") -> [SensorReading] {
+        [SensorReading(key: key, label: key, celsius: celsius)]
+    }
+
+    /// `ceilingDebounce` above does NOT prove the debounce is consecutive.
+    /// Delete `overCeilingTicks = 0` from `SafetyMonitor.ceilingVerdict` and it
+    /// still passes: its cool tick is followed by three more hot ticks and it
+    /// only inspects the third, which is `.forceMaxCooling` whether the count
+    /// restarted at zero or carried on from two.
+    ///
+    /// That reset is the entire point of the rule. Without it, three glitched
+    /// readings spread across an afternoon are indistinguishable from three
+    /// seconds of a genuinely cooking die — and the consequence is the fans
+    /// slamming to maximum, which is what the debounce exists to prevent.
+    @Test("A cool tick restarts the count rather than pausing it")
+    func ceilingDebounceIsConsecutive() {
+        var monitor = SafetyMonitor()
+        let manual = FanConfig(mode: .manual, manualTargets: [0: 2500])
+        // Two hot ticks — one short of the three-tick threshold.
+        #expect(monitor.evaluate(heartbeatAge: .zero, config: manual, temperatures: temps(106)) == .ok)
+        #expect(monitor.evaluate(heartbeatAge: .zero, config: manual, temperatures: temps(106)) == .ok)
+        // One cool tick.
+        #expect(monitor.evaluate(heartbeatAge: .zero, config: manual, temperatures: temps(70)) == .ok)
+
+        // THE ASSERTION THE OTHER TEST IS MISSING: the next hot tick is the
+        // FIRST of a new run, not the third of the old one.
+        #expect(
+            monitor.evaluate(heartbeatAge: .zero, config: manual, temperatures: temps(106)) == .ok,
+            "one hot tick after a cool one must not force cooling — that is the glitch this guards against"
+        )
+        #expect(monitor.evaluate(heartbeatAge: .zero, config: manual, temperatures: temps(106)) == .ok)
+        // And it must still trip on the third consecutive one.
+        guard case .forceMaxCooling = monitor.evaluate(
+            heartbeatAge: .zero, config: manual, temperatures: temps(106)
+        ) else {
+            Issue.record("three consecutive hot ticks must still force cooling")
+            return
         }
     }
 }
