@@ -1,6 +1,7 @@
 // CurveEditor.swift — the curve editor window: preset loaders, parameter sliders, save & apply.
 
 import IceCubeKit
+import os
 import SwiftUI
 
 /// The curve editor window. The plot itself lives in ``CurveCanvas``; this view
@@ -23,8 +24,33 @@ struct CurveEditorView: View {
     /// to do, so finishing it puts the workbench away.
     @Environment(\.dismiss) private var dismiss
 
-    /// Guards the one-shot seeding below.
-    @State private var didSeed = false
+    /// Logged because this decision is otherwise invisible: an editor showing
+    /// the wrong curve looks exactly like an editor showing a curve, and the
+    /// first version of this feature shipped, ran, and did nothing at all on
+    /// the owner's Mac with no trace of why. Same reasoning — and the same
+    /// category — as `WindowOpener.closeStaleWindows`.
+    private let log = Logger(subsystem: HelperConstants.logSubsystem, category: "ui")
+
+    /// Adopts whatever the daemon says it is running, unless the user has taken
+    /// the wheel. Safe to call as often as the status changes.
+    private func followRunningCurve() {
+        let seed = CurveEditorSeed.seed(
+            enforced: state.helper.status, applied: state.helper.lastAppliedConfig
+        )
+        let outcome: String = if let seed {
+            model.follow(seed) ? "adopted" : (model.hasUserEdits ? "kept (edited)" : "already shown")
+        } else {
+            "kept (nothing running)"
+        }
+        log.notice(
+            """
+            curve editor: daemon=\(state.helper.status?.mode.rawValue ?? "none", privacy: .public) \
+            activeCurve=\(state.helper.status?.activeCurve == nil ? "no" : "yes", privacy: .public) \
+            applied=\(state.helper.lastAppliedConfig?.mode.rawValue ?? "none", privacy: .public) \
+            → \(outcome, privacy: .public)
+            """
+        )
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -66,24 +92,13 @@ struct CurveEditorView: View {
         }
         // Sliders, toggle, and buttons all take the ice-blue brand accent.
         .tint(Theme.accent)
-        // Open on the curve the fans are actually running — see
-        // ``CurveEditorSeed`` for why the daemon's report outranks our own
-        // memory of what we sent.
-        //
-        // Once per window lifetime, and unconditionally latched. `.task` runs
-        // again if a window re-appears without being rebuilt, and replacing
-        // points somebody is mid-edit on is a worse failure than opening on
-        // Balanced during the second after a cold launch when no status has
-        // arrived yet — which is exactly what this window did before.
-        .task {
-            guard !didSeed else { return }
-            didSeed = true
-            if let seed = CurveEditorSeed.seed(
-                enforced: state.helper.status, applied: state.helper.lastAppliedConfig
-            ) {
-                model.load(seed)
-            }
-        }
+        // Show the curve the fans are actually running — see ``CurveEditorSeed``
+        // for why the daemon's report outranks our own memory of what we sent,
+        // and ``CurveEditorModel/follow(_:)`` for why this is a subscription
+        // rather than a one-shot on appear.
+        .task { followRunningCurve() }
+        .onChange(of: state.helper.status) { followRunningCurve() }
+        .onChange(of: state.helper.lastAppliedConfig) { followRunningCurve() }
         .onChange(of: state.snapshot) {
             if let die = state.hottestDie {
                 model.updatePreview(die: die)
