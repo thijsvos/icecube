@@ -92,6 +92,75 @@ struct CurveEditorModelTests {
         #expect(editor.hysteresis == 7)
         #expect(editor.ramp == 0.25)
         #expect(editor.previewFraction == 0, "the follower must be reset, as in load(_ curve:)")
+        #expect(!editor.hasUserEdits, "the machine naming its curve is not the user editing one")
+    }
+
+    // MARK: - follow(): the editor tracks the running curve until it is touched
+
+    private func seed(_ curve: FanCurve) -> CurveEditorSeed.Seed {
+        CurveEditorSeed.Seed(curve: curve, hysteresisCelsius: 4, rampPerTick: 0.1)
+    }
+
+    /// The bug this replaced a one-shot with: on the owner's Mac, an editor
+    /// opened after four presets had been applied still showed Balanced,
+    /// because "on appear" had already fired — once, at launch, before the app
+    /// knew anything — and never fired again.
+    @Test("An untouched editor adopts the running curve, however late it arrives")
+    func followAdoptsWhileUntouched() {
+        let editor = model()
+        #expect(editor.follow(seed(.max)))
+        #expect(editor.points == FanCurve.max.points)
+        // And again when the machine moves on to another curve.
+        #expect(editor.follow(seed(.quiet)))
+        #expect(editor.points == FanCurve.quiet.points)
+    }
+
+    @Test("Following the curve already on screen changes nothing", arguments: [true, false])
+    func followIsIdempotent(sameParameters: Bool) {
+        let editor = model()
+        editor.follow(seed(.max))
+        let shown = editor.points
+        var again = seed(.max)
+        if !sameParameters {
+            again.hysteresisCelsius = 6
+        }
+        // A no-op returns false so the caller can say so; a changed parameter
+        // is a real difference and must be adopted.
+        #expect(editor.follow(again) == !sameParameters)
+        #expect(editor.points == shown)
+        #expect(editor.hysteresis == (sameParameters ? 4 : 6))
+    }
+
+    /// The whole safety of making this a subscription: a status refresh every
+    /// few seconds must never overwrite a curve someone is drawing.
+    @Test("Anything the user does stops the editor following", arguments: [
+        "drag", "add", "remove", "nudge", "hysteresis", "ramp", "preset",
+    ])
+    func userEditsStopFollowing(action: String) {
+        let editor = model()
+        editor.follow(seed(.max))
+        #expect(!editor.hasUserEdits, "setup: following must not count as an edit")
+
+        switch action {
+        case "drag": editor.move(0, to: CurvePoint(celsius: 50, fraction: 0.2))
+        case "add": editor.addPoint(at: CurvePoint(celsius: 55, fraction: 0.4))
+        case "remove":
+            editor.addPoint(at: CurvePoint(celsius: 55, fraction: 0.4))
+            editor.addPoint(at: CurvePoint(celsius: 75, fraction: 0.8))
+            editor.selected = 1
+            editor.removeSelected()
+        case "nudge":
+            editor.selected = 0
+            editor.nudgeSelected(dCelsius: 1, dFraction: 0)
+        case "hysteresis": editor.hysteresis = 6
+        case "ramp": editor.ramp = 0.2
+        default: editor.load(.cold)
+        }
+        #expect(editor.hasUserEdits)
+
+        let drawn = editor.points
+        #expect(editor.follow(seed(.quiet)) == false)
+        #expect(editor.points == drawn, "a status refresh must not overwrite the user's curve")
     }
 
     // MARK: - move(): the monotonic invariant
