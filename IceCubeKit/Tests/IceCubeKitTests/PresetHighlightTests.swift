@@ -156,4 +156,60 @@ struct PresetHighlightTests {
         #expect(PresetHighlight.isActive(cold, enforced: unnamed, applied: cold.config))
         #expect(PresetHighlight.isActive(quiet, enforced: unnamed, applied: cold.config) == false)
     }
+
+    // MARK: - The curve that is none of the presets
+
+    /// A curve edited in the editor and applied without being saved. Reported
+    /// from the owner's Mac: drag one point of Balanced, apply, and the whole
+    /// preset row went dark — which reads as "fan control is off" at the moment
+    /// the user has taken the most direct control of it.
+    @Test("An edited curve is custom, and says so")
+    func editedCurveIsCustom() throws {
+        let cold = try #require(builtins.first { $0.kind == .cold })
+        var edited = cold.config.sharedCurve?.points ?? []
+        edited[0] = CurvePoint(celsius: edited[0].celsius + 3, fraction: edited[0].fraction)
+        let config = FanConfig.curve(FanCurve(points: edited), persists: false)
+        let status = HelperStatus(mode: .curve, activeCurve: config.sharedCurve)
+        #expect(PresetHighlight.isRunningCustomCurve(among: builtins, enforced: status, applied: config))
+        // And every preset stays dark, which is what makes the chip necessary.
+        #expect(!builtins.contains { PresetHighlight.isActive($0, enforced: status, applied: config) })
+    }
+
+    @Test("A preset the daemon is running is not custom")
+    func presetIsNotCustom() throws {
+        let cold = try #require(builtins.first { $0.kind == .cold })
+        let status = HelperStatus(mode: .curve, activeCurve: cold.config.sharedCurve)
+        #expect(
+            PresetHighlight.isRunningCustomCurve(
+                among: builtins, enforced: status, applied: cold.config
+            ) == false
+        )
+    }
+
+    /// Manual is its own state with its own warning tint, and auto means nothing
+    /// of ours is driving. Neither is a curve, so neither is a custom one.
+    @Test("Modes that are not curves are never custom", arguments: [FanConfig.Mode.manual, .auto])
+    func onlyCurvesCanBeCustom(mode: FanConfig.Mode) {
+        let status = HelperStatus(mode: mode)
+        #expect(
+            PresetHighlight.isRunningCustomCurve(
+                among: builtins, enforced: status, applied: FanConfig(mode: mode)
+            ) == false
+        )
+    }
+
+    /// Unknown is not custom. With no connection there is nothing to claim, and
+    /// a daemon too old to name its curve tells an app that has sent nothing
+    /// only that *a* curve runs — which might well be one of these presets.
+    @Test("A curve nobody can see is not called custom")
+    func unseeableCurveIsNotCustom() {
+        #expect(
+            PresetHighlight.isRunningCustomCurve(among: builtins, enforced: nil, applied: nil) == false
+        )
+        #expect(
+            PresetHighlight.isRunningCustomCurve(
+                among: builtins, enforced: HelperStatus(mode: .curve, activeCurve: nil), applied: nil
+            ) == false
+        )
+    }
 }

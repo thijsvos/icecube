@@ -152,9 +152,34 @@ struct FanControlSection: View {
             ForEach(presets.all) { preset in
                 presetButton(preset)
             }
+            if PresetHighlight.isRunningCustomCurve(
+                among: presets.all, enforced: helper.status, applied: helper.lastAppliedConfig
+            ) {
+                customChip
+            }
             Spacer(minLength: 0)
         }
         .controlSize(.small)
+    }
+
+    /// Shown only while the fans run a curve that is none of the presets — a
+    /// curve edited in the editor and applied without being saved.
+    ///
+    /// Without it the whole row goes dark the moment someone drags a point and
+    /// applies, which reads as "fan control is off" at exactly the moment the
+    /// user has taken the most direct control of it. It opens the editor rather
+    /// than applying anything: there is nothing to switch *to* — this is already
+    /// what is running — and the editor is where the curve can be adjusted or
+    /// given a name with Save Preset.
+    private var customChip: some View {
+        Button("Custom") {
+            WindowOpener.openFromPopover(
+                WindowOpener.ID.curves, using: openWindow, dismissing: dismissPopover
+            )
+        }
+        .buttonStyle(.bordered)
+        .tint(Theme.accent)
+        .help("A curve you edited. Open the editor to adjust it, or save it as a preset to name it.")
     }
 
     private func presetButton(_ preset: Preset) -> some View {
