@@ -1118,6 +1118,74 @@ struct DeferredApplyTests {
         #expect(manager.lastAppliedConfig != nil)
     }
 
+    /// `FanControlSection` shows `lastError` when non-nil and only *otherwise*
+    /// falls through to `deferralNotice`. So a failure followed by a lid close
+    /// used to keep a red error on screen and suppress "Waking up — your fan
+    /// settings will take effect in a moment", which is the one message the
+    /// deferral path exists to deliver.
+    @Test("A deferral clears an older error instead of letting it hide the wake notice")
+    func deferralClearsAStaleError() async {
+        let registrar = FakeRegistrar()
+        registrar.status = .enabled
+        let channel = FakeChannel()
+        let manager = makeManager(registrar: registrar, channel: channel, defaults: makeDefaults())
+
+        // First a genuine failure, which the user should see.
+        channel.applyFailure = WireError.wire(IceCubeError.smcKeyNotFound(key: "F0Md"))
+        await manager.apply(coldCurve())
+        #expect(manager.lastError != nil, "precondition: a real failure is on screen")
+
+        // Then the lid closes and the next command is merely deferred.
+        channel.applyFailure = asleep()
+        await manager.apply(coldCurve())
+
+        #expect(manager.lastError == nil, "a deferral is not a failure, and must not leave one standing")
+        #expect(manager.deferralNotice != nil, "the wake notice is what the user needs to read now")
+    }
+
+    /// `StatusItemController.quickSwitch` flashes the returned preset's name in
+    /// the menu bar. Keying that on `lastError` meant a preset merely *queued*
+    /// for a sleeping Mac was announced as a switch the fans never made.
+    @Test("A quick-switch deferred until wake is not reported as a switch")
+    func quickSwitchDeferredUntilWakeReportsNothing() async {
+        let registrar = FakeRegistrar()
+        registrar.status = .enabled
+        let channel = FakeChannel()
+        let manager = makeManager(registrar: registrar, channel: channel, defaults: makeDefaults())
+        // Connect FIRST. `cyclePreset` declines outright while the daemon is
+        // unreachable, so without this the test would pass on the refusal guard
+        // and never reach the line it is meant to pin.
+        await manager.maintainOnce()
+        #expect(
+            manager.connection == .connected(version: HelperConstants.protocolVersion),
+            "precondition: the quick-switch is allowed to proceed"
+        )
+
+        channel.applyFailure = asleep()
+        let switched = await manager.cyclePreset(in: PresetStore.builtins)
+
+        #expect(manager.lastError == nil, "and it is genuinely not an error")
+        #expect(switched == nil, "but nothing reached the fans, so nothing may be announced")
+    }
+
+    /// The other half: a guard that reports nothing for everything is not a fix.
+    @Test("A quick-switch that lands is still reported")
+    func quickSwitchThatLandsIsReported() async {
+        let registrar = FakeRegistrar()
+        registrar.status = .enabled
+        let channel = FakeChannel()
+        let manager = makeManager(registrar: registrar, channel: channel, defaults: makeDefaults())
+        await manager.maintainOnce()
+        #expect(
+            manager.connection == .connected(version: HelperConstants.protocolVersion),
+            "precondition: the quick-switch is allowed to proceed"
+        )
+
+        let switched = await manager.cyclePreset(in: PresetStore.builtins)
+
+        #expect(switched != nil, "a preset that reached the fans must still be announced")
+    }
+
     @Test("A genuine failure is still reported, and never re-sent behind the user's back")
     func realFailuresAreNotDeferred() async {
         let registrar = FakeRegistrar()

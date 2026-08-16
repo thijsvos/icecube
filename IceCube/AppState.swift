@@ -37,6 +37,59 @@ final class AppState: PopoverLifecycleObserving {
     /// in-memory store when simulated so a simulated session cannot steer the
     /// real app's next launch.
     @ObservationIgnored let defaults: any KeyValueStore
+
+    static let persistCurveKey = "persistCurve"
+    static let dismissedSetupKey = "hasDismissedSetup"
+
+    /// The app-wide "keep the curve running when Ice Cube quits" toggle.
+    ///
+    /// Here, rather than in three separate `@AppStorage` properties, because
+    /// `@AppStorage` binds to `UserDefaults.standard` and cannot be pointed at
+    /// the injected store — `SimulatedEnvironment.Defaults` is a plain
+    /// `KeyValueStore`, not a `UserDefaults`. So the popover, the curve editor
+    /// and the Settings tab each read a *different* value from
+    /// `FanControlMemory.persistsCurveWithoutApp`, which does go through the
+    /// seam: in a simulated session the toggle had no effect on what
+    /// `cyclePreset` and `powerSourceChanged` actually sent, **and** flipping it
+    /// wrote into the owner's real preferences domain. That is the hole
+    /// `CompositionRoot` exists to close, and `ChartSettings` was already fixed
+    /// for exactly this reason.
+    var persistsCurveWithoutApp: Bool {
+        didSet { defaults.set(persistsCurveWithoutApp, forKey: Self.persistCurveKey) }
+    }
+
+    /// Whether ⌥-click cycles presets without opening the popover.
+    ///
+    /// Same seam, same reason — and `reconcileMenuBarMode` already read this one
+    /// through the injected store, so the `@AppStorage` copy in Settings was
+    /// writing somewhere the reader never looked.
+    var prefersSilentOptionClick: Bool {
+        didSet {
+            defaults.set(prefersSilentOptionClick, forKey: MenuBarMode.preferenceKey)
+            reconcileMenuBarMode()
+        }
+    }
+
+    /// Whether the user has actually CLOSED the guided setup — not merely that
+    /// it was displayed once.
+    ///
+    /// It used to mean "shown", set the moment the window opened, which the
+    /// relocation flow then broke: moving to /Applications relaunches the app,
+    /// so the pre-move instance spent the one-shot flag and the relaunched one
+    /// — the instance the user actually interacts with — decided setup had
+    /// already been handled and showed nothing. The user was left in a menu-bar
+    /// app with no visible way forward, immediately after being told setup would
+    /// continue. Recording *dismissal* instead survives any number of relaunches
+    /// and still never nags someone who said no.
+    ///
+    /// Here rather than in `@AppStorage` for the same seam reason as the two
+    /// above: a simulated session that closed the setup window wrote this into
+    /// the real preferences domain, so a *simulated* run could make the next
+    /// real launch skip onboarding.
+    var hasDismissedSetup: Bool {
+        didSet { defaults.set(hasDismissedSetup, forKey: Self.dismissedSetupKey) }
+    }
+
     /// Helper daemon lifecycle + fan-control commands (Phase 3).
     ///
     /// Injected, never constructed here. It used to be `HelperManager()` as a
@@ -338,6 +391,9 @@ final class AppState: PopoverLifecycleObserving {
         self.defaults = defaults
         chartSettings = ChartSettings(defaults: defaults)
         updates = UpdateChecker(defaults: defaults)
+        persistsCurveWithoutApp = defaults.bool(forKey: Self.persistCurveKey)
+        prefersSilentOptionClick = defaults.bool(forKey: MenuBarMode.preferenceKey)
+        hasDismissedSetup = defaults.bool(forKey: Self.dismissedSetupKey)
         // Defaulted to the mock rather than to `SystemProcessSampler`, so a
         // caller that forgets the argument reads fiction instead of the user's
         // real process list. The safe default is the one that touches nothing.

@@ -17,19 +17,6 @@ struct IceCubeApp: App {
     @State private var appState: AppState
     @Environment(\.openWindow) private var openWindow
 
-    /// Whether the user has actually CLOSED the guided setup — not merely that
-    /// it was displayed once.
-    ///
-    /// It used to mean "shown", set the moment the window opened, which the
-    /// relocation flow then broke: moving to /Applications relaunches the app,
-    /// so the pre-move instance spent the one-shot flag and the relaunched one
-    /// — the instance the user actually interacts with — decided setup had
-    /// already been handled and showed nothing. The user was left in a menu-bar
-    /// app with no visible way forward, immediately after being told setup
-    /// would continue. Recording *dismissal* instead survives any number of
-    /// relaunches and still never nags someone who said no.
-    @AppStorage("hasDismissedSetup") private var hasDismissedSetup = false
-
     init() {
         // CompositionRoot decides simulated vs real; the app never chooses.
         // It now returns the WHOLE graph, not just a provider — deciding only
@@ -103,20 +90,26 @@ struct IceCubeApp: App {
                 for _ in 0 ..< 12 where appState.helper.connection == .disconnected {
                     try? await Task.sleep(for: .milliseconds(500))
                 }
-                let needsUpdate = if case .versionMismatch = appState.helper.connection {
-                    true
-                } else {
-                    false
-                }
-                let notSetUp = appState.helper.registration != .enabled
+                // Classified once, in `FanControlStatus`, rather than
+                // re-derived here from `registration` and `connection` by hand.
+                // Two hand-written readings of the same twelve pairs is the
+                // duplication that type exists to remove — and this was the
+                // second one, which is why `needsUserAction` had no production
+                // caller despite being exactly this question.
+                let summary = FanControlStatus.summary(
+                    registration: appState.helper.registration,
+                    connection: appState.helper.connection
+                )
+                let needsUpdate = summary == .updateNeeded
+                let notSetUp = summary.needsUserAction && !needsUpdate
                 let log = Logger(subsystem: HelperConstants.logSubsystem, category: "ui")
-                guard needsUpdate || (notSetUp && !hasDismissedSetup) else {
+                guard needsUpdate || (notSetUp && !appState.hasDismissedSetup) else {
                     // Say the ACTUAL reason. The old message asserted
                     // "registration ok, versions match" for every non-open,
                     // including the case where registration was plainly not ok
                     // — which sent me looking in the wrong place.
                     log.notice(
-                        "setup: not shown (notSetUp: \(notSetUp, privacy: .public), dismissed: \(hasDismissedSetup, privacy: .public))"
+                        "setup: not shown (notSetUp: \(notSetUp, privacy: .public), dismissed: \(appState.hasDismissedSetup, privacy: .public))"
                     )
                     return
                 }

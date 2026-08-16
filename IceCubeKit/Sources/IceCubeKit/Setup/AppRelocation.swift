@@ -53,11 +53,13 @@ public enum AppRelocation {
         if RegistrationPreflight.isInApplications(normalized) {
             return .fine
         }
-        // Translocated apps live under a randomized /private/var/folders path
-        // that vanishes on quit; a self-move is not possible from there.
-        if isTranslocated || normalized.hasPrefix("/private/var/folders/") {
-            return .offerMove(destination: applicationsPath)
-        }
+        // Everything left over gets the same answer, translocated or not — a
+        // translocated app (randomized /private/var/folders path, gone on quit)
+        // cannot copy ITSELF, but the one outcome that must never happen is a
+        // silent dead end, so it is still offered the move and `SetupModel`
+        // reveals it in Finder for the user to drag. This used to be written as
+        // an `if isTranslocated || …` returning the identical value, which read
+        // as a distinction the function makes and does not.
         return .offerMove(destination: applicationsPath)
     }
 

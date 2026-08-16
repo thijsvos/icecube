@@ -66,4 +66,23 @@ struct CoolingHistoryChartModelTests {
         )
         #expect(CoolingHistoryChartModel.rpmLabel(.fanless, minRPM: 0, maxRPM: 0) == "No fans")
     }
+
+    /// The low deciles are not hypothetical: the fans genuinely read 0 RPM in
+    /// mode 3 when the Mac is cool, and `FanContext.measure` bands on
+    /// `actualRPM / maxRPM`, so a real record can carry `.decile(0)`. Clamping
+    /// only the lower edge made those labels read backwards — "2317–680 RPM".
+    @Test("A decile entirely below the fan's floor still reads forwards")
+    func rpmLabelsNeverInvert() {
+        for decile in 0 ... 9 {
+            let label = CoolingHistoryChartModel.rpmLabel(.decile(decile), minRPM: 2317, maxRPM: 6800)
+            let bounds = label
+                .replacingOccurrences(of: " RPM", with: "")
+                .split(separator: "–")
+                .compactMap { Int($0) }
+            #expect(bounds.count == 2, "decile \(decile) produced \(label)")
+            if bounds.count == 2 {
+                #expect(bounds[0] <= bounds[1], "decile \(decile) reads backwards: \(label)")
+            }
+        }
+    }
 }

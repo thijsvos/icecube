@@ -107,6 +107,15 @@ public actor FanWriteSequencer {
             // for why a missing `Mn` alone is enough to disqualify a fan.
             guard fan.hasUsableRange else { continue }
             let target = Self.clamp(requested, to: fan)
+            // SAFETY: the last gate before the wire, and deliberately redundant.
+            // `hasUsableRange` above guarantees `minRPM > 0`, and `clamp` never
+            // returns below `minRPM`, so this is unreachable by construction —
+            // today. It exists so that stays true: `clamp` is `public static`
+            // and its unusable-range branch returns `maxRPM`, which for a fan
+            // that reported nothing at all is 0, the one value Ice Cube must
+            // never write. That the fans are safe should not rest on every
+            // future caller of a public helper remembering to filter first.
+            guard target > 0 else { continue }
             clamped[fan.id] = target
             let modeKey = "F\(fan.id)\(suffix)"
 
@@ -265,6 +274,13 @@ public actor FanWriteSequencer {
     /// A non-finite request collapses to the minimum (never NaN on the wire);
     /// callers must additionally skip fans with an unreadable range so this
     /// never has to invent a value for a `0…0` range (see `engageManual`).
+    ///
+    /// **This can return 0**, for a fan that reported neither bound — pinned by
+    /// `clampDegenerateRange`, because the alternative is inventing
+    /// an RPM for hardware that answered nothing. `engageManual` therefore
+    /// filters on ``Fan/hasUsableRange`` *and* refuses a non-positive target at
+    /// the write itself, so the forbidden value cannot reach the wire even if a
+    /// future caller of this helper forgets the first rule.
     public static func clamp(_ requested: Double, to fan: Fan) -> Double {
         guard fan.hasUsableRange else { return fan.maxRPM }
         guard requested.isFinite else { return fan.minRPM }

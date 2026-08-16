@@ -14,12 +14,8 @@ struct SetupWindowView: View {
     let state: AppState
     @State private var model: SetupModel?
     @Environment(\.dismiss) private var dismiss
-    /// Set only when the user closes this window, so a relaunch mid-flow (the
-    /// move to /Applications) reopens it rather than assuming it was handled.
-    @AppStorage("hasDismissedSetup") private var hasDismissedSetup = false
-
     private func close() {
-        hasDismissedSetup = true
+        state.hasDismissedSetup = true
         dismiss()
     }
 
@@ -39,7 +35,7 @@ struct SetupWindowView: View {
         // are restarting elsewhere is not the user saying no.
         .onDisappear {
             if model?.isRelocating != true {
-                hasDismissedSetup = true
+                state.hasDismissedSetup = true
             }
         }
         .task {

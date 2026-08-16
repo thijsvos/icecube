@@ -576,7 +576,12 @@ final class HelperManager {
     /// app** — it used to be copied verbatim into the popover's preset row and
     /// the Settings picker, which is one copy too many for a safety-adjacent
     /// rule.
-    func applyPreset(_ preset: Preset, persistCurve: Bool) async {
+    /// - Returns: what actually happened, so a caller that reports success to
+    ///   the user can tell an apply that reached the fans from one that was only
+    ///   queued for wake. `@discardableResult` because most callers are buttons
+    ///   whose feedback is the UI re-rendering from `status`.
+    @discardableResult
+    func applyPreset(_ preset: Preset, persistCurve: Bool) async -> CommandOutcome {
         var config = preset.config
         if config.mode == .curve {
             config.persistsWithoutApp = persistCurve
@@ -607,6 +612,7 @@ final class HelperManager {
         case .failed:
             log.error("preset: \(preset.name, privacy: .public) was refused after \(ms, privacy: .public) ms")
         }
+        return outcome
     }
 
     /// Why a quick-switch was declined, or nil when it may proceed.
@@ -676,10 +682,15 @@ final class HelperManager {
         }
         guard let next = PresetCycle.next(after: lastAppliedConfig, in: cycle) else { return nil }
         log.notice("quick-switch: \(next.name, privacy: .public)")
-        await applyPreset(next, persistCurve: memory.persistsCurveWithoutApp)
-        // `applyPreset` swallows failures into `lastError`; report honestly
-        // rather than claiming a switch that did not happen.
-        return lastError == nil ? next : nil
+        let outcome = await applyPreset(next, persistCurve: memory.persistsCurveWithoutApp)
+        // Report honestly rather than claiming a switch that did not happen.
+        //
+        // Keyed on the outcome, not on `lastError`: a `.deferredUntilWake` apply
+        // leaves `lastError` alone, so "no error" was true of a preset that had
+        // merely been queued for a sleeping Mac — and `StatusItemController`
+        // then flashed its name in the menu bar for a switch the fans never
+        // made. Only `.ok` means it reached the hardware.
+        return outcome == .ok ? next : nil
     }
 
     /// Re-applies the currently active curve with a new persist setting, so
@@ -902,6 +913,13 @@ final class HelperManager {
                 hasLoggedDeferral = true
                 log.notice("command deferred — the Mac is asleep; it will be re-sent on wake")
             }
+            // A deferral is not a failure, so it must not leave an older one
+            // standing. `FanControlSection` shows `lastError` when non-nil and
+            // only otherwise falls through to `deferralNotice` — so a failure
+            // followed by a lid close used to keep a red error on screen and
+            // suppress "Waking up — your fan settings will take effect in a
+            // moment", which is the one message this path exists to deliver.
+            lastError = nil
             return .deferredUntilWake
         } catch {
             // Now readable, because `HelperService` wires the description into

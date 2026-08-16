@@ -56,14 +56,6 @@ struct FanControlStatusTests {
 
     // MARK: What each surface says
 
-    /// Only one state means the fans are actually being controlled. Anything
-    /// looser and the UI claims control it does not have — the failure this
-    /// project deleted a whole preset over.
-    @Test("Exactly one state reports fan control as working")
-    func onlyOnIsWorking() {
-        #expect(FanControlStatus.Summary.allCases.filter(\.isWorking) == [.on])
-    }
-
     /// `.starting` is the one state that resolves itself. Everything else needs
     /// the user, and a surface that offers no button for those is a dead end.
     @Test("Starting is the only unactionable state that is not already working")

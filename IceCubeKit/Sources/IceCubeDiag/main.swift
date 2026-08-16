@@ -145,7 +145,7 @@ do {
                let r = CoolingEfficiency.resistance(dieCelsius: die, ambientCelsius: ambient, watts: watts)
             {
                 print(
-                    "Cooling:    \(String(format: "%.2f", r)) °C/W  (instantaneous — see --watch for a settled figure)"
+                    "Cooling:    \(String(format: "%.2f", r)) °C/W  (instantaneous — a settled figure needs the app, which holds the 20 s window)"
                 )
             }
         } else {

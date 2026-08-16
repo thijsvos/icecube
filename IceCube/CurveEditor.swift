@@ -8,13 +8,12 @@ import SwiftUI
 /// owns the chrome around it — loading presets in, tuning hysteresis and ramp,
 /// and sending the result to the daemon.
 struct CurveEditorView: View {
-    let state: AppState
+    @Bindable var state: AppState
     @State private var model = CurveEditorModel()
     @State private var presetName = ""
 
     /// The name a pending save would overwrite, driving the confirmation.
     @State private var pendingOverwrite: String?
-    @AppStorage("persistCurve") private var persistCurve = false
 
     /// Why the window is still here after an Apply — see ``CurveApplyPolicy``.
     /// `nil` in the ordinary case, because the ordinary case closed the window.
@@ -176,7 +175,7 @@ struct CurveEditorView: View {
                 }
             }
             HStack(spacing: 8) {
-                Toggle("Keep running when app quits", isOn: $persistCurve)
+                Toggle("Keep running when app quits", isOn: $state.persistsCurveWithoutApp)
                     .font(.caption)
                     .toggleStyle(.checkbox)
                 Spacer(minLength: 8)
@@ -233,7 +232,7 @@ struct CurveEditorView: View {
     }
 
     private func applyCurve() async {
-        var config = FanConfig.curve(model.curve, persists: persistCurve)
+        var config = FanConfig.curve(model.curve, persists: state.persistsCurveWithoutApp)
         config.hysteresisCelsius = model.hysteresis
         config.rampPerTick = model.ramp
         // Cleared before the send, not after: a notice left over from the last

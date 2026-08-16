@@ -91,11 +91,6 @@ extension FanControlStatus.Summary {
         }
     }
 
-    /// Whether fan control is actually working right now.
-    var isWorking: Bool {
-        self == .on
-    }
-
     /// Whether the user has something to do about it.
     var needsUserAction: Bool {
         switch self {

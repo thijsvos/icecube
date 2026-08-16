@@ -59,7 +59,7 @@ struct SettingsGeneralTab: View {
                 Toggle("Tell me if fan control stops working", isOn: $alerts.reportsControlLoss)
                     .help(
                         "The daemon handing the fans back, a failed write, Ice Cube having to cool "
-                            + "the Mac itself, or the fans stuck at maximum for an hour. "
+                            + "the Mac itself, or the fans stuck at maximum for 45 minutes. "
                             + "Grouped so a busy afternoon is one notification, not ten."
                     )
                 if state.alerts.permissionDenied {

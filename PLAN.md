@@ -474,9 +474,57 @@ only sampled endpoints, and an endpoint is what a mistyped interior point does
 not move; `coldMatchesItsDocumentedShape` now pins the slope ordering, and was
 mutation-verified against the old constants.
 
-Deliberately **not** fixed, and filed as an issue instead: 14 code bugs found
-while reading. Keeping the rest of the audit comment-only is what made it safe to
-review at that size.
+The 14 code bugs found while reading were filed separately rather than mixed into
+that diff, and fixed straight after — see below.
+
+### The audit's code bugs (2026-08-16)
+
+All 14, fixed in one pass with tests. Four touched fan control:
+
+- **`apply(.curve)` narrated an engage it had not made.** `runCurveTick()`
+  returned `Void`, so `record("curve engaged")` ran unconditionally — including
+  when the engage failed and `engage`'s catch had already reverted. The seventh
+  site of the shape v27 fixed in six. It now returns `Bool`; the tick and the
+  boot resume ignore it with an explicit `_ =` and say why.
+- **`cyclePreset` reported success for a wake-deferred apply**, because it keyed
+  on `lastError` and a deferral writes no error. Now keyed on the
+  `CommandOutcome`, so the menu bar cannot flash a preset the fans never took.
+- **A deferral never cleared an older error**, and `FanControlSection` shows
+  `lastError` in preference to `deferralNotice` — so a failure followed by a lid
+  close hid the one message that path exists to deliver.
+- **`FanWriteSequencer.clamp` can return 0 RPM** for a fan that reported neither
+  bound. Unreachable through every current caller, but the safety rested on each
+  of them remembering; `engageManual` now also refuses a non-positive target at
+  the write itself. The test pins the *outcome*, so removing either guard alone
+  keeps it green and removing both does not.
+
+The isolation hole was the widest-reaching: **four `@AppStorage` properties
+bypassed the injected `KeyValueStore`.** `@AppStorage` binds to
+`UserDefaults.standard` and cannot be pointed at a plain `KeyValueStore`, so the
+persist toggle, the ⌥-click mode and the setup-dismissed flag were read from one
+store and written to another. Two silent consequences: a simulated session's
+toggles had no effect on what it actually sent, and flipping one wrote into the
+owner's real preferences domain — the hole `CompositionRoot` exists to close, and
+which `ChartSettings` had already been fixed for. All three now live on
+`AppState` over the injected store, under their existing key names so nobody's
+settings move. `SimulatedIsolationTests` gained the behavioural test; verified
+live afterwards by running simulated mode and confirming the real plist's mtime
+did not change.
+
+Also: the approval card was dead code (`approvalPrompt` had no reference, so a
+user one switch from done read "Fan control is off"); `rpmLabel` printed
+inverted ranges for the low deciles, which are reachable because the fans read
+0 RPM in mode 3 when cool; `csv()` omitted the power series it calls itself the
+full history of; the pinned-fan help text said an hour where the rule is 45
+minutes; the power chart row was labelled "Package" for a whole-machine reading;
+`--watch`'s settled-figure hint pointed at a flag that computes no `R`;
+`AppRelocation`'s translocation branch returned the same value as the line after
+it; and two genuinely dead members went (`twoDecimals`, `Summary.isWorking`).
+`Summary.needsUserAction` was not dead but unused — `IceCubeApp` was re-deriving
+it by hand from the same two inputs, which is the duplication `FanControlStatus`
+exists to remove, so it now calls it.
+
+Every new test was mutation-verified.
 
 ## 7. Risks & mitigations
 - **SMC keys vary wildly per model** → curated map + fallback enumeration + community diagnostics pipeline (§3.3). Biggest ongoing cost; design for it.

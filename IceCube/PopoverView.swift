@@ -124,7 +124,8 @@ struct PopoverView: View {
                         helper: state.helper,
                         presets: state.presets,
                         fans: state.fans,
-                        dismissPopover: dismissPopover
+                        dismissPopover: dismissPopover,
+                        persistsCurveWithoutApp: state.persistsCurveWithoutApp
                     )
                 }
                 if state.chartSettings.showCharts {

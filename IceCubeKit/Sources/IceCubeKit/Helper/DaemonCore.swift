@@ -227,7 +227,10 @@ public actor DaemonCore {
                 record("boot: the persisted curve is loaded, but this is a dark wake — the fans stay with the firmware")
             } else {
                 record("boot: resuming persisted curve config")
-                await runCurveTick()
+                // Ignored deliberately: the sentence just recorded is about the
+                // config being resumed, which is already true, and a boot whose
+                // first write misses gets another attempt 2 s later from the tick.
+                _ = await runCurveTick()
             }
         } else {
             await revertEverything(reason: "daemon start")
@@ -810,8 +813,18 @@ public actor DaemonCore {
             status.mode = .curve
             status.activeCurve = newConfig.sharedCurve
             store.save(newConfig) // persists only when the rules allow
-            await runCurveTick()
-            record("curve engaged (persists without app: \(newConfig.persistsWithoutApp))")
+            if await runCurveTick() {
+                record("curve engaged (persists without app: \(newConfig.persistsWithoutApp))")
+            } else {
+                // Deliberately says nothing about where the fans ended up: the
+                // lines `engage` and `revertEverything` already recorded do that,
+                // and they are the only ones that know. A failed engage whose
+                // revert ALSO failed keeps `.curve` and retries every tick —
+                // control is retained precisely so the watchdog and the ceiling
+                // stay armed — so "the fans are back with macOS" would be exactly
+                // the class of false claim this line exists to stop making.
+                record("the curve could not be applied")
+            }
         }
     }
 
@@ -1008,7 +1021,9 @@ public actor DaemonCore {
             }
             switch config.mode {
             case .manual: await verifyManualState()
-            case .curve: await runCurveTick()
+            // Ignored deliberately: a tick that could not write says so through
+            // `engage`, and the next tick is 2 s away.
+            case .curve: _ = await runCurveTick()
             case .auto: await autoSafetyNet()
             }
         case let .forceMaxCooling(offender):
@@ -1405,9 +1420,18 @@ public actor DaemonCore {
 
     /// One curve tick: hottest die temp → per-fan follower → quantized
     /// targets → write when changed, read-back-verify when not.
-    private func runCurveTick() async {
+    /// - Returns: whether the curve actually reached the hardware this tick.
+    ///
+    /// Deliberately NOT `@discardableResult`. The 2 s tick and the boot resume
+    /// both ignore it on purpose and say so with `_ =`, but `apply(.curve)` must
+    /// not: it used to `record("curve engaged")` unconditionally on the next
+    /// line, so an engage that failed — and that `engage`'s own catch had
+    /// already reverted, clearing the persisted curve and dropping to `.auto` —
+    /// still put "curve engaged" on the decision timeline as the last word. Same
+    /// shape as the six paths v27 fixed; this was the seventh.
+    private func runCurveTick() async -> Bool {
         let generation = revertGeneration
-        guard let fans = try? await readFans(), !fans.isEmpty else { return }
+        guard let fans = try? await readFans(), !fans.isEmpty else { return false }
         // Sensor blindness is handled by the SafetyMonitor (revert after 3
         // failed ticks). A single missing reading used to skip this tick
         // outright — a 2 second wait for a millisecond problem, and it landed
@@ -1415,7 +1439,7 @@ public actor DaemonCore {
         // immediately, on a connection that `resetPort()` just closed, so the
         // first read after handing back to macOS is the one most likely to
         // miss. Retrying in place turns that into an imperceptible pause.
-        guard let dieHot = await hottestDieRetrying() else { return }
+        guard let dieHot = await hottestDieRetrying() else { return false }
 
         var targets: [Int: Double] = [:]
         for fan in fans {
@@ -1438,18 +1462,21 @@ public actor DaemonCore {
             // to auto for exactly this reason).
             targets[fan.id] = FanWriteSequencer.quantizedTarget(fraction: fraction, fan: fan)
         }
-        guard !targets.isEmpty else { return }
+        guard !targets.isEmpty else { return false }
 
         if targets != curveTargets {
             curveTargets = targets
-            if let outcome = await engage(targets: targets, fans: fans, since: generation) {
-                status.appliedTargets = outcome.clampedTargets
-                status.unlockBranch = outcome.branch.rawValue
-                status.lastWriteVerified = outcome.verified
+            guard let outcome = await engage(targets: targets, fans: fans, since: generation) else {
+                // `engage` has already reverted and logged why.
+                return false
             }
-        } else {
-            await verifyCurveHeld(expected: targets, fans: fans, since: generation)
+            status.appliedTargets = outcome.clampedTargets
+            status.unlockBranch = outcome.branch.rawValue
+            status.lastWriteVerified = outcome.verified
+            return true
         }
+        await verifyCurveHeld(expected: targets, fans: fans, since: generation)
+        return true
     }
 
     /// Same read-back discipline as manual mode: one re-assert, then revert.
