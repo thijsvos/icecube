@@ -15,8 +15,10 @@ import Foundation
 ///   settings, until it cools 5 °C below the ceiling. Die sensors legitimately
 ///   run hotter than proximity sensors, hence per-class thresholds + debounce
 ///   (a single glitched tick must not slam the fans).
-/// - **Sensor health**: >3 consecutive failed temperature reads while manual
-///   control is active → revert (flying blind is not allowed).
+/// - **Sensor health**: >3 consecutive failed temperature reads while the daemon
+///   is holding the fans at all — manual *or* curve, since a curve running on a
+///   machine it cannot see is no safer than a fixed RPM → revert (flying blind
+///   is not allowed).
 public struct SafetyMonitor: Sendable {
     /// Tunables, overridable in tests only — release code uses the defaults.
     public struct Limits: Sendable {
@@ -45,7 +47,6 @@ public struct SafetyMonitor: Sendable {
         case revertToAuto(reason: String)
     }
 
-    /// Die-class sensor key prefixes (higher ceiling).
     private let limits: Limits
     private var overCeilingTicks = 0
     private var coolingActive = false

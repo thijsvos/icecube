@@ -243,7 +243,14 @@ public struct FanGuardian: Sendable {
     ///
     /// - Parameters:
     ///   - fans: this tick's fan readings.
-    ///   - dieCelsius: the hottest die-class sensor, or 0 if none could be read.
+    ///   - dieCelsius: the hottest die-class reading, in °C. **Never a stand-in
+    ///     for a failed read.** 0 is below every threshold here, so a blind tick
+    ///     passed as 0 takes the release branch and hands a hot Mac back to the
+    ///     `thermalmonitord` this type exists because it does not reliably
+    ///     resume — which happened, at 90 °C. `DaemonCore`'s auto tick therefore
+    ///     skips this call entirely when the sensors do not answer, and holds the
+    ///     previous decision instead. This doc said "or 0 if none could be read"
+    ///     until 2026-08-16, which invited exactly that bug back.
     public mutating func evaluate(fans: [Fan], dieCelsius: Double) -> Action {
         if state.isActive {
             guard dieCelsius >= limits.releaseCelsius else {
@@ -366,8 +373,16 @@ public struct FanGuardian: Sendable {
         )
     }
 
-    /// What to command to keep each fan turning: its minimum if it is already
-    /// moving, or ``Limits/breakawayFraction`` of its range if it is stopped.
+    /// What to command to keep each fan turning: its own minimum if it is still
+    /// turning fast enough to keep itself going, or ``Limits/breakawayFraction``
+    /// of its range once it has fallen below
+    /// ``Limits/breakawayBelowFractionOfMin`` of that minimum.
+    ///
+    /// Deliberately NOT "if it is stopped" — that is what the first version
+    /// tested, and on hardware a fan caught mid-coast at 293 RPM against a
+    /// 2317 RPM floor was handed its own minimum and carried on decaying to a
+    /// standstill anyway. The constant's own doc says so; this summary claimed
+    /// the repudiated test until 2026-08-16.
     ///
     /// SAFETY: fans without a usable `[Mn, Mx]` are skipped rather than clamped
     /// — the same rule as ``curveTargets``. A 0…0 range maps every fraction to
