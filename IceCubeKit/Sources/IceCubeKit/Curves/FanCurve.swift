@@ -128,9 +128,18 @@ public struct FanCurve: Sendable, Codable, Equatable {
     /// sustained load lives. Net: the machine stays just as cool, but with a
     /// constant soft hum instead of random spikes. (The die still exceeds
     /// 50 °C under real load — no fan can prevent that.)
+    ///
+    /// CORRECTION (2026-08-16): the first two fractions shipped as 0.5 and 0.62
+    /// in `d45b2e3`, which put the idle band at 50–62 % and — because the slope
+    /// then *fell* from 55→65 °C to 65→80 °C — put the steepest segment BELOW
+    /// 65 °C. Both halves of the paragraph above were untrue of the constants
+    /// under it from the day they landed; that commit's own message asks for
+    /// "a steady ~55-70%" and a knee "ABOVE 65 C". The prose was the spec and
+    /// the numbers were the typo, so the numbers moved. Cold now genuinely
+    /// climbs 0.0075 → 0.008 → 0.0147 per °C, steepest last.
     public static let cold = FanCurve(points: [
-        CurvePoint(celsius: 35, fraction: 0.5),
-        CurvePoint(celsius: 55, fraction: 0.62),
+        CurvePoint(celsius: 35, fraction: 0.55),
+        CurvePoint(celsius: 55, fraction: 0.7),
         CurvePoint(celsius: 65, fraction: 0.78),
         CurvePoint(celsius: 80, fraction: 1),
     ])
