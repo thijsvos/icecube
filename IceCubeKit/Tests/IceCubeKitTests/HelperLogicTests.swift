@@ -323,6 +323,32 @@ struct FanWriteSequencerTests {
         #expect(try await firmware.readDouble("F1Tg") == 2317, "and fan 1")
     }
 
+    /// The invariant, not the implementation: a fan that reported neither bound
+    /// must receive no target at all.
+    ///
+    /// Two independent guards stand here — `engageManual` filters on
+    /// ``Fan/hasUsableRange``, and refuses a non-positive target at the write
+    /// itself — and this pins the outcome rather than either mechanism, so
+    /// removing one of them keeps the test green and removing both does not.
+    /// That redundancy is deliberate: `clamp` is `public static`, its
+    /// unusable-range branch returns `maxRPM`, and for a `0…0` fan that is 0 —
+    /// the one value Ice Cube must never write.
+    @Test("A fan that reported no usable range is never given a target")
+    func unusableFanIsNeverCommanded() async throws {
+        let unusable = Fan(
+            id: 0, name: "Left", mode: .auto,
+            actualRPM: 0, targetRPM: 0, minRPM: 0, maxRPM: 0
+        )
+        let firmware = FakeFirmware(generation: .m2, fans: [unusable])
+        let sequencer = FanWriteSequencer(port: firmware, sleep: instantSleep)
+
+        let outcome = try await sequencer.engageManual(targets: [0: 4000], fans: [unusable])
+
+        #expect(outcome.clampedTargets[0] == nil, "no target may be computed for a fan with no range")
+        let targetWrites = await firmware.writes.filter { $0.key == "F0Tg" }
+        #expect(targetWrites.isEmpty, "and nothing may reach the wire — got \(targetWrites)")
+    }
+
     @Test("A machine with no mode key at all refuses manual mode")
     func noModeKey() async throws {
         // A `FakeFirmware` seeded with no fans has no `F{i}Md`/`F{i}md` key at

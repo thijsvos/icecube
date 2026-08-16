@@ -13,11 +13,9 @@ import SwiftUI
 /// `.windowResizability(.contentSize)`.
 struct SettingsWindowView: View {
     @Bindable var state: AppState
-    @AppStorage("persistCurve") private var persistCurve = false
     /// Default false, deliberately: `object(forKey:) == nil` and "the user
     /// turned it off" are indistinguishable through `@AppStorage`, so a
     /// default-true toggle cannot tell a fresh install from a considered no.
-    @AppStorage(MenuBarMode.preferenceKey) private var silentOptionClick = false
     /// Seeded in `onAppear`, not here.
     ///
     /// A `@State` default expression runs on every re-init of the view struct,
@@ -113,10 +111,10 @@ struct SettingsWindowView: View {
                 loginItemError: $loginItemError, updates: state.updates
             )
         case .menu:
-            SettingsMenuTab(state: state, silentOptionClick: $silentOptionClick)
+            SettingsMenuTab(state: state)
         case .fans:
             SettingsFanControlTab(
-                state: state, persistCurve: $persistCurve, openWindow: openWindow
+                state: state, openWindow: openWindow
             )
         }
     }

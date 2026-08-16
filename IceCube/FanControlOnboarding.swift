@@ -14,10 +14,33 @@ import SwiftUI
 struct FanControlOnboarding: View {
     let helper: HelperManager
     let dismissPopover: () -> Void
-    @Environment(\.openWindow) private var openWindow
+
+    /// Which of the two pre-setup cards a registration state deserves.
+    ///
+    /// A named type with a pure resolver, rather than an `if` inside `body`,
+    /// because the `if` inside `body` is exactly what was wrong: this view was
+    /// hard-wired to `onboarding`, so someone who had already registered the
+    /// daemon and was one switch away from done read "Fan control is off" with a
+    /// "Set Up Fan Control…" button — the card for a user who had done nothing.
+    /// `approvalPrompt` existed the whole time and nothing referenced it, which
+    /// no test could catch because the decision lived in a `View`. `SetupModel`
+    /// distinguishes these two correctly, so only this card was ever wrong.
+    enum Prompt: Equatable {
+        /// Nothing has been set up yet.
+        case notSetUp
+        /// Registered; one approval away in System Settings.
+        case awaitingApproval
+
+        static func forRegistration(_ registration: HelperManager.Registration) -> Prompt {
+            registration == .requiresApproval ? .awaitingApproval : .notSetUp
+        }
+    }
 
     var body: some View {
-        onboarding
+        switch Prompt.forRegistration(helper.registration) {
+        case .notSetUp: onboarding
+        case .awaitingApproval: approvalPrompt
+        }
     }
 
     /// Both pre-enabled states hand off to the guided setup window rather than

@@ -151,18 +151,37 @@ struct ChartStoreTests {
     private let epoch = Date(timeIntervalSince1970: 1_753_000_000)
 
     /// Feeds `seconds` of simulated snapshots into a fresh store.
-    private func fedStore(seconds: Int) async -> ChartStore {
+    private func fedStore(seconds: Int, withPower: Bool = false) async -> ChartStore {
         let store = ChartStore()
         for s in 0 ..< seconds {
             let t = epoch.addingTimeInterval(Double(s))
             let snapshot = SMCSnapshot(
                 date: t,
                 fans: MockSMCProvider.fans(at: t.timeIntervalSince1970),
-                temperatures: MockSMCProvider.temperatures(at: t.timeIntervalSince1970)
+                temperatures: MockSMCProvider.temperatures(at: t.timeIntervalSince1970),
+                power: withPower ? MockSMCProvider.power(at: t.timeIntervalSince1970) : nil
             )
             await store.ingest(snapshot)
         }
         return store
+    }
+
+    /// `csv()` calls itself "the full raw history", and the power series is a
+    /// row the user can see on screen — so leaving it out of the export was a
+    /// silent omission of the one series that is the denominator of every
+    /// cooling-efficiency question the export exists to answer offline.
+    @Test("The CSV export carries every series the chart draws, power included")
+    func csvIncludesPower() async {
+        let store = await fedStore(seconds: 30, withPower: true)
+        let csv = await store.csv()
+
+        #expect(csv.contains("power.watts"), "the power series must be exported")
+        #expect(csv.contains("cpu.max.celsius"), "and the others must not have been lost doing it")
+
+        // A Mac with no usable power key has nothing to export, and must not
+        // gain an empty column for it.
+        let noPower = await fedStore(seconds: 30)
+        #expect(await !noPower.csv().contains("power.watts"))
     }
 
     // Phase 2's acceptance line asks for "no dropped frames" on the 60-minute

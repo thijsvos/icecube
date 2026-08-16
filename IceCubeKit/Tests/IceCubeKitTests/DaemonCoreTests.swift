@@ -985,6 +985,56 @@ struct DaemonCoreRevertTests {
         let fan0Modes = await smc.modeWrites(fan: 0)
         #expect(fan0Modes.contains(0), "the already-forced fan was reverted, not abandoned")
     }
+
+    /// The seventh site of the v27 "record the sentence, not the outcome" bug.
+    ///
+    /// `apply(.curve)` used to `record("curve engaged")` unconditionally on the
+    /// line after `runCurveTick()`. When the engage failed, its own catch had
+    /// already reverted to `.auto` and cleared the persisted curve — so the last
+    /// curve-related word on the decision timeline said engaged while the daemon
+    /// held nothing, and `DecisionEvent.Kind.classify` filed it as `.engaged`,
+    /// which the alert rules treat as routine. Silent as well as wrong.
+    @Test("A curve engage that fails is not recorded as an engage")
+    func failedCurveEngageIsNotNarratedAsSuccess() async {
+        let smc = FakeSMC()
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+        await smc.breakWrite("F1Md")
+
+        _ = try? await core.apply(curveConfig(persists: false))
+
+        let events = await core.currentStatus().recentEvents
+        #expect(
+            !events.contains { $0.contains("curve engaged") },
+            "the timeline claimed an engage that never reached the fans: \(events)"
+        )
+        #expect(
+            events.contains { $0.contains("could not be applied") },
+            "the failure must be stated, not merely left unclaimed: \(events)"
+        )
+        // The daemon KEEPS `.curve` here, and that is the v27 invariant rather
+        // than a leak: this engage failed and so did its revert, so dropping to
+        // `.auto` would disarm the watchdog, the ceiling and the guardian over
+        // fans that are still physically forced. Control is retained and the
+        // revert retries every tick instead.
+        #expect(await core.revertPending, "a revert that never landed must stay pending")
+    }
+
+    /// The other half of the same fix: a curve that DOES engage must still say so.
+    /// A guard that reports failure for everything is not an improvement.
+    @Test("A curve engage that succeeds is still recorded as one")
+    func successfulCurveEngageIsStillNarrated() async throws {
+        let core = makeCore(smc: FakeSMC())
+        await core.heartbeat()
+
+        try await core.apply(curveConfig(persists: false))
+
+        let events = await core.currentStatus().recentEvents
+        #expect(
+            events.contains { $0.contains("curve engaged") },
+            "a successful engage went unrecorded: \(events)"
+        )
+    }
 }
 
 @Suite("DaemonCore — boot, wake and the safety tick")

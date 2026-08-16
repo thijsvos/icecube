@@ -228,7 +228,8 @@ public actor ChartStore {
             rows.append(Row(
                 id: "power", title: "Power", unit: .watts, yDomainMin: 0, yDomainMax: 120,
                 series: [
-                    series(id: "power.watts", label: "Package", from: power, start: start, end: end, budget: budget),
+                    // "System", not "Package": `PSTR` is whole-machine power.
+                    series(id: "power.watts", label: "System", from: power, start: start, end: end, budget: budget),
                 ]
             ))
         }
@@ -277,6 +278,14 @@ public actor ChartStore {
         }
         if hasGPU {
             dump("gpu.max.celsius", gpuMax)
+        }
+        // The power series is ingested and drawn as its own row, so an export
+        // that calls itself the full raw history has to carry it. Omitting it
+        // was silent: the file simply had one fewer series than the window the
+        // user was looking at, and watts are the denominator of every
+        // cooling-efficiency question this export exists to answer offline.
+        if hasPower {
+            dump("power.watts", power)
         }
         for fan in fanMeta {
             if let actual = fanActual[fan.id] {

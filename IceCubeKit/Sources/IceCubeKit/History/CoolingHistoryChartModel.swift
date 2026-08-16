@@ -95,14 +95,22 @@ public enum CoolingHistoryChartModel {
     /// small lie on every label.
     ///
     /// The edges are plain fractions of `maxRPM` (`n/10 … (n+1)/10`,
-    /// ``FanBand/width`` apart) with the floor applied to the lower end only.
-    /// `.fanless` says so in words. (The example read "2317–3213 RPM" until
-    /// 2026-08-16 — a figure no decile can produce, left from when the label was
-    /// computed over the min→max range instead.)
+    /// ``FanBand/width`` apart), with the floor applied to **both** ends. Only
+    /// the lower one was clamped until 2026-08-16, so a band lying entirely
+    /// below the floor printed backwards — decile 0 of that same fan read
+    /// "2317–680 RPM". Those low deciles are reachable rather than theoretical:
+    /// the fans genuinely report 0 RPM in mode 3 when the Mac is cool, and
+    /// `FanContext.measure` bands on `actualRPM / maxRPM`. A band collapsed to
+    /// its floor at both ends reads as a single speed, which is the truth about
+    /// a fan that cannot go slower. `.fanless` says so in words.
     public static func rpmLabel(_ band: FanBand, minRPM: Double, maxRPM: Double) -> String {
         guard let range = band.fractionRange else { return "No fans" }
         let low = max(minRPM, range.lowerBound * maxRPM)
-        let high = range.upperBound * maxRPM
+        // The floor is applied to the upper edge too, or the label inverts. The
+        // low deciles are genuinely reachable on Mac14,9 — the fans read 0 RPM in
+        // mode 3 when cool, and `FanContext.measure` bands on `actualRPM/maxRPM`
+        // — so decile 0 of a 2317–6800 fan used to render "2317–680 RPM".
+        let high = max(low, range.upperBound * maxRPM)
         return "\(Int(low.rounded()))–\(Int(high.rounded())) RPM"
     }
 }

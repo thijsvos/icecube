@@ -239,4 +239,47 @@ struct SimulatedIsolationTests {
         #expect(a.helper.usesSimulatedChannel && b.helper.usesSimulatedChannel)
         #expect(!(a.defaults is UserDefaults) && !(b.defaults is UserDefaults))
     }
+
+    /// Injecting the store is only half of isolation — the settings the user can
+    /// actually toggle have to *go through* it.
+    ///
+    /// Four preferences did not. `@AppStorage` binds to `UserDefaults.standard`
+    /// and cannot be pointed at a plain `KeyValueStore`, so the persist toggle,
+    /// the ⌥-click mode and the setup-dismissed flag each read and wrote the
+    /// real domain while `FanControlMemory` and `reconcileMenuBarMode` read the
+    /// injected one. Two consequences, both silent: a simulated session's
+    /// toggles had no effect on what it actually sent, and flipping one wrote
+    /// into the owner's real preferences. The type checks above could not catch
+    /// it — the graph was correct; the views went around it.
+    @Test("The user-facing toggles write to the injected store, not the real domain")
+    func togglesGoThroughTheInjectedStore() {
+        let graph = simulatedGraph()
+        let state = AppState(graph: graph, menuBarHost: { _ in SilentHost() })
+
+        state.persistsCurveWithoutApp = true
+        state.prefersSilentOptionClick = true
+        state.hasDismissedSetup = true
+
+        #expect(graph.defaults.bool(forKey: AppState.persistCurveKey))
+        #expect(graph.defaults.bool(forKey: MenuBarMode.preferenceKey))
+        #expect(graph.defaults.bool(forKey: AppState.dismissedSetupKey))
+
+        // And the reader the daemon-facing code actually consults must agree
+        // with the toggle — that half was broken, not merely leaky: `cyclePreset`
+        // and `powerSourceChanged` both send `memory.persistsCurveWithoutApp`.
+        #expect(
+            FanControlMemory(defaults: graph.defaults).persistsCurveWithoutApp,
+            "the toggle must steer what cyclePreset and powerSourceChanged actually send"
+        )
+
+        // Nothing may have reached the real domain on the way.
+        #expect(!(graph.defaults is UserDefaults))
+    }
+
+    /// A menu-bar host that does nothing and touches no AppKit.
+    private final class SilentHost: MenuBarHosting {
+        func installVendoredItem() {}
+        func removeVendoredItem() {}
+        func closePopover() {}
+    }
 }

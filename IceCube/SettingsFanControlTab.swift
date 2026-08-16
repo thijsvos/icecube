@@ -7,7 +7,6 @@ import SwiftUI
 /// ``SettingsGeneralTab`` for why.
 struct SettingsFanControlTab: View {
     @Bindable var state: AppState
-    @Binding var persistCurve: Bool
     let openWindow: OpenWindowAction
 
     /// Turning fan control off removes a root LaunchDaemon and erases both the
@@ -41,8 +40,8 @@ struct SettingsFanControlTab: View {
                 }
                 powerProfileRule
 
-                Toggle("Keep the curve running when Ice Cube quits", isOn: $persistCurve)
-                    .onChange(of: persistCurve) { _, on in
+                Toggle("Keep the curve running when Ice Cube quits", isOn: $state.persistsCurveWithoutApp)
+                    .onChange(of: state.persistsCurveWithoutApp) { _, on in
                         // Push the new setting to the daemon now, so an already-
                         // active curve starts (or stops) persisting immediately.
                         Task { await state.helper.setPersist(on) }
@@ -226,7 +225,7 @@ struct SettingsFanControlTab: View {
             },
             set: { id in
                 guard let id, let preset = state.presets.all.first(where: { $0.id == id }) else { return }
-                Task { await state.helper.applyPreset(preset, persistCurve: persistCurve) }
+                Task { await state.helper.applyPreset(preset, persistCurve: state.persistsCurveWithoutApp) }
             }
         )
     }

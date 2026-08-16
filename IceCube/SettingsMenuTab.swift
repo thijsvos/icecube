@@ -7,7 +7,6 @@ import SwiftUI
 /// ``SettingsGeneralTab`` for why.
 struct SettingsMenuTab: View {
     @Bindable var state: AppState
-    @Binding var silentOptionClick: Bool
 
     var body: some View {
         menuTab
@@ -20,7 +19,7 @@ struct SettingsMenuTab: View {
                 Picker("Show beside the icon", selection: $state.menuBarDisplay) {
                     ForEach(MenuBarDisplayMode.allCases) { Text($0.title).tag($0) }
                 }
-                Toggle("⌥-click switches preset silently", isOn: $silentOptionClick)
+                Toggle("⌥-click switches preset silently", isOn: $state.prefersSilentOptionClick)
                     .help(
                         "Off: ⌥-click opens the popover already switched to the next preset. "
                             + "On: it switches without opening anything, using Ice Cube's own "

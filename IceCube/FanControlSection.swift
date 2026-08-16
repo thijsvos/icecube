@@ -34,6 +34,15 @@ struct FanControlSection: View {
     /// second copy to keep right.
     let dismissPopover: () -> Void
 
+    /// The app-wide "keep running when the app quits" setting, so the popover's
+    /// preset buttons and the curve editor's checkbox cannot disagree about
+    /// whether a curve may outlive the app. Passed in rather than read from
+    /// `@AppStorage`, which binds to `UserDefaults.standard` and so bypasses the
+    /// injected store entirely — see `AppState.persistsCurveWithoutApp`. Applying
+    /// a curve preset needs it; `applyPreset` owns the rule that only curve mode
+    /// may carry it.
+    let persistsCurveWithoutApp: Bool
+
     /// Slider positions, per fan id. Committed to the daemon on release only
     /// — dragging must not spam the SMC with writes.
     @State private var sliderTargets: [Int: Double] = [:]
@@ -78,9 +87,10 @@ struct FanControlSection: View {
     @ViewBuilder
     private var content: some View {
         switch helper.registration {
-        case .unknown, .notRegistered:
-            FanControlOnboarding(helper: helper, dismissPopover: dismissPopover)
-        case .requiresApproval:
+        // One branch, because the card itself picks the right prompt from the
+        // registration — see `FanControlOnboarding.Prompt`. Two cases spelled
+        // identically here is how the approval state lost its own card.
+        case .unknown, .notRegistered, .requiresApproval:
             FanControlOnboarding(helper: helper, dismissPopover: dismissPopover)
         case .enabled:
             enabledContent
@@ -144,13 +154,6 @@ struct FanControlSection: View {
         }
     }
 
-    /// The editor's "keep running when the app quits" setting, stored app-wide
-    /// so the popover's preset buttons and the curve editor's own checkbox
-    /// cannot disagree about whether a curve may outlive the app. Read here
-    /// because applying a curve preset needs it; `applyPreset` owns the rule
-    /// that only curve mode may carry it.
-    @AppStorage("persistCurve") private var persistCurve = false
-
     /// The preset row — now a single spectrum, quietest to loudest.
     ///
     /// It used to be split by a divider, because "hand the fans to macOS" sat
@@ -195,7 +198,7 @@ struct FanControlSection: View {
 
     private func presetButton(_ preset: Preset) -> some View {
         Button(preset.name) {
-            Task { await helper.applyPreset(preset, persistCurve: persistCurve) }
+            Task { await helper.applyPreset(preset, persistCurve: persistsCurveWithoutApp) }
         }
         // Only a saved preset can be deleted, and only from a context menu: a
         // visible minus beside four built-ins that cannot be removed would be

@@ -308,8 +308,4 @@ public enum DiagnosisCopy {
     private static func oneDecimal(_ value: Double) -> String {
         String(format: "%.1f", value)
     }
-
-    private static func twoDecimals(_ value: Double) -> String {
-        String(format: "%.2f", value)
-    }
 }
