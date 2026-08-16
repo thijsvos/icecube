@@ -28,12 +28,19 @@ public enum AppRelocation {
     /// The canonical install location.
     public static let applicationsPath = "/Applications"
 
+    /// Decides whether this bundle should be moved to /Applications, and how.
+    ///
     /// - Parameters:
     ///   - bundlePath: the running app bundle's path.
     ///   - isTranslocated: whether macOS is running the app from a randomized
     ///     read-only path (Gatekeeper app translocation, which happens to a
-    ///     quarantined app launched straight from a download). The app cannot
-    ///     move *itself* out of a translocated path, so the user has to drag it.
+    ///     quarantined app launched straight from a download). It deliberately
+    ///     does **not** change the verdict — a translocated app still gets
+    ///     `.offerMove`, because the one outcome that must never happen is a
+    ///     silent dead end. It is a parameter so the *caller* can honour it: a
+    ///     translocated bundle cannot copy itself, so `SetupModel` reveals it in
+    ///     Finder for the user to drag instead. Pinned by
+    ///     `SetupFlowTests.translocatedPrompts`.
     public static func verdict(bundlePath: String, isTranslocated: Bool = false) -> Verdict {
         let normalized = bundlePath.hasSuffix("/") ? String(bundlePath.dropLast()) : bundlePath
 

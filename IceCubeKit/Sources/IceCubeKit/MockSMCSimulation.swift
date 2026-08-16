@@ -203,24 +203,32 @@ extension MockSMCProvider {
         1 - 0.85 * smoothstep((envelopeSteadiness(at: t) - 10) / 15)
     }
 
-    // MARK: SoC power
+    // MARK: System power
 
-    /// Idle and peak SoC package power, in watts.
+    /// Idle and peak **system** power, in watts — the whole machine, not the SoC
+    /// package.
     ///
     /// Taken from the real machine rather than invented: `PSTR` on a Mac14,9
     /// read **19.6 W idle and ~52 W peak under a Release build** (measured
     /// 2026-07-28), so the simulation spans a range a reader can sanity-check
-    /// against their own hardware.
+    /// against their own hardware. Named carefully: this said "SoC package
+    /// power" until 2026-08-16, and `SMCKeyMaps.powerKeyCandidates` already
+    /// records that several places once made that mistake and were wrong. It
+    /// matters wherever this is divided into a die temperature — see
+    /// docs/THERMAL.md.
     static let idleWatts = 19.6
     static let peakWatts = 52.0
 
-    /// Simulated SoC package power in watts at time `t`.
+    /// Simulated total system power in watts at time `t`.
     ///
     /// Tracks the same workload envelope the sensors do. It is deliberately NOT
-    /// given a head start over the thermal model: on real hardware the two move
-    /// within a couple of seconds of each other (docs/SMC-KEYS.md), and a
-    /// simulation that invented a lead would make any future control idea built
-    /// on it look far better in CI than it is on the owner's desk.
+    /// given a head start over the thermal model: the measured lead on real
+    /// hardware is somewhere between −2 and +9 seconds depending on the
+    /// threshold and what the machine was already doing (docs/SMC-KEYS.md), and
+    /// far less than the ~16 s of smoothing it would take to stop a single
+    /// 2-second burst spinning the fans. A simulation that invented a clean lead
+    /// would make any future control idea built on it look far better in CI than
+    /// it is on the owner's desk.
     static func power(at t: TimeInterval) -> Double {
         idleWatts + (peakWatts - idleWatts) * spikeEnvelope(at: t)
     }

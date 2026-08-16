@@ -22,12 +22,18 @@ import Foundation
 ///
 /// ## What it deliberately will not say
 ///
-/// **"Your cooling is degrading."** That needs a baseline, Ice Cube keeps no
-/// history across launches (`docs/THERMAL.md`), and `R` is explicitly not
-/// comparable between machines — the ambient reference is a sensor inside the
-/// case. Absent history, the only load-versus-cooling claim made here is
-/// ``Load/hotWithoutLoad(watts:celsius:)``, which needs no baseline because a
-/// hot die at a near-idle wattage is anomalous on any Mac.
+/// **"Your cooling is degrading."** Ice Cube can answer that now — settled
+/// readings persist across launches and ``CoolingTrend`` turns them into a
+/// verdict (question 5 of `docs/DIAGNOSIS.md`) — but it is a claim about months,
+/// and this type is a claim about one moment: it is handed a snapshot, no
+/// history at all, and could only ever fake it. The one load-versus-cooling
+/// claim made here is ``Load/hotWithoutLoad(watts:celsius:)``, which needs no
+/// baseline because a hot die at a near-idle wattage is anomalous on any Mac.
+/// `R` itself stays not comparable between machines — the ambient reference is a
+/// sensor inside the case — which is why nothing else in these four answers is a
+/// verdict about cooling health. (This said "Ice Cube keeps no history across
+/// launches" until 2026-08-16, which stopped being true when the history
+/// shipped.)
 ///
 /// Pure by construction: no I/O, no clock, no hardware. Every input arrives as
 /// a parameter so the whole verdict is exercised against scripted values.

@@ -297,8 +297,10 @@ public enum DiagnosisCopy {
         SafetyMonitor.Limits().dieCeiling
     }
 
-    /// Formatted through `String(format:)` rather than interpolated into a
-    /// `Text`, so a locale that groups thousands cannot render 6800 as "6.800".
+    /// Built as a `String` here rather than interpolated into a `Text`, so a
+    /// locale that groups thousands cannot render 6800 as "6.800" — the trap
+    /// ``RPM/text(_:)`` documents, and the reason this rounds through `Int`
+    /// instead of reaching for a formatter that would have to be told not to.
     private static func whole(_ value: Double) -> String {
         String(Int(value.rounded()))
     }

@@ -138,8 +138,9 @@ public struct CoolingHistory: Sendable, Codable, Equatable {
     public let schemaVersion: Int
     public let machine: MachineFingerprint
     public let createdAt: Date
-    /// Raw settled readings, ascending by date. Bounded by ``rawRetention``
-    /// and ``maximumRawRecords``.
+    /// Raw settled readings, ascending by date. Bounded by ``rawRetentionDays``
+    /// — the whole-day window that in practice always bites first — with
+    /// ``maximumRawRecords`` behind it as a count backstop.
     public private(set) var records: [CoolingRecord]
     /// Folded day-band aggregates, ascending by (day, band). Bounded by
     /// ``maximumDayAgeDays`` and ``maximumDayAggregates``.

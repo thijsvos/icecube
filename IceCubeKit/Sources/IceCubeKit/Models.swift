@@ -13,7 +13,16 @@ public enum FanMode: UInt8, Sendable, Codable, Equatable {
     /// Manually forced target RPM (mode 1). Only the helper daemon may enter this.
     case forced = 1
     /// macOS (`thermalmonitord`) is in control (mode 3) — the normal resting
-    /// state on Apple Silicon; read-only, never written by us.
+    /// state on Apple Silicon, and the state the daemon tries to put a fan back
+    /// into when it lets go.
+    ///
+    /// The hand-back parks `Tg` at the fan's minimum, writes mode 0, then
+    /// *attempts* mode 3 to return the fan to macOS explicitly (some generations
+    /// refuse, which is fine, and is why that write is best-effort). Nothing in
+    /// the app process writes any mode at all — only the helper daemon can — so
+    /// on the read side this is simply what a fan nobody of ours is driving
+    /// reports. This said "never written by us" until 2026-08-16; §3.4 records
+    /// that same false model having already cost the project a shipped bug.
     case system = 3
 }
 

@@ -107,11 +107,16 @@ public struct ProcessEnergyReading: Sendable, Equatable {
 public protocol ProcessSampling: Sendable {
     /// Samples now, returning power drawn **since the previous call**.
     ///
-    /// Returns `nil` on the first call of a process's life and whenever too
-    /// little time has passed to divide by. A rate cannot be computed from one
-    /// cumulative reading, and the honest answer to "what is drawing power right
-    /// now?" before any interval has elapsed is "ask again in a moment" — not a
-    /// number derived from a single sample.
+    /// A sampler that differences a kernel counter returns `nil` on the first
+    /// call of a process's life and whenever too little time has passed to
+    /// divide by: a rate cannot be computed from one cumulative reading, and the
+    /// honest answer to "what is drawing power right now?" before any interval
+    /// has elapsed is "ask again in a moment" — not a number derived from a
+    /// single sample.
+    ///
+    /// ``SystemProcessSampler`` owns that rule. ``MockProcessSampler`` has no
+    /// counter to difference and answers on the first call, so a simulated run
+    /// never sits on the "measuring" state.
     func sample() async -> ProcessEnergyReading?
 }
 
@@ -129,9 +134,6 @@ public protocol ProcessSampling: Sendable {
 public struct MockProcessSampler: ProcessSampling {
     private let now: @Sendable () -> Date
 
-    /// Names chosen to be obviously synthetic on inspection while still
-    /// exercising realistic layout: a long name that will need truncating, a
-    /// helper-style name with parentheses, and short ones.
     /// The first fake PID, chosen **above Darwin's PID ceiling** (99999) so a
     /// simulated PID can never name a process that actually exists.
     ///
@@ -142,6 +144,9 @@ public struct MockProcessSampler: ProcessSampling {
     /// fiction out of reach makes the guarantee structural instead of lucky.
     public static let firstFakePID: Int32 = 900_001
 
+    /// Names chosen to be obviously synthetic on inspection while still
+    /// exercising realistic layout: a long name that will need truncating, a
+    /// helper-style name with parentheses, and short ones.
     private static let cast = [
         "Simulated Compiler",
         "Simulated Browser (Renderer)",

@@ -60,6 +60,8 @@ public enum PowerProfilePolicy {
         case apply(Preset.Kind)
     }
 
+    /// Decides whether a change of power source should switch presets.
+    ///
     /// - Parameters:
     ///   - source: where the Mac is drawing power right now.
     ///   - previous: the source at the last decision, or `nil` if none has been

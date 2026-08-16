@@ -20,10 +20,14 @@ import Foundation
 ///   period) plus a faster small ripple, with per-sensor phases hashed from
 ///   the SMC key, so the six traces drift independently.
 /// - **Workload spikes**: time is cut into fixed 180 s buckets. Most buckets
-///   (85 %, decided by hashing the bucket index) contain one spike — 30–60 s
-///   long, with a smooth 8 s rise, a flat plateau, and a 12 s cool-down —
-///   that pushes the CPU and GPU toward 85–100 °C. Net effect: roughly every
-///   2–4 minutes "something compiles".
+///   (85 %, decided by hashing the bucket index) contain one spike, with a
+///   smooth 8 s rise, a flat plateau and a 12 s cool-down, pushing the CPU and
+///   GPU toward 85–100 °C. Most of those run 30–60 s; about one spiking bucket
+///   in seven instead holds its plateau for the whole bucket (~132 s flat),
+///   because the fans' 10 s lag eats a short plateau and the simulated machine
+///   could otherwise never hold still *at speed* — see
+///   ``spikeWindow(inBucket:)``. Net effect: roughly every 2–4 minutes
+///   "something compiles", and every so often it compiles for a while.
 /// - **Fan demand** maps the hottest sensor to 0…1: zero at or below 60 °C
 ///   (fans rest at minimum RPM), rising smoothly to one as the hottest sensor
 ///   approaches 95 °C (maximum RPM). `targetRPM` tracks demand instantly.
@@ -40,6 +44,8 @@ public actor MockSMCProvider: SMCProviding {
     /// manually-advanced clock to replay the simulation deterministically.
     private let now: @Sendable () -> Date
 
+    /// Builds a simulated Mac. No hardware, no root, no SMC.
+    ///
     /// - Parameter now: the clock the simulation runs on. Every reading is a
     ///   pure function of this clock's current `Date`.
     public init(now: @escaping @Sendable () -> Date = { Date() }) {

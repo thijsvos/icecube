@@ -36,6 +36,11 @@ public enum StartupPolicy {
         case apply(FanConfig)
     }
 
+    /// What, if anything, this launch should send to the daemon.
+    ///
+    /// Can only ever produce a curve: manual is never the persisted default, so
+    /// no app launch may put the fans under fixed-RPM control on its own.
+    ///
     /// - Parameters:
     ///   - daemonMode: what the daemon reports it is already enforcing.
     ///   - preference: the user's last deliberate choice, or `nil`.
