@@ -6,11 +6,14 @@ import SwiftUI
 
 /// The content of the `MenuBarExtra` window.
 ///
-/// Layout, top to bottom: header (app name, SIMULATED badge, hottest-sensor
-/// badge), one row per fan, a divider, the temperature list, and a footer with
-/// a placeholder "Open Ice Cube" button plus a working Quit button. Because
-/// Ice Cube is an `LSUIElement` app there is no Dock icon — Quit here is the
-/// only way out.
+/// Layout, top to bottom: the header (app name plus the SIMULATED badge —
+/// deliberately no temperature, see ``PopoverHeader``), an error row when there
+/// is one, then the cards: fans, the control section, the live charts, and the
+/// temperature cards. Which of the middle three appear is the user's choice,
+/// through `chartSettings.showControls` and `showCharts`. Below them a divider,
+/// an update row when a newer release has been found, and the footer — Sensors…,
+/// Settings…, "Why is it hot?" and Quit. Because Ice Cube is an `LSUIElement`
+/// app there is no Dock icon, so that Quit is still the only way out.
 ///
 /// Styling rule: system materials and hierarchical fills only, never opaque
 /// custom colors, so the popover looks native in both light and dark mode.

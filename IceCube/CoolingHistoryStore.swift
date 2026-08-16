@@ -57,6 +57,8 @@ final class CoolingHistoryStore {
     private let identity: Identity
     private let log = Logger(subsystem: HelperConstants.logSubsystem, category: "ui")
 
+    /// Opens the history file for this machine, creating it if there is none.
+    ///
     /// - Parameters:
     ///   - seed: fabricated history applied **only when the file is absent**.
     ///     Passed exclusively by the simulated graph; the live graph has no

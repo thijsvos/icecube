@@ -120,37 +120,12 @@ struct SettingsWindowView: View {
             )
         }
     }
-
-    // The one-line answer to "is fan control working?", in plain language.
-    //
-    // The twelve registration × connection pairs are classified once in
-    // ``FanControlStatus`` — shared with the popover, so the two surfaces
-    // cannot come to disagree about whether the user's fans are controlled.
-
-    // "Quiet on battery, cool on the desk" — the one thing a laptop genuinely
-    // wants differentiated, and the only situational awareness Ice Cube has.
-    //
-    // Reads as a sentence rather than three labelled controls, because that is
-    // how someone thinks about it: *on battery use Quiet, plugged in use
-    // Balanced.* The pickers stay visible but disabled when the toggle is off,
-    // so the shape of the setting is legible before you commit to it.
-    // "Does fan control actually work on this Mac?" — answerable, at last.
-    //
-    // Worth a button rather than only running in the background: Ice Cube's
-    // write path is verified on exactly one machine, and on any other the
-    // honest answer until now was a shrug. The check writes each fan's current
-    // target back to itself and reverts, so pressing it changes nothing you
-    // can hear.
-    // Reflects/sets the active built-in preset (mirrors the menu's preset row).
-    //
-    // Tagged on ``Preset/Kind`` rather than the display name, so renaming a
-    // built-in can't silently break the picker.
 }
 
 /// The one-line summary of whether fan control is actually working, shown in
-/// two of the Settings tabs.
+/// the Fan Control tab.
 ///
-/// On `AppState` rather than duplicated into both, for the same reason
+/// On `AppState` rather than derived at the point of use, for the same reason
 /// `readingAnimation` is: two copies of a derivation are two things that can
 /// later disagree. `FanControlStatusTests` already pins the wording itself.
 extension AppState {

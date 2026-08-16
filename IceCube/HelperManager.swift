@@ -166,8 +166,6 @@ final class HelperManager {
     /// join it rather than being dropped — see ``maintainOnce()``.
     @ObservationIgnored private var maintenancePass: Task<Void, Never>?
 
-    /// Defaults are the production wiring, so `HelperManager()` still means
-    /// "the real daemon, the real XPC channel, the real preferences".
     // MARK: - Isolation introspection
 
     /// Whether the XPC channel is a stand-in rather than the real one.
@@ -340,6 +338,8 @@ final class HelperManager {
         refreshRegistration()
     }
 
+    /// Hands the fans back, then removes the daemon.
+    ///
     /// - Parameter forgettingIntent: whether to also erase the app's memory of
     ///   the curve the user chose.
     ///
@@ -529,8 +529,13 @@ final class HelperManager {
             deferredConfig = nil
             deferredSince = nil
         }
-        // Remember a curve profile so a later launch can resume it; a
-        // deliberate Auto forgets it (the user wants macOS in control).
+        // Remember a curve profile so a later launch can resume it. An auto
+        // config forgets it instead — but that is no longer a user saying "I
+        // want macOS in control", because since the macOS preset was removed
+        // nothing in the UI can send one. Auto reaches here only as the daemon's
+        // resting state, and `FanControlMemory.remember(applied:)` treats it as
+        // "this user never chose", which lands the next launch on the Balanced
+        // fallback rather than on a stale curve.
         //
         // Only on SUCCESS, and a deferral is not success. This write used to
         // run unconditionally, outside the error handling above — so a curve
@@ -604,12 +609,6 @@ final class HelperManager {
         }
     }
 
-    /// The app-wide "keep the curve running when I quit" preference.
-    ///
-    /// Reads the **injected** suite. `powerSourceChanged(to:)` used to reach for
-    /// `UserDefaults.standard` here instead, which quietly undid the point of
-    /// injecting it: under test that read the developer's own preference, so
-    /// the power rule's assertions depended on a setting outside the test.
     /// Why a quick-switch was declined, or nil when it may proceed.
     ///
     /// Pure and static so the rule can be tested directly. The obvious
@@ -644,10 +643,17 @@ final class HelperManager {
     /// gesture cannot become a second path with its own idea of the persist
     /// rule; it is the same call the popover's buttons make.
     ///
-    /// - Returns: the preset applied, or `nil` when the gesture was declined —
-    ///   which is not a failure. There is genuinely nothing to switch to while
-    ///   the daemon is unreachable or a write-path self-test holds the fans, and
-    ///   the caller uses nil to decide whether to say anything to the user.
+    /// - Returns: the preset applied, or `nil` — which covers two different
+    ///   things, and the caller has to be willing to treat them alike. The first
+    ///   is a declined gesture, which is not a failure: there is genuinely
+    ///   nothing to switch to while the daemon is unreachable or a write-path
+    ///   self-test holds the fans. The second is an apply the daemon refused,
+    ///   which very much is one — `applyPreset` swallows those into `lastError`,
+    ///   so this checks that afterwards rather than claiming a switch that never
+    ///   reached the fans. Both answers mean the same thing to a caller: do not
+    ///   tell the user their preset changed. `StatusItemController.quickSwitch`
+    ///   opens the popover for either, because the popover is where `lastError`
+    ///   is already on screen.
     @discardableResult
     func cyclePreset(in cycle: [Preset]) async -> Preset? {
         if let refusal = Self.quickSwitchRefusal(
@@ -733,9 +739,6 @@ final class HelperManager {
         memory.storedPreference
     }
 
-    /// Records a deliberate choice. Manual is not a startup mode — it is
-    /// watchdogged and must never be what an app launch puts you in — so it
-    /// leaves the stored preference untouched.
     // MARK: - Power-aware profiles
 
     private static let powerRuleKey = "powerProfileRule"
@@ -1012,23 +1015,25 @@ final class HelperManager {
         mergeDecisions(status?.recentDecisions)
     }
 
-    /// Folds a status payload's decisions into the session timeline.
-    ///
-    /// Assigned only when something is genuinely new: the popover renders this,
-    /// and reassigning an identical array every 5 s would invalidate the view
-    /// for nothing. `nil` means a daemon that predates v23, which is not an
-    /// error — it simply contributes nothing.
     /// Called with decisions this app has **never seen before**.
     ///
     /// A callback rather than a direct call into `AlertManager`, because this
-    /// type is already 985 lines and owns the daemon lifecycle — it has no
-    /// business knowing what a notification is. `AppState` connects the two.
+    /// type already runs past a thousand lines and owns the daemon lifecycle —
+    /// it has no business knowing what a notification is. `AppState` connects
+    /// the two.
     ///
     /// The freshness is the whole value: the same decision arrives in several
     /// consecutive status payloads, so anything acting on `decisions` wholesale
     /// would fire once every 5 s for as long as the daemon kept repeating it.
     var onFreshDecisions: (([DecisionEvent]) -> Void)?
 
+    /// Folds a status payload's decisions into the session timeline.
+    ///
+    /// Assigns only when something is genuinely new: the popover renders
+    /// `decisions`, and reassigning an identical array every 5 s would
+    /// invalidate the view for nothing. A `nil` payload means a daemon old
+    /// enough to predate the field, which is not an error — it simply
+    /// contributes nothing.
     private func mergeDecisions(_ incoming: [DecisionEvent]?) {
         guard let incoming, !incoming.isEmpty else { return }
         let known = Set(decisions.map(\.id))

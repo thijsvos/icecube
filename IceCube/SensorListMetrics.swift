@@ -4,8 +4,9 @@ import CoreGraphics
 
 /// Decides the height of the popover's sensor list, and whether it scrolls.
 ///
-/// **Why the list needs a bound at all.** `PopoverView.temperatureListSection`
-/// draws one row per `AppState.temperatures` entry, and that count is a
+/// **Why the list needs a bound at all.**
+/// `PopoverTemperatureCards.temperatureListSection` draws one row per
+/// `AppState.temperatures` entry, and that count is a
 /// property of the Mac rather than of the app: 20 on the owner's curated
 /// Mac14,9, but on a model outside `SMCKeyMaps`' curated set discovery
 /// enumerates every plausible `T*` key — 193 of them on this same hardware.
@@ -45,9 +46,10 @@ nonisolated enum SensorListMetrics {
     /// `VStack` adds ``rowSpacing`` beneath every row but the last.
     static let rowPitch: CGFloat = 16
 
-    /// The list's inter-row spacing. Not private: `PopoverView` builds the
-    /// `VStack` with it, so the view and this arithmetic cannot drift — the
-    /// same reason `SensorsWindowMetrics.titleBarHeight` is not private.
+    /// The list's inter-row spacing. Not private: `PopoverTemperatureCards`
+    /// builds the `VStack` with it, so the view and this arithmetic cannot
+    /// drift — the same reason `SensorsWindowMetrics.titleBarHeight` is not
+    /// private.
     static let rowSpacing: CGFloat = 3
 
     /// Everything in the popover that is **not** the scrollable region, in the
@@ -91,6 +93,8 @@ nonisolated enum SensorListMetrics {
         sensorCount <= 0 ? 0 : rowPitch * CGFloat(sensorCount) - rowSpacing
     }
 
+    /// How tall the sensor list should be, and whether it has to scroll.
+    ///
     /// - Parameters:
     ///   - sensorCount: how many sensors this Mac **has** — the inventory
     ///     count, floored by the rows currently published so the region is

@@ -14,7 +14,10 @@ import UserNotifications
 /// 1. **A temperature threshold.** One notification when the hottest die sensor
 ///    crosses the user's limit, re-armed only after a real 5 °C cooldown.
 /// 2. **Loss of control.** The daemon reverting, a failed write, the guardian
-///    taking the fans off macOS, or the fans sitting at maximum for an hour.
+///    taking the fans off macOS, or the fans sitting at maximum for
+///    three-quarters of an hour — ``ControlAlertRules/pinnedDuration``, chosen
+///    to be comfortably longer than a long build or an export and far shorter
+///    than the 2 h 52 m incident that motivated the rule.
 ///    Decided by ``ControlAlertRules``, which is pure and owns every question
 ///    about how often it is acceptable to speak.
 ///

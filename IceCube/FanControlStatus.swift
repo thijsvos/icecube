@@ -15,6 +15,14 @@ import Foundation
 /// duplication that already bit `PresetHighlight`, whose doc comment records
 /// that "the copies had already drifted".
 ///
+/// **Only half of that migration happened.** Settings reads this type; the
+/// popover still switches over `helper.connection` by hand in
+/// `FanControlSection.enabledContent`, and takes its status line from the Kit's
+/// `ControlStatus`. So the twelve pairs are written down once *here* and pinned
+/// by `FanControlStatusTests`, but the second surface has not been moved onto
+/// them yet, and until it is the two can still drift. Said differently: this
+/// type is currently the fix's first half, not the finished job.
+///
 /// Lives **app-side**, not in IceCubeKit, and the rule is worth stating because
 /// it is not obvious: extracted app logic goes to the Kit only when every one of
 /// its inputs is already a Kit type. `Registration` and `Connection` describe
@@ -68,7 +76,11 @@ extension FanControlStatus.Summary {
     ///
     /// Deliberately not the popover's wording: Settings answers "is it on?" in
     /// as few words as fit a `LabeledContent`, while the popover has room to say
-    /// what to do about it. Shared *classification*, separate *wording*.
+    /// what to do about it — and it does that from its own switch over
+    /// `helper.connection`, so this is the only surface currently reading
+    /// ``FanControlStatus/Summary``. Shared *classification* is still the point
+    /// of the type and the reason its tests walk all twelve pairs; see the
+    /// type's own doc for why that sharing is only half-done.
     var settingsText: String {
         switch self {
         case .on: "On"

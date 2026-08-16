@@ -119,6 +119,8 @@ final class ChartSettings {
 
     private let defaults: any KeyValueStore
 
+    /// Loads the chart preferences from a key-value store.
+    ///
     /// - Parameter defaults: where the twelve preferences live. Injected, and
     ///   that is load-bearing: this used to read `UserDefaults.standard`
     ///   directly while every other seam in the graph was substituted, so a
