@@ -5,10 +5,18 @@ import SwiftUI
 
 /// The control section of the popover.
 ///
-/// What it shows depends on where the helper stands: onboarding (not
-/// registered) → approval prompt → manual controls. Manual mode gets an
-/// unmissable orange tint (PLAN.md §1.2), and "Auto" is always the biggest,
-/// easiest action.
+/// What it shows depends on where the helper stands: onboarding (not registered
+/// or awaiting approval) → connecting / update-needed → the controls themselves.
+/// Manual mode gets an unmissable orange tint (PLAN.md §1.2).
+///
+/// There is no "Auto" button here and there is not meant to be. Auto stopped
+/// being something a user can pick on 2026-07-26, along with the "macOS" preset
+/// and "Hand Back to macOS" — nobody installs a fan-control app in order to stop
+/// controlling their fans, and on Mac14,9 the hand-back did not work anyway.
+/// `FanConfig.Mode.auto` survives as the daemon's resting state and the target
+/// of every safety revert, which is why `ControlStatus` can still report it; the
+/// honest exit lives in Settings → "Turn Off Fan Control", which removes the
+/// daemon. The biggest, easiest action in this card is now the preset row.
 struct FanControlSection: View {
     /// A plain `let`: observation-driven redraw works without @Bindable, which
     /// exists only to project `$`-bindings — and this view forms none.
@@ -136,8 +144,11 @@ struct FanControlSection: View {
         }
     }
 
-    /// The preset quick-switch row (PLAN.md §1.2). Applying a curve preset
-    /// needs the editor's persist setting, stored app-wide.
+    /// The editor's "keep running when the app quits" setting, stored app-wide
+    /// so the popover's preset buttons and the curve editor's own checkbox
+    /// cannot disagree about whether a curve may outlive the app. Read here
+    /// because applying a curve preset needs it; `applyPreset` owns the rule
+    /// that only curve mode may carry it.
     @AppStorage("persistCurve") private var persistCurve = false
 
     /// The preset row — now a single spectrum, quietest to loudest.

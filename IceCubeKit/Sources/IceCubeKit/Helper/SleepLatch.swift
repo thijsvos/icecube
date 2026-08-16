@@ -113,6 +113,8 @@ public struct SleepLatch: Sendable, Equatable {
         state?.origin
     }
 
+    /// Latches for a sleep that macOS has just announced.
+    ///
     /// - Returns: true when this is a NEW sleep and the fans must be parked now;
     ///   false when already latched (dark wake → sleep again fires
     ///   `systemWillSleep` repeatedly, and re-running a hand-back that already
@@ -153,6 +155,8 @@ public struct SleepLatch: Sendable, Equatable {
         state?.awakeSoFar = .zero
     }
 
+    /// Advances the latch by one daemon tick and says what to do next.
+    ///
     /// - Parameters:
     ///   - slept: the tick's ContinuousClock − SuspendingClock diff.
     ///   - tickInterval: the daemon's nominal tick period.
@@ -174,7 +178,9 @@ public struct SleepLatch: Sendable, Equatable {
         return current.parkLanded ? .stayParked : .retryPark
     }
 
-    /// Releases the latch. - Returns: whether it was actually latched.
+    /// Releases the latch.
+    ///
+    /// - Returns: whether it was actually latched.
     @discardableResult
     public mutating func release() -> Bool {
         defer { state = nil }

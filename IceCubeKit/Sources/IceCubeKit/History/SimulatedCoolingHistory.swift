@@ -164,7 +164,13 @@ public enum SimulatedCoolingHistory {
         MockSMCProvider.unitNoise(UInt64(bitPattern: Int64(a)), UInt64(b), 0xC001)
     }
 
-    /// The instant `hour` into the day, unless it would land in the future.
+    /// The instant `hour` into the day, unless it falls inside the last two
+    /// hours — which covers anything in the future as well.
+    ///
+    /// The seeded story stops short of `now` rather than right up against it, so
+    /// a fabricated reading never lands in the stretch the live recorder is
+    /// about to write into. The `.jump` story writes its own records into
+    /// `now − 4.5 h … now − 2 h`, which only fits because of that margin.
     private static func timeIfPast(_ dayStart: Date, hour: Double, now: Date) -> Date? {
         let date = dayStart.addingTimeInterval(hour * 3600)
         return date < now.addingTimeInterval(-7200) ? date : nil

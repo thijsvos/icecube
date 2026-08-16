@@ -70,10 +70,36 @@ struct FanCurveTests {
         #expect(FanCurve.balanced.fraction(at: 85) == 1, "balanced is flat-out by 85 °C")
         // Cold keeps a strong steady speed across the idle band (no steep knee
         // there to hunt on) and reaches full speed only under real load.
-        #expect(FanCurve.cold.fraction(at: 30) == 0.5, "cold always moves air firmly")
+        #expect(FanCurve.cold.fraction(at: 30) == 0.55, "cold always moves air firmly")
         #expect(FanCurve.cold.fraction(at: 80) == 1, "cold is flat-out by 80 °C")
         let idleBandSwing = FanCurve.cold.fraction(at: 55) - FanCurve.cold.fraction(at: 35)
         #expect(idleBandSwing < 0.2, "cold's idle band (35–55 °C) is flat-ish, so fans don't hunt")
+    }
+
+    /// Pins the *shape* Cold's doc comment promises, not just two sample points.
+    ///
+    /// Cold shipped from `d45b2e3` until 2026-08-16 with 0.5/0.62 as its first
+    /// two fractions, which put the idle band at 50–62 % and made the curve
+    /// steepest BELOW 65 °C — the opposite of both claims in its own doc
+    /// comment. Nothing caught it because `builtins` only sampled endpoints, and
+    /// an endpoint is exactly what a mis-typed interior point does not move.
+    @Test("Cold's idle band and rising slope match what its doc comment claims")
+    func coldMatchesItsDocumentedShape() {
+        let cold = FanCurve.cold
+        #expect(cold.fraction(at: 35) == 0.55, "idle band opens at 55 %")
+        #expect(cold.fraction(at: 55) == 0.7, "idle band closes at 70 %")
+
+        func slope(_ from: Double, _ to: Double) -> Double {
+            (cold.fraction(at: to) - cold.fraction(at: from)) / (to - from)
+        }
+        let idle = slope(35, 55)
+        let middle = slope(55, 65)
+        let load = slope(65, 80)
+
+        // Rising, so the steep climb sits ABOVE 65 °C and ordinary ±few-°C
+        // noise in the idle band never crosses a knee and swings the fans.
+        #expect(idle < middle, "the curve must not be steepest across the idle band")
+        #expect(middle < load, "the steepest segment is above 65 °C, where real load lives")
     }
 }
 

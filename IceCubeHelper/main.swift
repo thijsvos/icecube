@@ -30,7 +30,8 @@ do {
 let power = SystemPowerWatcher(core: core)
 power.start()
 
-// Revert-to-auto on start + begin the 2 s safety tick.
+// Hand the fans back on start — unless a valid persisted curve loads, which
+// `start()` resumes instead — then begin the 2 s safety tick.
 Task { await core.start() }
 
 // SIGTERM (launchd shutdown/unregister): leave fans on automatic — always.

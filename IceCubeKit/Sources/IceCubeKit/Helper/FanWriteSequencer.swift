@@ -80,8 +80,13 @@ public actor FanWriteSequencer {
     /// by read-back.
     ///
     /// - Parameter fans: the current fan readings (source of `[Mn, Mx]`).
-    /// - Throws: when no mode key exists, the unlock never sticks, or a write
-    ///   fails at the transport level. The caller (daemon) reverts on throw.
+    /// - Throws: when no mode key exists, the unlock never sticks, a write fails
+    ///   at the transport level, or `shouldAbandon()` reports that the machine is
+    ///   going to sleep — that last one surfaces as `IceCubeError.systemAsleep`
+    ///   from the middle of the sequence, and it is deliberately a throw rather
+    ///   than a quiet early return so the caller cannot mistake it for a
+    ///   completed engage. The caller (daemon) reverts on throw, which parks
+    ///   every fan this had already forced.
     public func engageManual(targets: [Int: Double], fans: [Fan]) async throws -> FanWriteOutcome {
         let suffix = try await resolveModeKeySuffix(fanIDs: fans.map(\.id))
         var clamped: [Int: Double] = [:]
@@ -125,8 +130,15 @@ public actor FanWriteSequencer {
         return FanWriteOutcome(branch: branch, clampedTargets: clamped, verified: allVerified)
     }
 
-    /// Reverts every fan to automatic: mode 0 (+ Tg 0), then `Ftst=0` once
-    /// all fans are back on auto (only if the Ftst path was used).
+    /// Reverts every fan to automatic: `Tg` parked at that fan's own **minimum**
+    /// first, then mode 0, then a best-effort mode 3 — and finally `Ftst=0` if
+    /// this machine ever needed the Ftst unlock, cleared whether or not every fan
+    /// came back cleanly.
+    ///
+    /// Never `Tg 0`. This summary said "mode 0 (+ Tg 0)" until 2026-08-16, which
+    /// is the one sequence the field correction directly below repudiates — and
+    /// a summary is the line Quick Help shows, so it was the most-read sentence
+    /// in the file and it named the command the file exists to forbid.
     ///
     /// FIELD CORRECTION (2026-07-23, verified on Mac14,9 / macOS 26.4.1):
     /// the reference sequence "mode 0 + Tg 0" left the fans **stopped at

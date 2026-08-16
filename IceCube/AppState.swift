@@ -20,8 +20,15 @@ final class AppState: PopoverLifecycleObserving {
     /// The hottest sensor as shown in UI — updated with hysteresis so the
     /// badge doesn't flip between near-equal cores every second.
     private(set) var hottest: SensorReading?
-    /// Consecutive failed polls; the error row only appears at 3+ so a single
-    /// transient miss can't flash a caption in and out of the layout.
+    /// Consecutive failed polls, kept here because the tick owns the counting
+    /// and ``PollErrorPolicy`` owns the rule.
+    ///
+    /// The 3-in-a-row wait applies to *transient* faults only, and that
+    /// distinction is the whole point of the split: an SMC that misses a read on
+    /// healthy hardware must not flash a caption in and out of the layout, but a
+    /// Mac whose sensor map is wrong will be wrong on every subsequent tick too,
+    /// so `.smcKeyNotFound`, `.smcDecodingFailed` and `.smcNotPrivileged` speak
+    /// on the first failure and ignore this number entirely.
     @ObservationIgnored private var consecutiveFailures = 0
     /// True when running against `MockSMCProvider` — the UI shows a badge so
     /// simulated numbers are never mistaken for real hardware.
@@ -370,9 +377,17 @@ final class AppState: PopoverLifecycleObserving {
         }
     }
 
-    /// Rebuilds the polling stream with the effective cadence. Icon-only
-    /// display needs no 1 Hz updates while the popover is closed, so it
-    /// polls at ≥ 5 s — a real energy win for a menu-bar resident.
+    /// Rebuilds the polling stream with the effective cadence.
+    ///
+    /// Icon-only display has no reading on screen to keep current, so it polls
+    /// at ≥ 5 s whatever the user picked — a real energy win for a menu-bar
+    /// resident. The downshift is a property of the *display mode alone*
+    /// (``PollInterval/effectiveSeconds(display:)``), not of whether the popover
+    /// happens to be open: an icon-only user who opens the popover gets its
+    /// gauges and charts at the slower cadence too. That is the honest trade —
+    /// the alternative is restarting the poller on every popover open and close,
+    /// which is a second thing to keep in step with the setting, for a window
+    /// that is usually shut.
     private func restartPolling() {
         let seconds = pollInterval.effectiveSeconds(display: menuBarDisplay)
         pollTask?.cancel()
@@ -666,10 +681,10 @@ final class AppState: PopoverLifecycleObserving {
     /// — see `SMCProviding.sensorInventory()`. Fetched once, because it is a
     /// property of the hardware.
     ///
-    /// Not observed: only ``sensorRowCount`` is read from the scene body, and
-    /// this feeds it. 0 until the fetch lands, which the `max` at the call site
-    /// absorbs.
-    /// Observed, because the popover reserves its sensor list's height from it
+    /// 0 until the fetch lands, which the `max` at each call site absorbs.
+    ///
+    /// Observed, deliberately, because the popover reserves its sensor list's
+    /// height from it
     /// (``SensorListMetrics``). The warning on ``sensorRowCount`` does not apply
     /// here: nothing reads this from `App.body`, and the popover's body already
     /// re-renders every tick from `temperatures`, so the one invalidation this

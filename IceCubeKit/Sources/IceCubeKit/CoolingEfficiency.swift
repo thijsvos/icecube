@@ -32,10 +32,17 @@ public enum CoolingEfficiency {
     ///
     /// `R` is a quotient, so as `P → 0` the noise in `ΔT` is amplified without
     /// bound: at 4 W a ±1 °C sensor wobble moves `R` by ±0.25 °C/W, which is
-    /// larger than the difference between a clean Mac and a dusty one. The floor
-    /// is above the idle draw `docs/SMC-KEYS.md` measured on Mac14,9
-    /// (`PSTR` 19.6 W idle), so a genuinely idle Mac reports a value — the floor
-    /// exists for the pathological low end, not to silence normal use.
+    /// larger than the difference between a clean Mac and a dusty one.
+    ///
+    /// The floor sits far below the 19.6 W `docs/SMC-KEYS.md` measured on
+    /// Mac14,9 — that figure was captured with background work running — so an
+    /// ordinarily busy Mac always reports a value. `docs/THERMAL.md` later
+    /// measured 7.9 W at *true* idle, close enough to 5 W that a deeply idle
+    /// machine can legitimately show `—`: the floor exists for the pathological
+    /// low end, and a quiet desktop occasionally falling under it is the rule
+    /// working. (Until 2026-08-16 this said the floor "is above the idle draw
+    /// … so a genuinely idle Mac reports a value", which has the comparison
+    /// backwards — 5 is below 19.6 — and drew the opposite conclusion.)
     public static let minimumWatts: Double = 5
 
     /// `R` is only meaningful at steady state, and this is how long "steady" has
@@ -43,9 +50,11 @@ public enum CoolingEfficiency {
     ///
     /// Silicon has thermal mass. After a load step the die keeps *absorbing*
     /// heat, so `ΔT` lags `P` and the instantaneous quotient describes neither
-    /// the old state nor the new one. Twenty seconds is ten polls at the app's
-    /// default 1 Hz cadence — long enough to outlast the ramp, short enough that
-    /// an ordinary idle desktop settles within it.
+    /// the old state nor the new one. Twenty seconds is twenty samples at the
+    /// app's default 1 Hz cadence, and still four at the slowest 5 s cadence a
+    /// user can pick — long enough to outlast the ramp, short enough that an
+    /// ordinary idle desktop settles within it, and the reason
+    /// ``CoolingRecorder/minimumSamples`` is 4 rather than 10.
     public static let settleWindow: TimeInterval = 20
 
     /// How much power may drift within the window and still count as settled.

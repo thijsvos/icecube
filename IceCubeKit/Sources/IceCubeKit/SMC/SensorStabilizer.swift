@@ -16,13 +16,20 @@ import Foundation
 /// cluster reports nothing usable for up to ~85 s after launch (measured on
 /// Mac14,9). Those sensors join the list when they first report.
 enum SensorStabilizer {
+    /// Turns one tick's raw reads into the list the UI renders, holding the last
+    /// good value for any sensor that misread.
+    ///
     /// - Parameters:
     ///   - sensors: the discovered sensor list (fixed at discovery time).
     ///   - freshValues: this tick's successful raw reads, by key (a failed
     ///     read simply has no entry).
     ///   - lastGood: the previous known-good value per key.
-    /// - Returns: one reading per discovered sensor — fresh when plausible,
-    ///   held otherwise — plus the updated known-good cache.
+    /// - Returns: one reading for every sensor that has produced a plausible
+    ///   value at least once this process — this tick's read when it was
+    ///   plausible, the last good one otherwise — plus the updated known-good
+    ///   cache. An admitted sensor that has **never** reported yields no reading
+    ///   at all, which is why the published list grows over the first minute of a
+    ///   launch instead of starting complete.
     static func stabilize(
         sensors: [SMCKeyMaps.SensorDescriptor],
         freshValues: [String: Double],

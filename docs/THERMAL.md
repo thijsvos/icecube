@@ -96,7 +96,9 @@ So Ice Cube only reports `R` when, for a continuous 20 seconds:
 - power stays within **15 %** (`powerTolerance`) of its mean,
 - the die stays within **1.5 °C** (`temperatureToleranceCelsius`) of its mean.
 
-Twenty seconds is ten polls at the default 1 Hz cadence. 1.5 °C is a little above
+Twenty seconds is twenty samples at the default 1 Hz cadence, and still four at
+the slowest 5 s cadence a user can pick — which is why `minimumSamples` is 4
+rather than 10. 1.5 °C is a little above
 the SMC's own reporting granularity — a tighter bound would mean never settling.
 
 A gap in the data **resets** the window rather than being skipped over. Stitching

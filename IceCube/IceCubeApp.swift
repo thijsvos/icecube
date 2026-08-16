@@ -197,10 +197,13 @@ struct IceCubeApp: App {
         }
         .defaultSize(width: 560, height: 420)
 
-        // Full settings. Fixed content size (the tabbed view is 480×380) and
-        // non-resizable — one `.windowResizability(.contentSize)` only. (A
-        // stray second `.contentMinSize` here previously let the window grow
-        // to its saved frame and fill the screen.)
+        // Full settings. Fixed *width* at 480 and non-resizable, with the height
+        // coming from whichever tab is showing — `SettingsWindowView` is
+        // `.frame(width: 480)` plus `.fixedSize(vertical:)`, so the window grows
+        // and shrinks as you move between General, Menu and Fan Control. Exactly
+        // one `.windowResizability(.contentSize)`, which is what makes that
+        // work. (A stray second `.contentMinSize` here previously let the window
+        // grow to its saved frame and fill the screen.)
         Window("Ice Cube Settings", id: WindowOpener.ID.settings) {
             SettingsWindowView(state: appState)
         }

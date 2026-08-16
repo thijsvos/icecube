@@ -36,8 +36,17 @@ enum CurveApplyPolicy {
     /// than an empty warning row, which reads as a rendering bug.
     static let unexplainedFailure = "The curve couldn’t be applied. Open the Ice Cube menu for details."
 
+    /// Decides what, if anything, the curve editor should say after an apply.
+    ///
     /// - Parameter error: `HelperManager.lastError` as it stands after the
-    ///   apply. Only consulted for `.failed`; the other two paths clear it.
+    ///   apply, and only consulted for `.failed`. Worth being precise about what
+    ///   the other two answers leave behind, because they are not the same:
+    ///   `.ok` clears it (`HelperManager.run` sets `lastError = nil` the moment
+    ///   the call returns), while `.deferredUntilWake` leaves whatever was
+    ///   already there — a deferral is not a failure, so nothing on that path
+    ///   writes the field either way. This function ignores it for both, so the
+    ///   difference costs nothing here; it matters to whoever renders the two
+    ///   side by side.
     static func resolve(_ outcome: HelperManager.CommandOutcome, error: String?) -> Resolution {
         switch outcome {
         case .ok:

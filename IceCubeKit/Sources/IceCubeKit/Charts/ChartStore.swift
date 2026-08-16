@@ -8,9 +8,15 @@ import Foundation
 /// Being an actor puts ring-buffer upkeep and downsampling **off the main
 /// actor** (a PLAN.md §1.2 requirement) — the UI awaits ready-to-render rows.
 ///
-/// Anti-jump rules: the row set is fixed after the first ingest (CPU row iff
-/// any `Tp*` sensor exists, GPU row iff any `Tg*`, one row per fan), and each
-/// row carries a **fixed y-axis domain** so axes never rescale mid-glance.
+/// Anti-jump rules: rows only ever appear — never disappear, never reorder. The
+/// fan rows are fixed at the first ingest (`FNum` is answered on the first poll
+/// and a fan never turns up late), while the CPU, GPU and Power rows latch **on**
+/// the first time a sensor of that class, or a wattage, is seen: a power-gated
+/// cluster can stay silent for the first minute of a launch, and a row that
+/// appears late beats one that is missing for the life of the process. Membership
+/// follows ``SMCKeyMaps/classify(_:)``, so an M3's `Te*` keys land in the CPU row
+/// exactly as an M2's `Tp*` do. Each row carries a **fixed y-axis domain** so
+/// axes never rescale mid-glance.
 public actor ChartStore {
     /// 1 sample/s × 3600 = the 60-minute maximum window.
     public static let capacity = 3600

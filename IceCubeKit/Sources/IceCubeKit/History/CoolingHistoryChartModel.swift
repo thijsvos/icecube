@@ -89,9 +89,16 @@ public enum CoolingHistoryChartModel {
         return 0 ... max(1.2, (top * 1.25 * 10).rounded(.up) / 10)
     }
 
-    /// "2317–3213 RPM", clamped to the fan's real floor — a decile whose
-    /// lower edge sits below the fan's own minimum would otherwise name
-    /// speeds the fan cannot do. `.fanless` says so in words.
+    /// "2317–2720 RPM" for decile 3 of a 2317–6800 fan, clamped to the fan's
+    /// real floor — that band's own lower edge is 2040 RPM, below the minimum
+    /// the fan can actually turn, and naming a speed it cannot do would be a
+    /// small lie on every label.
+    ///
+    /// The edges are plain fractions of `maxRPM` (`n/10 … (n+1)/10`,
+    /// ``FanBand/width`` apart) with the floor applied to the lower end only.
+    /// `.fanless` says so in words. (The example read "2317–3213 RPM" until
+    /// 2026-08-16 — a figure no decile can produce, left from when the label was
+    /// computed over the min→max range instead.)
     public static func rpmLabel(_ band: FanBand, minRPM: Double, maxRPM: Double) -> String {
         guard let range = band.fractionRange else { return "No fans" }
         let low = max(minRPM, range.lowerBound * maxRPM)

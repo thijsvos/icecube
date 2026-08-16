@@ -437,6 +437,47 @@ the first signed build; the DMG is never signed, notarized or stapled; and the
 `Restarting after` tripwire that commit `ee223fe`'s message claims to have added
 exists in no commit in history.
 
+### The comment-drift audit (2026-08-16)
+
+An audit of every `///` doc comment in all 130 source files. **74 comments no
+longer described the code under them** — not because the prose was poor, but
+because 181 commits in three months moved code out from under it. Fixed across
+four commits; the mechanical classes were closed exhaustively rather than
+sampled, and re-scanned to zero afterwards.
+
+Six were actively hazardous, in that believing them would undo a fix already
+paid for in field testing: `FanWriteSequencer.revertAllAuto`'s one-line summary
+advertised the `Tg 0` sequence its own FIELD CORRECTION forbids;
+`FanGuardian.evaluate`'s `dieCelsius` doc invited callers to pass `0` on a failed
+read, which takes the release branch on a hot machine (the 90 °C incident);
+`DaemonCore.start()` claimed an unconditional revert, which would have destroyed
+the §4.3.3 boot promise; `autoSafetyNet`'s guard was justified by a false claim
+that `asRevert` skips the generation bump, inviting its deletion;
+`FanMode.system` said mode 3 is "never written by us" when it is written in two
+places — the same false model §3.4 records as having already cost a shipped bug;
+and `HelperClient` claimed a `#if DEBUG` gate on unsigned connections that does
+not exist in the app target at all (the daemon side does fail closed; only the
+comment was wrong).
+
+The largest single cause was structural, not editorial: **10 doc blocks were
+orphaned or fused during refactors** — a declaration was deleted or moved and its
+comment stayed, attaching to whatever came next. Two documented a `// MARK:` and
+therefore nothing.
+
+**One code change came out of it.** `FanCurve.cold` shipped from `d45b2e3` with
+fractions 0.5/0.62, putting the idle band at 50–62 % and the steepest segment
+*below* 65 °C — while its doc comment, and that commit's own message, both asked
+for "~55-70%" and a knee "ABOVE 65 C". The prose was the spec and the constants
+were the typo, so the constants moved to 0.55/0.7. Cold now climbs
+0.0075 → 0.008 → 0.0147 per °C, steepest last. It survived because `builtins`
+only sampled endpoints, and an endpoint is what a mistyped interior point does
+not move; `coldMatchesItsDocumentedShape` now pins the slope ordering, and was
+mutation-verified against the old constants.
+
+Deliberately **not** fixed, and filed as an issue instead: 14 code bugs found
+while reading. Keeping the rest of the audit comment-only is what made it safe to
+review at that size.
+
 ## 7. Risks & mitigations
 - **SMC keys vary wildly per model** → curated map + fallback enumeration + community diagnostics pipeline (§3.3). Biggest ongoing cost; design for it.
 - **Free-Apple-ID helper approval unproven** → Phase 0.5 spike with the fallback documented *before* it runs (manual `sudo launchctl bootstrap` install for Phases 3–5).

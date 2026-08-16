@@ -229,7 +229,7 @@ public enum ControlAlertRules {
     /// Evaluates one poll.
     ///
     /// - Parameters:
-    ///   - decisions: **only decisions not seen before.** `HelperManager`
+    ///   - freshDecisions: **only decisions not seen before.** `HelperManager`
     ///     already dedupes by `id` and already computes exactly this set, so
     ///     passing the whole timeline would re-alert on every poll.
     ///   - fans: the current readings, for the pinned rule.

@@ -8,7 +8,7 @@ import os
 /// the safety invariants true no matter what the app does (or fails to do).
 ///
 /// **A deliberate exception to the ~300-line file guideline — and it is now
-/// roughly 1,400 lines, so the exception deserves the real number.** Splitting
+/// roughly 1,650 lines, so the exception deserves the real number.** Splitting
 /// this into `DaemonCore+Safety/+Curve/+Guardian/+Hardware` extensions has been
 /// tried and reverted TWICE (most recently 2026-07-26, with the split written
 /// and building before it was thrown away). Swift's `private` is file-scoped,
@@ -52,7 +52,6 @@ public actor DaemonCore {
     private var tickTask: Task<Void, Never>?
     /// Read-back mismatches since the last good verification.
     private var verifyFailures = 0
-    /// Resolved sensor keys for safety monitoring (curated ∩ present).
     /// True while the SafetyMonitor is forcing maximum cooling.
     private var coolingOverride = false
     /// Bumped by every revert. See ``engage(targets:fans:since:)``.
@@ -125,16 +124,22 @@ public actor DaemonCore {
         }
     }
 
+    /// Builds the control loop. Every system seam is injected, which is what
+    /// makes the safety invariants testable against a scripted fake firmware.
+    ///
     /// - Parameters:
     ///   - port: the SMC surface. The real daemon passes `SMCWritePort` (the
     ///     only IOKit writer in the system, which lives in the helper target);
     ///     tests pass a scripted fake firmware.
     ///   - store: persistence for the boot promise. Injected for the same reason.
+    ///   - capabilities: reads the live system power capability bits.
+    ///     Deliberately has NO default: a default is a value some future caller
+    ///     forgets to override, and the value it would have to be is "full wake",
+    ///     which is precisely the bug this parameter exists to prevent.
     ///   - sleep: injected so tests do not actually wait out revert retries.
-    /// - Parameter capabilities: reads the live system power capability bits.
-    ///   Deliberately has NO default: a default is a value some future caller
-    ///   forgets to override, and the value it would have to be is "full wake",
-    ///   which is precisely the bug this parameter exists to prevent.
+    ///   - now: the wall clock, used **only** to date decision events — never to
+    ///     measure elapsed time. See the property's own doc for why a control
+    ///     loop that otherwise runs on `ContinuousClock` needs one at all.
     public init(
         port: any SMCControlPort,
         store: any FanConfigStoring,
@@ -177,9 +182,22 @@ public actor DaemonCore {
 
     // MARK: - Lifecycle
 
-    /// SAFETY (§4.3): the daemon starts by reverting everything to auto —
-    /// whatever a crash or power loss left behind is wiped clean — then runs
-    /// the tick forever.
+    /// SAFETY (PLAN.md §4.3.3): with nothing persisted, the daemon starts by
+    /// reverting everything to auto, so whatever a crash or power loss left
+    /// behind is wiped clean. A valid persisted curve is **resumed instead** —
+    /// that is the Phase 4 boot promise, and §4.3.3 spells out that it is
+    /// explicitly NOT unconditional auto, because unconditional auto is what
+    /// broke boot persistence.
+    ///
+    /// Boot inside a dark wake goes one step further: the curve is loaded and
+    /// reported, but not one fan is written until a display proves the machine
+    /// is awake — so on that path whatever the firmware was left holding stays
+    /// exactly where it was until the first real wake. Then the tick runs
+    /// forever.
+    ///
+    /// This said "starts by reverting everything to auto" flatly until
+    /// 2026-08-16, which is the opposite of the boot promise; anyone
+    /// "correcting" the code to match would have deleted the feature.
     public func start() async {
         let caps = capabilities()
         // One line, every start: if a future macOS moves the symbol AND renames
@@ -694,9 +712,20 @@ public actor DaemonCore {
     /// Puts the daemon into `newConfig` — the app's main entry point, and the
     /// only way a user-chosen mode reaches the hardware.
     ///
-    /// - Throws: when the config is unusable (a curve with no usable points) or
-    ///   the firmware refuses the write sequence. On a throw the fans are left
-    ///   reverted, never half-applied.
+    /// - Throws: `IceCubeError.systemAsleep` when the Mac is parked for sleep —
+    ///   the one case the app must not render as a failure, because it holds the
+    ///   config and re-sends it on wake (``WireError/isDeferredUntilWake(_:)``);
+    ///   `IceCubeError.smcDecodingFailed` for a curve with no usable points; and
+    ///   whatever the fan read threw when the SMC would not answer at all.
+    ///
+    ///   A firmware that *refuses the write sequence* deliberately does NOT
+    ///   throw: `engage(targets:fans:since:)` has already reverted the fans and
+    ///   logged why, so this returns normally, `HelperService` replies success,
+    ///   and the caller finds out from the next `currentStatus()` rather than
+    ///   from an error. This tag claimed the opposite until 2026-08-16 — it
+    ///   named the refusal path, which returns, and omitted the two errors that
+    ///   actually throw. Either way the fans are left reverted, never
+    ///   half-applied.
     public func apply(_ newConfig: FanConfig) async throws {
         // Not a silent success: `HelperService.apply` would reply `nil` and the
         // popover would show a config the hardware is not in, indefinitely.
@@ -925,10 +954,13 @@ public actor DaemonCore {
 
     // MARK: - The safety tick
 
-    /// - Parameter sleptFor: how long the machine was actually asleep since the
-    ///   previous tick, measured as ContinuousClock − SuspendingClock.
+    /// One pass of the control loop: read, judge, and act on what it finds.
+    ///
     /// `internal` so tests can drive single ticks deterministically instead of
     /// racing the 2 s loop that `start()` spawns.
+    ///
+    /// - Parameter sleptFor: how long the machine was actually asleep since the
+    ///   previous tick, measured as ContinuousClock − SuspendingClock.
     func tick(sleptFor slept: Duration) async {
         // Parked for sleep: nothing but the temperature ceiling may touch a fan,
         // and even a deferred revert waits until the machine is genuinely awake.
@@ -1160,9 +1192,9 @@ public actor DaemonCore {
     private func forceMaximumCooling() async {
         let generation = revertGeneration
         guard let fans = try? await readFans() else { return }
-        // Never `uniqueKeysWithValues` here: it traps on a duplicate fan id,
-        // and this is the 95 °C emergency-cooling path — the very last place
-        // that may crash.
+        // Never `uniqueKeysWithValues` here: it traps on a duplicate fan id, and
+        // this is the temperature-ceiling path — 104 °C for a die sensor, 95 °C
+        // for everything else — the very last place that may crash.
         let maxTargets = Dictionary(
             fans.map { ($0.id, $0.maxRPM) }, uniquingKeysWith: { first, _ in first }
         )
@@ -1202,7 +1234,8 @@ public actor DaemonCore {
     /// leaving them physically `.forced` while `config == .auto`.
     ///
     /// Nothing recovers that state on its own: `SafetyMonitor` only acts while
-    /// `config.mode != .auto`, so the 95 °C ceiling cannot fire; and the
+    /// `config.mode != .auto`, so the temperature ceiling — 104 °C on a die
+    /// sensor, 95 °C on everything else — cannot fire; and the
     /// guardian's `nobodyCooling` / `orphaned` filters both read forced fans as
     /// "somebody is already cooling" and stand down. The fans would hold a
     /// fixed RPM that no longer tracks load.
@@ -1266,6 +1299,9 @@ public actor DaemonCore {
         return outcome
     }
 
+    /// Hands every fan back to the firmware and drops the daemon to `.auto` —
+    /// the single path every safety revert funnels through.
+    ///
     /// - Parameter clearsPersistence: whether this revert also cancels the boot
     ///   promise. True for every user- or safety-driven revert (the user asked
     ///   for auto, or we lost control); false only for daemon shutdown, where
@@ -1484,8 +1520,16 @@ public actor DaemonCore {
         // `readFans()` and `readTemperatures()` above are both suspension points,
         // and `HelperService` spawns a Task per XPC message — so an `apply` can
         // land in between and put us in manual/curve. Writing then would fight
-        // the user's own config, and the two branches below bypass `engage()`
-        // (no generation bump, no revertsInFlight), so nothing else catches it.
+        // the user's own config, and the release and re-park branches below go
+        // through `asRevert` rather than `engage()`: they DO bump the generation
+        // and hold `revertsInFlight`, but nothing re-checks the generation
+        // *after* their writes land, which is the half `engage()` provides and
+        // they do not get. This guard is the only thing standing there.
+        //
+        // Until 2026-08-16 this said the branches bypass `engage()` "(no
+        // generation bump, no revertsInFlight)". `asRevert` has done both since
+        // it was introduced, so the parenthetical was false — and a false
+        // justification invites someone to delete the guard as redundant.
         guard config.mode == .auto, !revertPending else {
             return
         }

@@ -38,7 +38,6 @@ struct PopoverTemperatureCards: View {
     }
 
     /// The full per-sensor list, grouped as a titled card.
-    /// The full per-sensor list, grouped as a titled card.
     ///
     /// The height is **reserved**, not measured: see ``SensorListMetrics``. On
     /// a curated Mac it is exactly the list; on a Mac whose sensors are

@@ -7,8 +7,22 @@ import os
 /// A thin async wrapper around one `NSXPCConnection` to the root daemon.
 ///
 /// The connection pins the helper's code signature to our own Team ID
-/// (mirroring the pinning the helper applies to us). Unsigned dev builds
-/// can't pin — that's logged loudly and only tolerated in DEBUG.
+/// (mirroring the pinning the helper applies to us). When we are unsigned there
+/// is no Team ID to pin to, and this side connects **anyway**, in every build
+/// configuration — it logs a fault and carries on.
+///
+/// That asymmetry is deliberate but easy to misread, so it is worth saying out
+/// loud: the two ends of this channel do not fail the same way. The daemon is
+/// the end that fails closed, in
+/// `HelperService.listener(_:shouldAcceptNewConnection:)`, which rejects every
+/// connection outright in a Release build with no requirement to impose;
+/// `CodesignPinning`'s doc, which says callers "fail closed in release", is
+/// describing that end. Here the practical guard is upstream instead:
+/// `RegistrationPreflight.blocker` refuses to register an unsigned build at all,
+/// and `maintain()` only reaches `connect()` once registration is `.enabled` —
+/// so an unsigned app normally never gets this far, and if it somehow does, the
+/// daemon turns it away. (This said unsigned builds are "only tolerated in
+/// DEBUG" until 2026-08-16. There is no `#if DEBUG` in the app target at all.)
 final class HelperClient {
     private var connection: NSXPCConnection?
     /// `HelperConstants.logSubsystem`, not the literal: under test this resolves

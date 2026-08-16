@@ -214,7 +214,15 @@ public struct HelperStatus: Codable, Sendable, Equatable {
     public var protocolVersion: String
     /// The mode currently enforced by the daemon (not merely requested).
     public var mode: FanConfig.Mode
-    /// Clamped per-fan targets in force when `mode == .manual`.
+    /// The clamped per-fan targets the daemon last actually wrote — in curve
+    /// mode as well as manual, since the curve tick fills this in with what it
+    /// commanded, and every revert empties it.
+    ///
+    /// The app happens to read it only while `mode == .manual`
+    /// (`PresetHighlight.reconcile`), which is why nobody noticed it has been
+    /// carrying curve targets all along. Documented as manual-only until
+    /// 2026-08-16; a field described narrower than it is, is how the next
+    /// consumer gets it wrong.
     public var appliedTargets: [Int: Double]
     /// Which write branch this machine needed: `"direct"` (M1/M2-style) or
     /// `"ftst"` (M3/M4-style unlock). `nil` until the first manual engage.

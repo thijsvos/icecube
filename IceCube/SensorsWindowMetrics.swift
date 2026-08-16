@@ -120,8 +120,17 @@ nonisolated enum SensorsWindowMetrics {
 
     // MARK: - The bounds
 
-    /// The smallest window we open, and the floor the user can drag to. Roughly
-    /// six rows: a short list rather than a peephole.
+    /// The smallest window we open, and the floor the user can drag to.
+    ///
+    /// It was chosen as roughly six rows of list, back when the chrome was two
+    /// sections. It is less than that now — the Cooling section alone is 104 pt,
+    /// and title bar plus controls plus chrome already come to 325 — so at the
+    /// floor the `List` scrolls rather than showing six rows outright. That is
+    /// acceptable and the number stays: this is a *drag* floor, the height the
+    /// window actually opens at comes from
+    /// ``frameHeight(rowCount:availableHeight:hasDecisions:)``, and raising the
+    /// floor in step with every chrome addition would eventually make the
+    /// smallest allowed window taller than a small display.
     static let minimumFrameHeight: CGFloat = 320
 
     /// The absolute ceiling. Beyond this a 560 pt-wide window reads as a broken
@@ -178,8 +187,18 @@ nonisolated enum SensorsWindowMetrics {
     /// 100 ms on a Mac whose sensors are curated, but on an unmapped model
     /// discovery walks every key on the machine, which is 1–2 s — and the
     /// unmapped user is exactly who gets sent to this window to export
-    /// diagnostics. Twelve rows lands at 473 pt: near enough the fixed 480 this
-    /// type replaced that an unlucky first open is no worse off than before.
+    /// diagnostics.
+    ///
+    /// Twelve rows was chosen when this window held two sections and landed at
+    /// 473 pt, near enough the fixed 480 this type replaced that an unlucky
+    /// first open was no worse off than before. The Cooling section has since
+    /// added 104 pt of chrome and its header and gap another 48, so the same
+    /// twelve rows now open at 625 pt. That is *taller* than the old fixed
+    /// height rather than shorter, which is the harmless direction to be wrong
+    /// in — a strip of empty list background, not a clipped last row that macOS
+    /// then remembers forever — so the number stays. Anyone retuning it should
+    /// re-derive from ``frameHeight(rowCount:availableHeight:hasDecisions:)``
+    /// rather than from this paragraph.
     static let unmeasuredRowCount = 12
 
     /// The height to hand `.defaultSize` — frame points, title bar included.

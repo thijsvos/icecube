@@ -4,8 +4,15 @@ import IceCubeKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The live-charts section of the popover (PLAN.md §1.2): a window picker
-/// (1/5/15/60 min), a pause button, and the stacked chart rows.
+/// The live-charts section of the popover (PLAN.md §1.2): a title that doubles
+/// as the live window caption ("1 MIN HISTORY"), a CSV export button, a pause
+/// button, and the stacked chart rows.
+///
+/// The window picker itself moved to Settings → Menu → Charts along with the
+/// row-visibility toggles, which is why this view only *reads*
+/// `chartSettings.window` and re-renders on change. Only the two live actions
+/// stayed: pausing and exporting are things you do while looking at the charts,
+/// and a picker is a thing you set once.
 ///
 /// The section's height is constant once rows exist — rows are a static set
 /// (see `ChartStore`) and each row has a fixed frame, so the popover never
