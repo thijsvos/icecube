@@ -526,6 +526,91 @@ exists to remove, so it now calls it.
 
 Every new test was mutation-verified.
 
+### Inside — the live cooling schematic (2026-08-17), experimental
+
+A drawing of the cooling path instead of a list of numbers: silicon glowing at
+its own temperature, blowers turning, air moving at fan speed. **Off by
+default**, behind Settings → General → Experimental, and while the switch is off
+there is no route to it — no popover entry, and nothing calls `WindowOpener`
+with its id. The default overview is unchanged.
+
+It reads one thing, `SMCProviding.snapshot()`, which the app already polls once
+a second. No new file, no new preference domain, no permission, no daemon
+change, no protocol bump — `HelperConstants.protocolVersion` stays at 27 and
+`verify-bundle.sh` has nothing new to check. It cannot affect the fans.
+
+Four pure types in `IceCubeKit/Inside/` carry every decision, so the SwiftUI
+file is a renderer with no logic in it: `InsideLayout` (which blocks exist, in a
+stable order), `HeatFlow` (the gradient, the flow rate, the state),
+`FanRotation` (the drawn blade angle) and `InsideCopy` (the sentence).
+
+**Two things were cut before they shipped, both for the same reason.**
+
+- **The "cooling is failing" state.** The plan promised a third state — fans
+  fast, heat not leaving — read off the spread between the two airflow sensors.
+  Checked against this file's own measurements first: on Mac14,9 under load
+  `TaLP` and `TaRF` read **46.8 °C and 47.0 °C** while cooling was working
+  perfectly. Both sensors sit in the airflow path a few centimetres apart;
+  neither is at an end of it, so there is no spread to threshold. The state was
+  not detectable and was removed rather than faked. The question it was for
+  already has an owner — `R` needs the watts and a settle rule, which is
+  `CoolingEfficiency` and the Cooling History window. Inside states the gradient
+  and links there.
+- **Blade speed.** A fan drawn at 6,800 RPM into a canvas aliases and appears to
+  run backwards, most loudly exactly when the machine is working hardest. What
+  aliases is *blade passes*, not turns, so `FanRotation` caps the drawn rate
+  from the blade count and the frame rate.
+
+  **CORRECTION (2026-08-17), caught in review on the owner's machine.** The
+  first cap was `frameRate / 2` — Nyquist exactly — which at 30 fps and nine
+  blades put the fastest fan on precisely 15 blade passes/s against a 15 Hz
+  limit. That is the one rate at which rotation is guaranteed to look
+  *stationary*, and the blur then reached full opacity at 70 % of range, so the
+  blades vanished as well: the drawing got stiller as the machine got busier.
+  Nyquist is where aliasing begins, not a safe place to sit. Now 60 fps, seven
+  blades, and a `frameRate / 3` margin — 20 passes/s against a 30 Hz limit,
+  giving 2.9 rev/s. Blur caps at 0.55 so it stays a cue layered over visible
+  motion rather than a replacement for it. **The old test was part of the bug**:
+  it asserted `maximumDisplayRPM == 100` and so pinned the defect in place; it
+  now derives the relationship and asserts the rate is safely *under* Nyquist.
+
+Honest limits stated in the window: it is a schematic, not a floorplan — Ice
+Cube knows what a sensor measures, not where it sits — and intake/outflow are
+assigned **by temperature, not position**, the same inference
+`CoolingEfficiency.ambient(from:)` already documents.
+
+Opt-in was the owner's call and is the right one: this is the first surface that
+is primarily an impression rather than a measured claim, and it is the only part
+of the app that redraws continuously.
+
+The drawing itself took four attempts, and the failures are recorded in
+`InsideStage`'s doc comment because they were all one mistake. Two top-down
+versions read as a **face** — two equal circles above anything horizontal are
+eyes, and a curved heat pipe between them is a mouth — and shrinking the circles
+did not help, because the problem was the arrangement rather than the parts. A
+left-to-right flow killed the face and lost the point: a diagram of a laptop
+should be oriented like the laptop. What worked was drawing the machine
+truthfully instead of symmetrically — blowers out at the corners where they
+physically are, silicon inside a drawn logic board, fin stacks as wide bars
+along the back edge, and nothing curved. The blowers are drawn as real
+centrifugal blowers (volute, central inlet, backswept impeller, outlet aimed at
+the fins), which is general arrangement rather than any model's geometry — see
+`docs/CREDITS.md` for why no Apple or iFixit artwork could be used.
+
+**Motion is a second, separate switch.** macOS Reduce Motion is respected by
+default, but it exists for parallax and full-screen zooms, and applying it here
+switches off the one thing the window is for. So the preference is tri-state:
+unset follows the system, set overrides it for this window only. That is what
+`KeyValueStore.object(forKey:)` is for — `bool(forKey:)` cannot tell "never
+chosen" from "chosen off", and here the two must behave differently.
+
+23 new Kit tests plus 4 app-side (639 and 271 totals, from 616 and 267), all
+mutation-verified — thirteen mutations applied and killed,
+including removing the alias cap, putting the drawn rate back on Nyquist,
+allowing a negative gradient, treating a fanless Mac as one with stopped fans,
+sorting the blocks by temperature, shipping the switch on, and writing the
+toggle to the real `UserDefaults`.
+
 ## 7. Risks & mitigations
 - **SMC keys vary wildly per model** → curated map + fallback enumeration + community diagnostics pipeline (§3.3). Biggest ongoing cost; design for it.
 - **Free-Apple-ID helper approval unproven** → Phase 0.5 spike with the fallback documented *before* it runs (manual `sudo launchctl bootstrap` install for Phases 3–5).

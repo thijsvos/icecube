@@ -21,6 +21,16 @@ Ice Cube's code is original (MIT), but it stands on community research:
 
 ## Artwork
 
+- **The Inside schematic** is drawn from scratch, and deliberately so. Apple
+  publishes Self Service Repair manuals with exploded views, and iFixit
+  publishes teardowns, but neither is licensable here: Apple's manuals are
+  copyrighted, and iFixit's CC BY-NC-SA carries a NonCommercial clause this
+  project's MIT licence cannot accept. What the drawing uses instead is
+  *general arrangement* — a fact, not an expression: every Mac laptop cools
+  with centrifugal blowers that draw air in through a central inlet and vent
+  through a volute into a fin stack at the hinge. Nothing is traced, and the
+  window says in its own footnote that it is a schematic rather than a map of
+  any particular board.
 - **App icon & menu-bar glyph**: the 🧊 "Ice" emoji (U+1F9CA) from
   **[Google Noto Emoji](https://github.com/googlefonts/noto-emoji)**,
   licensed **Apache 2.0**. Composited onto Ice Cube's gradient background and

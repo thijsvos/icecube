@@ -259,10 +259,15 @@ struct SimulatedIsolationTests {
         state.persistsCurveWithoutApp = true
         state.prefersSilentOptionClick = true
         state.hasDismissedSetup = true
+        state.isInsideEnabled = true
 
         #expect(graph.defaults.bool(forKey: AppState.persistCurveKey))
         #expect(graph.defaults.bool(forKey: MenuBarMode.preferenceKey))
         #expect(graph.defaults.bool(forKey: AppState.dismissedSetupKey))
+        #expect(
+            graph.defaults.bool(forKey: AppState.insideEnabledKey),
+            "a simulated session must not be able to switch an experimental feature on for the real app"
+        )
 
         // And the reader the daemon-facing code actually consults must agree
         // with the toggle — that half was broken, not merely leaky: `cyclePreset`

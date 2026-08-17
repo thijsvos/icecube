@@ -135,6 +135,81 @@ struct AppStateTests {
         #expect(graph.defaults.object(forKey: "charts.power") as? Bool == true)
     }
 
+    // MARK: - The experimental switch
+
+    /// Off is the whole promise of an opt-in feature, so it is pinned rather
+    /// than assumed from `bool(forKey:)`'s behaviour.
+    ///
+    /// Worth one sentence about why that reader is the right one here, because
+    /// the same call was the *wrong* one in `ChartStore.Window`: there `0` was a
+    /// legitimate stored value, so "absent" and "one minute" were
+    /// indistinguishable and the documented default could never fire. Here
+    /// `false` genuinely means *not enabled* — there is no state this
+    /// preference can hold that `false` would misrepresent.
+    @Test("A store nobody has written reports the experimental window as off")
+    func insideIsOffUntilAskedFor() {
+        let graph = CompositionRoot.makeSimulatedForTesting()
+        #expect(graph.defaults.object(forKey: AppState.insideEnabledKey) == nil, "nothing may have written it")
+        let state = AppState(graph: graph, menuBarHost: { _ in SpyHost() })
+        #expect(!state.isInsideEnabled, "an experimental feature must not arrive switched on")
+    }
+
+    /// The seam `@AppStorage` broke three times: the toggle has to land in the
+    /// store the graph handed over, or a simulated session writes a feature flag
+    /// into the owner's real preferences.
+    @Test("Turning the experimental window on writes to the injected store")
+    func insideTogglePersistsThroughTheSeam() {
+        let graph = CompositionRoot.makeSimulatedForTesting()
+        let state = AppState(graph: graph, menuBarHost: { _ in SpyHost() })
+
+        state.isInsideEnabled = true
+        #expect(graph.defaults.bool(forKey: AppState.insideEnabledKey))
+        #expect(!(graph.defaults is UserDefaults), "and the store it landed in must not be the real one")
+
+        state.isInsideEnabled = false
+        #expect(!graph.defaults.bool(forKey: AppState.insideEnabledKey), "and it must switch back off again")
+    }
+
+    /// Three states, and the third is the one that matters: "never chosen" has
+    /// to stay distinguishable from "chosen off", because the first follows the
+    /// system's Reduce Motion setting and the second overrides it. This is what
+    /// `KeyValueStore.object(forKey:)` exists for — `bool(forKey:)` collapses
+    /// the two.
+    @Test("The animation preference remembers not having been chosen")
+    func insideAnimationIsTriState() {
+        let graph = CompositionRoot.makeSimulatedForTesting()
+        let state = AppState(graph: graph, menuBarHost: { _ in SpyHost() })
+        #expect(state.insideAnimation == nil, "an untouched preference must defer to the system")
+
+        state.insideAnimation = false
+        #expect(graph.defaults.object(forKey: AppState.insideAnimationKey) as? Bool == false)
+        #expect(
+            AppState(graph: graph, menuBarHost: { _ in SpyHost() }).insideAnimation == false,
+            "an explicit off must survive a relaunch as an explicit off, not decay to 'unchosen'"
+        )
+
+        state.insideAnimation = nil
+        #expect(
+            graph.defaults.object(forKey: AppState.insideAnimationKey) == nil,
+            "clearing it must remove the key, or 'follow the system' becomes unreachable"
+        )
+    }
+
+    /// An unreachable window is the point of the switch, and a window the menu
+    /// bar cannot close is the "a window nobody remembers opening" bug
+    /// `closableFromMenuBar` exists for. Inside qualifies for the same reason
+    /// the diagnosis window does: it holds nothing and commits nothing.
+    @Test("The experimental window is one the menu bar may close")
+    func insideIsClosableFromTheMenuBar() {
+        #expect(WindowOpener.closableFromMenuBar.contains(WindowOpener.ID.inside))
+        #expect(
+            WindowOpener.windowsToClose(
+                openWindowIDs: [WindowOpener.ID.inside], summoning: WindowOpener.ID.settings
+            ) == [WindowOpener.ID.inside],
+            "opening Settings must not leave it stranded behind"
+        )
+    }
+
     @Test("Reporting an error surfaces it, and it can be cleared by the next good poll")
     func reportedErrorsAreVisible() {
         let state = Self.state()

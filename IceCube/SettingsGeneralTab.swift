@@ -17,6 +17,7 @@ struct SettingsGeneralTab: View {
     @Binding var loginItemError: String?
     let updates: UpdateChecker
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.accessibilityReduceMotion) private var systemReducesMotion
 
     var body: some View {
         generalTab
@@ -82,6 +83,42 @@ struct SettingsGeneralTab: View {
                     }
                     .controlSize(.small)
                     updateStatusView
+                }
+            }
+            // The one place an experimental feature can be switched on. Off by
+            // default, and while it is off nothing anywhere else offers a route
+            // to the window — a feature reachable without this switch would not
+            // be experimental, it would just be undocumented.
+            Section("Experimental") {
+                Toggle("Inside — a live view of the cooling", isOn: $state.isInsideEnabled)
+                    .help("Draws the heat path: silicon, blowers and airflow, at this instant.")
+                Text(
+                    "A picture of where the heat is and whether it is leaving. "
+                        + "It redraws continuously while open, so it is off unless you want it."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                if state.isInsideEnabled {
+                    Toggle("Animate the fans and airflow", isOn: Binding(
+                        get: { state.insideAnimation ?? !systemReducesMotion },
+                        set: { state.insideAnimation = $0 }
+                    ))
+                    .help("The blowers turn and the air moves. Off draws the same picture, held still.")
+                    if systemReducesMotion {
+                        // Worth saying out loud: otherwise the switch above
+                        // looks broken to the one group of people whose system
+                        // setting is quietly overriding it.
+                        Text(
+                            "Reduce Motion is on in System Settings, so this starts off. "
+                                + "Turning it on here applies to this window only."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                    Button("Open Inside…") {
+                        WindowOpener.open(WindowOpener.ID.inside, using: openWindow)
+                    }
+                    .controlSize(.small)
                 }
             }
         }

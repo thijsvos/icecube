@@ -40,6 +40,10 @@ enum WindowOpener {
 
         /// The cooling-history chart and its controls.
         static let coolingHistory = "cooling-history"
+
+        /// The experimental live cooling schematic. Reachable only while
+        /// ``AppState/isInsideEnabled`` is on.
+        static let inside = "inside"
     }
 
     /// The windows the menu bar may close on the user's behalf.
@@ -69,8 +73,11 @@ enum WindowOpener {
     /// ``ID/diagnosis`` is a member: it holds nothing and commits nothing — it
     /// is a live readout of this instant — and closing it is what stops the
     /// per-process sampling and discards the process names it collected.
+    /// ``ID/inside`` is a member for the same reason as ``ID/diagnosis``: it is
+    /// a live readout of this instant, it commits nothing, and closing it is
+    /// what stops the only continuous redraw the app has.
     static let closableFromMenuBar: Set<String> = [
-        ID.sensors, ID.settings, ID.about, ID.diagnosis, ID.coolingHistory,
+        ID.sensors, ID.settings, ID.about, ID.diagnosis, ID.coolingHistory, ID.inside,
     ]
 
     /// Which currently-open windows to close before `summoning` goes on screen.
