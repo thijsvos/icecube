@@ -40,6 +40,8 @@ final class AppState: PopoverLifecycleObserving {
 
     static let persistCurveKey = "persistCurve"
     static let dismissedSetupKey = "hasDismissedSetup"
+    static let insideEnabledKey = "experimental.inside"
+    static let insideAnimationKey = "experimental.inside.animates"
 
     /// The app-wide "keep the curve running when Ice Cube quits" toggle.
     ///
@@ -88,6 +90,52 @@ final class AppState: PopoverLifecycleObserving {
     /// real launch skip onboarding.
     var hasDismissedSetup: Bool {
         didSet { defaults.set(hasDismissedSetup, forKey: Self.dismissedSetupKey) }
+    }
+
+    /// Whether the experimental **Inside** window is available at all.
+    ///
+    /// Off until the user turns it on in Settings, and while it is off there is
+    /// no route to the window: the popover shows no entry and
+    /// ``WindowOpener/open(_:using:)`` is never called with its id. An
+    /// "experimental" feature that is reachable anyway is not experimental.
+    ///
+    /// `bool(forKey:)` returning `false` for a key nobody has written is
+    /// *exactly* the wanted default here, which is worth stating because the
+    /// same call was the wrong reader in `ChartStore.Window`: there, `0` was a
+    /// legitimate stored value, so "absent" and "one minute" were indis-
+    /// tinguishable and the documented 5-minute default could never apply. The
+    /// difference is that `false` here genuinely means *not enabled* — there is
+    /// no state this preference can be in that `false` would misrepresent.
+    ///
+    /// Same injected-store seam as the three above: a simulated session must
+    /// not be able to switch a feature on in the owner's real preferences.
+    var isInsideEnabled: Bool {
+        didSet { defaults.set(isInsideEnabled, forKey: Self.insideEnabledKey) }
+    }
+
+    /// Whether the Inside window animates, or `nil` to follow the system's
+    /// Reduce Motion setting.
+    ///
+    /// Three states, not two, and the third is the point. macOS Reduce Motion
+    /// is the right default to respect — but it is a blunt instrument here:
+    /// it exists for parallax and full-screen zooms that provoke vestibular
+    /// symptoms, and applying it to this window switches off the one thing the
+    /// window is for. Someone who deliberately turned on an experimental live
+    /// drawing of their fans has expressed an intent worth honouring over a
+    /// global default, so they can say so — and someone who has not said
+    /// anything still gets the system's answer.
+    ///
+    /// `nil` is why ``KeyValueStore/object(forKey:)`` exists: `bool(forKey:)`
+    /// cannot tell "never chosen" from "chosen false", and here those two must
+    /// behave differently.
+    var insideAnimation: Bool? {
+        didSet {
+            if let insideAnimation {
+                defaults.set(insideAnimation, forKey: Self.insideAnimationKey)
+            } else {
+                defaults.removeObject(forKey: Self.insideAnimationKey)
+            }
+        }
     }
 
     /// Helper daemon lifecycle + fan-control commands (Phase 3).
@@ -394,6 +442,8 @@ final class AppState: PopoverLifecycleObserving {
         persistsCurveWithoutApp = defaults.bool(forKey: Self.persistCurveKey)
         prefersSilentOptionClick = defaults.bool(forKey: MenuBarMode.preferenceKey)
         hasDismissedSetup = defaults.bool(forKey: Self.dismissedSetupKey)
+        isInsideEnabled = defaults.bool(forKey: Self.insideEnabledKey)
+        insideAnimation = defaults.object(forKey: Self.insideAnimationKey) as? Bool
         // Defaulted to the mock rather than to `SystemProcessSampler`, so a
         // caller that forgets the argument reads fiction instead of the user's
         // real process list. The safe default is the one that touches nothing.

@@ -43,6 +43,17 @@ struct PopoverFooter: View {
                 )
             }
             .help("What is drawing power, and whether cooling has anything left to give")
+            // Only once the experimental switch is on. Someone who has never
+            // touched it sees the footer exactly as it has always been — the
+            // whole point of the feature being opt-in.
+            if state.isInsideEnabled {
+                Button("Inside…") {
+                    WindowOpener.openFromPopover(
+                        WindowOpener.ID.inside, using: openWindow, dismissing: dismissPopover
+                    )
+                }
+                .help("A live view of where the heat is and whether it is leaving")
+            }
             Spacer()
             Button("Quit") {
                 NSApplication.shared.terminate(nil)

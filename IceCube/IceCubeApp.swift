@@ -190,6 +190,17 @@ struct IceCubeApp: App {
         }
         .defaultSize(width: 560, height: 420)
 
+        // The experimental cooling schematic. The scene is always declared —
+        // a SwiftUI `Window` cannot be added and removed at runtime — but
+        // nothing ever opens it while `isInsideEnabled` is off, because every
+        // route to it is gated on that flag. Declaring it unconditionally costs
+        // one unopened scene; making it conditional would mean a live `if` in
+        // the scene builder, which is not what that builder is for.
+        Window("Inside", id: WindowOpener.ID.inside) {
+            InsideView(state: appState)
+        }
+        .defaultSize(width: 620, height: 500)
+
         // Full settings. Fixed *width* at 480 and non-resizable, with the height
         // coming from whichever tab is showing — `SettingsWindowView` is
         // `.frame(width: 480)` plus `.fixedSize(vertical:)`, so the window grows

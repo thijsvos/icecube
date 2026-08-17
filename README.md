@@ -46,6 +46,19 @@ dependencies**; small footprint is a design goal, not an accident.
 | Decision timeline: the charts mark *why* the fans moved, in the daemon's words | ✅ |
 | CSV history export, temperature alerts, launch at login, °C/°F | ✅ |
 | Update check via GitHub Releases — once a day, link only, never auto-install, switchable off | ✅ |
+| **Inside** — a live drawing of the cooling path: silicon at its own temperature, blowers turning at their real speed, air moving at fan speed | 🧪 experimental |
+
+**Inside is off until you turn it on**, in Settings → General → Experimental.
+It replaces nothing: the popover and its charts are unchanged, and while the
+switch is off there is no way to reach the window at all. It reads the same
+once-a-second snapshot everything else does — no extra permission, nothing
+written to disk, and no ability to touch the fans. It is the one part of the app
+that redraws continuously while open, which is the reason it is opt-in.
+
+It draws a *schematic*, not a floorplan: Ice Cube knows what each sensor
+measures, not where it physically sits. And whether cooling is getting **worse**
+is a question for Cooling History, which has the watts and a baseline behind it —
+Inside shows you the machine right now and links there.
 
 <p align="center">
   <img src="docs/img/curve-editor.png" alt="The fan-curve editor: draggable temperature-to-RPM points with a live marker showing the current die temperature." width="620">
