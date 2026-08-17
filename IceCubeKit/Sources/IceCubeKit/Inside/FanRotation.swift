@@ -67,14 +67,14 @@ public enum FanRotation {
         return maximumDisplayRPM * (rpm / maxRPM).clamped(to: 0 ... 1)
     }
 
-    /// Blade angle in **turns** (0..<1) at `seconds`, wrapping cleanly.
+    /// How fast the blades should turn, in turns per second.
     ///
-    /// Turns rather than radians so the wrap is exact and a test can assert it
-    /// without trigonometry; the view multiplies by 2π.
-    public static func phase(rpm: Double, maxRPM: Double, at seconds: Double) -> Double {
-        guard seconds.isFinite else { return 0 }
-        let turns = seconds * displayRPM(rpm: rpm, maxRPM: maxRPM) / 60
-        return turns - turns.rounded(.down)
+    /// A **rate**, not a position. It used to be `phase(rpm:maxRPM:at:)`, which
+    /// multiplied the absolute clock by this rate — correct only for a speed
+    /// that never changes, and this one changes on every poll. See
+    /// ``PhaseIntegrator`` for what that did to the drawing.
+    public static func turnsPerSecond(rpm: Double, maxRPM: Double) -> Double {
+        displayRPM(rpm: rpm, maxRPM: maxRPM) / 60
     }
 
     /// How far to fade discrete blades into a spinning disc, 0…1.
