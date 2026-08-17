@@ -25,8 +25,34 @@ import SwiftUI
 /// order is the one thing a reader of drawing code needs to be able to follow.
 /// If this grows again, the next thing to leave is the blower renderer, which is
 /// self-contained.
+/// Owns the running phase of everything that moves.
+///
+/// A reference type held in `@State` rather than value state, because the draw
+/// closure is where the current instant is known and `@State` cannot be written
+/// from inside one. ``PhaseIntegrator/advance(to:turnsPerSecond:)`` is
+/// idempotent for a repeated instant, which is what makes that safe: SwiftUI
+/// may run a body more than once per frame, and every one of those evaluations
+/// gets the same answer instead of advancing the motion again.
+@MainActor
+final class InsideMotion {
+    private var flow = PhaseIntegrator()
+    private var blades: [Int: PhaseIntegrator] = [:]
+
+    func flowPhase(at seconds: Double, turnsPerSecond: Double) -> Double {
+        flow.advance(to: seconds, turnsPerSecond: turnsPerSecond)
+    }
+
+    func bladePhase(fan: Int, at seconds: Double, turnsPerSecond: Double) -> Double {
+        var integrator = blades[fan] ?? PhaseIntegrator()
+        let phase = integrator.advance(to: seconds, turnsPerSecond: turnsPerSecond)
+        blades[fan] = integrator
+        return phase
+    }
+}
+
 struct InsideView: View {
     @Bindable var state: AppState
+    @State private var motion = InsideMotion()
     @Environment(\.accessibilityReduceMotion) private var systemReducesMotion
 
     /// The user's explicit choice if they made one, otherwise the system's.
@@ -74,8 +100,14 @@ struct InsideView: View {
         snapshot.map { HeatFlow.flowFraction($0.fans) } ?? nil
     }
 
+    /// The unit the user picked, as the rest of the app renders it.
+    private var style: TemperatureStyle {
+        state.temperatureUnit.style
+    }
+
     private var accessibilityText: String {
-        "\(InsideCopy.headline(heatState)). \(InsideCopy.detail(heatState, gradient: gradient, flow: flow))"
+        let detail = InsideCopy.detail(heatState, gradient: gradient, flow: flow, style: style)
+        return "\(InsideCopy.headline(heatState)). \(detail)"
     }
 
     // MARK: - Footer
@@ -90,7 +122,7 @@ struct InsideView: View {
                     .offset(y: -1)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(InsideCopy.headline(heatState)).font(.callout.weight(.semibold))
-                    Text(InsideCopy.detail(heatState, gradient: gradient, flow: flow))
+                    Text(InsideCopy.detail(heatState, gradient: gradient, flow: flow, style: style))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -133,7 +165,13 @@ struct InsideView: View {
         drawHeatPipe(board, stage: stage)
         drawFins(board, stage: stage)
         for (index, frame) in stage.blowers.enumerated() where index < fans.count {
-            drawBlower(board, at: frame, fan: fans[index], seconds: seconds)
+            drawBlower(
+                board, at: frame, fan: fans[index],
+                phase: motion.bladePhase(
+                    fan: fans[index].id, at: seconds,
+                    turnsPerSecond: FanRotation.turnsPerSecond(rpm: fans[index].actualRPM, maxRPM: fans[index].maxRPM)
+                )
+            )
         }
         drawLogicBoard(board, stage: stage)
         drawComponentBay(board, stage: stage)
@@ -153,7 +191,11 @@ struct InsideView: View {
         guard !stage.blowers.isEmpty else { return }
         let intakeC = blocks.first { $0.role == .intake }?.celsius ?? 30
         let outflowC = blocks.first { $0.role == .outflow }?.celsius ?? intakeC
-        let speed = 0.035 + fraction * 0.22
+        // A rate, integrated — never `seconds * speed`. The flow rate follows
+        // `actualRPM`, which changes on every poll, and multiplying an absolute
+        // clock by a changing rate teleports every particle each time.
+        let turnsPerSecond = 0.035 + fraction * 0.22
+        let travelled = motion.flowPhase(at: seconds, turnsPerSecond: turnsPerSecond)
         let perBlower = 14
 
         for (index, blower) in stage.blowers.enumerated() {
@@ -164,7 +206,7 @@ struct InsideView: View {
                 let offset = Double(step) / Double(perBlower) + Double(index) * 0.037
                 let phase = reduceMotion
                     ? offset.truncatingRemainder(dividingBy: 1)
-                    : (seconds * speed + offset).truncatingRemainder(dividingBy: 1)
+                    : (travelled + offset).truncatingRemainder(dividingBy: 1)
                 let lane = CGFloat(step % 3) - 1
 
                 let point: CGPoint
@@ -271,7 +313,7 @@ struct InsideView: View {
         drawRow(
             context,
             sources,
-            slots: stage.slots(in: stage.siliconRow, count: sources.count, maxWidth: 112),
+            slots: stage.slots(in: stage.siliconRow, count: sources.count, maxWidth: 104, maxHeight: 82),
             prominent: true
         )
     }
@@ -286,7 +328,7 @@ struct InsideView: View {
         drawRow(
             context,
             components,
-            slots: stage.slots(in: stage.componentRow, count: components.count, maxWidth: 108),
+            slots: stage.slots(in: stage.componentRow, count: components.count, maxWidth: 92, maxHeight: 66),
             prominent: false
         )
     }
@@ -305,12 +347,12 @@ struct InsideView: View {
         let intakeC = blocks.first { $0.role == .intake }
         let outflowC = blocks.first { $0.role == .outflow }
         context.draw(
-            Text(outflowC.map { "exhaust  \(Int($0.celsius.rounded()))°" } ?? "exhaust")
+            Text(outflowC.map { "exhaust  \(style.reading($0.celsius))" } ?? "exhaust")
                 .font(.caption2).foregroundStyle(.secondary),
             at: CGPoint(x: stage.chassis.midX, y: stage.chassis.minY - 5), anchor: .bottom
         )
         context.draw(
-            Text(intakeC.map { "air in  \(Int($0.celsius.rounded()))°" } ?? "air in")
+            Text(intakeC.map { "air in  \(style.reading($0.celsius))" } ?? "air in")
                 .font(.caption2).foregroundStyle(.secondary),
             at: CGPoint(x: stage.chassis.midX, y: stage.chassis.maxY + 5), anchor: .top
         )
@@ -324,7 +366,7 @@ struct InsideView: View {
     /// the impeller, gathered by a volute whose radius grows around the turn,
     /// and pushed out of one outlet into the fins. That is true of every model
     /// this app runs on, which a traced diagram of one machine would not be.
-    private func drawBlower(_ context: GraphicsContext, at frame: CGRect, fan: Fan, seconds: Double) {
+    private func drawBlower(_ context: GraphicsContext, at frame: CGRect, fan: Fan, phase: Double) {
         let centre = CGPoint(x: frame.midX, y: frame.midY)
         let radius = frame.width / 2
         // The outlet faces the fin stack, which sits towards the back edge.
@@ -360,7 +402,7 @@ struct InsideView: View {
         duct.addLine(to: CGPoint(x: centre.x + radius * 0.30, y: centre.y - mouthR - radius * 0.35))
         context.stroke(duct, with: .color(.primary.opacity(0.22)), lineWidth: 1.2)
 
-        let turns = reduceMotion ? 0 : FanRotation.phase(rpm: fan.actualRPM, maxRPM: fan.maxRPM, at: seconds)
+        let turns = reduceMotion ? 0 : phase
         let blur = FanRotation.blur(rpm: fan.actualRPM, maxRPM: fan.maxRPM)
 
         var impeller = context
@@ -413,33 +455,65 @@ struct InsideView: View {
         )
     }
 
+    /// One tile: symbol, value, label — the vertical stack Apple uses for a
+    /// compact metric (Weather's hourly cells, Fitness' stat tiles).
+    ///
+    /// Three details do most of the work of looking native, and none of them
+    /// are noticeable individually. **SF Rounded** for the numerals, which is
+    /// what Apple reaches for when a number is the content rather than part of
+    /// a sentence. **Monospaced digits**, because these update once a second and
+    /// proportional digits make a reading twitch sideways as it changes.
+    /// **Continuous** corner radius — the squircle — rather than the circular
+    /// arc `Path(roundedRect:cornerRadius:)` gives by default.
+    ///
+    /// The fill is tinted by temperature and the stroke is a hairline at low
+    /// opacity. A full-strength border around every tile was most of why the
+    /// first version read as a grid of boxes rather than a set of readings.
     private func drawRow(
         _ context: GraphicsContext, _ row: [InsideLayout.Block], slots: [CGRect], prominent: Bool
     ) {
         for (block, frame) in zip(row, slots) {
-            let shape = Path(roundedRect: frame, cornerRadius: 7)
             let colour = Theme.temperatureColor(block.celsius)
             let heat = min(1, max(0, (block.celsius - 45) / 50))
+            let shape = Path(
+                roundedRect: frame,
+                cornerSize: CGSize(width: 12, height: 12),
+                style: .continuous
+            )
             context.fill(
                 shape,
                 with: .linearGradient(
                     Gradient(colors: [
-                        colour.opacity(prominent ? 0.20 + heat * 0.38 : 0.16),
-                        colour.opacity(prominent ? 0.08 + heat * 0.22 : 0.06),
+                        colour.opacity(prominent ? 0.22 + heat * 0.30 : 0.16),
+                        colour.opacity(prominent ? 0.09 + heat * 0.16 : 0.07),
                     ]),
                     startPoint: CGPoint(x: frame.midX, y: frame.minY),
                     endPoint: CGPoint(x: frame.midX, y: frame.maxY)
                 )
             )
-            context.stroke(shape, with: .color(colour.opacity(prominent ? 0.75 : 0.42)), lineWidth: 1)
+            context.stroke(shape, with: .color(colour.opacity(prominent ? 0.45 : 0.28)), lineWidth: 0.75)
+
+            let valueSize: CGFloat = prominent ? 25 : 19
+            let iconSize: CGFloat = prominent ? 15 : 12
+            let labelSize: CGFloat = prominent ? 11 : 10
+
             context.draw(
-                Text("\(Int(block.celsius.rounded()))°")
-                    .font(prominent ? .title3.weight(.semibold).monospacedDigit() : .callout.monospacedDigit()),
-                at: CGPoint(x: frame.midX, y: frame.midY - (prominent ? 6 : 5)), anchor: .center
+                Text(Image(systemName: block.symbolName))
+                    .font(.system(size: iconSize, weight: .medium))
+                    .foregroundStyle(colour),
+                at: CGPoint(x: frame.midX, y: frame.minY + frame.height * 0.22), anchor: .center
             )
             context.draw(
-                Text(block.label).font(.caption2).foregroundStyle(.secondary),
-                at: CGPoint(x: frame.midX, y: frame.maxY - 6), anchor: .center
+                Text("\(Int(style.absolute(block.celsius).rounded()))°")
+                    .font(.system(size: valueSize, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(.primary),
+                at: CGPoint(x: frame.midX, y: frame.minY + frame.height * 0.53), anchor: .center
+            )
+            context.draw(
+                Text(block.label)
+                    .font(.system(size: labelSize, weight: .medium))
+                    .foregroundStyle(.secondary),
+                at: CGPoint(x: frame.midX, y: frame.minY + frame.height * 0.81), anchor: .center
             )
         }
     }

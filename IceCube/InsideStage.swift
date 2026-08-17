@@ -123,18 +123,25 @@ struct InsideStage {
         frontNotch = CGRect(x: x(0.36), y: y(0.90), width: shell.width * 0.28, height: shell.height * 0.055)
     }
 
-    /// Evenly spaced frames along `row`.
+    /// Evenly spaced frames along `row`, capped in both directions and centred
+    /// vertically in it.
     ///
     /// Spread across the row rather than packed at its centre: a tight centred
     /// cluster is what made the components read as teeth.
-    func slots(in row: CGRect, count: Int, maxWidth: CGFloat) -> [CGRect] {
+    ///
+    /// `maxHeight` exists because the blocks used to fill their row's whole
+    /// height — on a normal window that meant a 98 pt tall tile wrapped around a
+    /// 15 pt number, which is most of what made the drawing look cheap. A tile
+    /// should hug what it contains.
+    func slots(in row: CGRect, count: Int, maxWidth: CGFloat, maxHeight: CGFloat) -> [CGRect] {
         guard count > 0 else { return [] }
         let width = max(38, min(maxWidth, row.width / CGFloat(count) - 10))
+        let height = min(maxHeight, row.height)
         return (0 ..< count).map { index in
             let t = (CGFloat(index) + 0.5) / CGFloat(count)
             return CGRect(
                 x: row.minX + row.width * t - width / 2,
-                y: row.minY, width: width, height: row.height
+                y: row.midY - height / 2, width: width, height: height
             )
         }
     }

@@ -19,14 +19,24 @@ public enum InsideCopy {
         }
     }
 
-    /// The quiet line under it: the evidence, in the units it was measured in.
+    /// The quiet line under it: the evidence, in the unit the user chose.
     ///
     /// `gradient` is how far the hottest silicon sits above the incoming air.
     /// It is stated as a plain figure and never as a verdict — the number that
     /// carries a claim about *cooling* is `R`, which needs watts and a settle
     /// rule, and that lives in the Cooling History window.
-    public static func detail(_ state: HeatFlow.State, gradient: Double?, flow: Double?) -> String {
-        let rise = gradient.map { "\(Int($0.rounded()))° above the air coming in" }
+    ///
+    /// **`gradient` is a difference, so it renders with
+    /// ``TemperatureStyle/difference(_:)`` and not
+    /// ``TemperatureStyle/reading(_:)``.** A 38 °C rise is a 68 °F rise, not
+    /// 100 °F — the `+32` belongs to a point on the scale, never to the gap
+    /// between two points. That is the whole reason `TemperatureStyle` splits
+    /// the two operations instead of offering one `display(_:)`, and this line
+    /// is exactly the shape of call that gets it wrong.
+    public static func detail(
+        _ state: HeatFlow.State, gradient: Double?, flow: Double?, style: TemperatureStyle
+    ) -> String {
+        let rise = gradient.map { "\(style.difference($0)) above the air coming in" }
         switch state {
         case .warmingUp:
             return "The silicon is no warmer than the air around it yet."

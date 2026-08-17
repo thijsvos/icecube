@@ -611,6 +611,45 @@ allowing a negative gradient, treating a fanless Mac as one with stopped fans,
 sorting the blocks by temperature, shipping the switch on, and writing the
 toggle to the real `UserDefaults`.
 
+#### What running it on the owner's own Mac found (2026-08-17, same day)
+
+Four things, none of which any test would have produced.
+
+- **The motion stuttered**, and the cause was structural. Phase was computed as
+  `seconds × speed`, which is correct only while `speed` is constant — and it
+  never is, because the flow rate and the blade rate both derive from
+  `actualRPM`, which arrives fresh on every poll and drifts by a few RPM.
+  `seconds` is `timeIntervalSinceReferenceDate`, ~8.3 × 10⁸, so a rate change of
+  one part in ten thousand moved the result by **83,000 cycles**: everything
+  teleported to an unrelated phase once a second, and the size of the jump grew
+  with uptime. Multiplying an absolute clock by a varying rate cannot be made
+  continuous. `PhaseIntegrator` accumulates `rate × dt` instead, which costs the
+  "pure function of time" property the drawing was designed around — the wrong
+  property to have wanted.
+- **Two batteries, the SSD and the wireless card were four identical grey
+  rectangles** showing similar numbers. Each block now carries an SF Symbol,
+  chosen by SMC key **prefix** rather than label, because labels are only
+  curated on the M2 generation. Deliberately *not* added to
+  `SMCKeyMaps.classify(_:)`, which selects the safety ceiling.
+- **The tiles were badly proportioned** — a ~98 pt box around a 15 pt reading,
+  because blocks filled their whole row. Capped, and restyled as the
+  icon/value/label stack Apple uses for a compact metric: SF Rounded numerals,
+  monospaced digits (they update at 1 Hz), continuous corner radius, hairline
+  stroke.
+- **It ignored the °C/°F setting.** `TemperatureStyle` is now threaded through,
+  and the split it exists for is exactly the trap here: the tile readings are
+  absolutes, but the gradient is a **difference** and takes the 9/5 scale with no
+  `+32`. A 49 °C rise is 88 °F, not 120 °F.
+
+Two notes from the mutation runs, because both were about the tests rather than
+the code. The continuity test **could not see the bug it was written for**: it
+wobbled the rate in steps of 0.0001, which against a 8.3e8 clock lands on exact
+integers, so the fractional part never moved. And two survivors turned out to be
+**equivalent mutants** — a `seconds != last` guard exactly redundant with
+`delta > 0`, and a `seconds.isFinite` guard with no observable effect. Both were
+deleted rather than defended: an unobservable branch is one no test can protect,
+and leaving it in invites someone to write a test that only appears to.
+
 ## 7. Risks & mitigations
 - **SMC keys vary wildly per model** → curated map + fallback enumeration + community diagnostics pipeline (§3.3). Biggest ongoing cost; design for it.
 - **Free-Apple-ID helper approval unproven** → Phase 0.5 spike with the fallback documented *before* it runs (manual `sudo launchctl bootstrap` install for Phases 3–5).

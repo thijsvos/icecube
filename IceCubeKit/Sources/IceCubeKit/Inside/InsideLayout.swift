@@ -40,13 +40,27 @@ public enum InsideLayout {
         /// How many sensors this block reduced, so the view can say "hottest
         /// of 8" rather than implying a single reading.
         public let sensorCount: Int
+        /// The SF Symbol that names what this block *is*, so four grey
+        /// rectangles reading 41°, 45°, 39° and 44° stop being four grey
+        /// rectangles.
+        ///
+        /// A string rather than an `Image`, which is what lets this decision
+        /// live beside the others instead of in the view — `IceCubeKit` has no
+        /// business importing SwiftUI. `InsideSymbolTests` in the app bundle is
+        /// what proves every name here actually resolves on the deployment
+        /// target; a symbol that does not exist draws nothing at all, silently.
+        public let symbolName: String
 
-        public init(id: String, label: String, celsius: Double, role: Role, sensorCount: Int = 1) {
+        public init(
+            id: String, label: String, celsius: Double, role: Role,
+            sensorCount: Int = 1, symbolName: String = InsideLayout.fallbackSymbol
+        ) {
             self.id = id
             self.label = label
             self.celsius = celsius
             self.role = role
             self.sensorCount = sensorCount
+            self.symbolName = symbolName
         }
     }
 
@@ -65,12 +79,12 @@ public enum InsideLayout {
     public static func blocks(for temperatures: [SensorReading]) -> [Block] {
         var blocks: [Block] = []
 
-        for (sensorClass, label) in Self.sourceClasses {
+        for (sensorClass, label, symbol) in Self.sourceClasses {
             let members = temperatures.filter { $0.sensorClass == sensorClass }
             guard let hottest = members.map(\.celsius).max() else { continue }
             blocks.append(Block(
                 id: label, label: label, celsius: hottest,
-                role: .source, sensorCount: members.count
+                role: .source, sensorCount: members.count, symbolName: symbol
             ))
         }
 
@@ -78,7 +92,8 @@ public enum InsideLayout {
         for component in ambient.filter({ !SMCKeyMaps.isAirflowKey($0.key) }).sorted(by: { $0.key < $1.key }) {
             blocks.append(Block(
                 id: component.key, label: component.label,
-                celsius: component.celsius, role: .component
+                celsius: component.celsius, role: .component,
+                symbolName: componentSymbol(forKey: component.key)
             ))
         }
 
@@ -88,11 +103,40 @@ public enum InsideLayout {
 
     /// The silicon groups, in drawing order. CPU first because it is what
     /// heats first and what people look for.
-    private static let sourceClasses: [(SMCKeyMaps.SensorClass, String)] = [
-        (.cpu, "CPU"),
-        (.gpu, "GPU"),
-        (.otherDie, "Silicon"),
+    private static let sourceClasses: [(SMCKeyMaps.SensorClass, String, String)] = [
+        (.cpu, "CPU", "cpu"),
+        (.gpu, "GPU", "memorychip"),
+        (.otherDie, "Silicon", "square.grid.2x2"),
     ]
+
+    /// What a block gets when nothing more specific fits — a thermometer, which
+    /// is true of every sensor here whatever else it is attached to.
+    public static let fallbackSymbol = "thermometer.medium"
+
+    /// The symbol for a component sensor, chosen by key prefix.
+    ///
+    /// Prefix rather than label, because the label is only curated on the M2
+    /// generation: everywhere else it falls back to the raw key, so matching on
+    /// words would give M1, M3, M4 and M5 owners a thermometer for everything.
+    /// The prefixes are the same ones ``SMCKeyMaps`` matches on and are stable
+    /// across generations.
+    ///
+    /// Deliberately **not** added to ``SMCKeyMaps/classify(_:)``. That function
+    /// is the single source of truth for the die/ambient split and selects the
+    /// safety ceiling; growing it for a cosmetic reason would put icon choices
+    /// in the same file as a temperature limit.
+    public static func componentSymbol(forKey key: String) -> String {
+        if key.hasPrefix("TB") {
+            return "battery.100"
+        }
+        if key.hasPrefix("TH") {
+            return "internaldrive"
+        }
+        if key.hasPrefix("TW") {
+            return "wifi"
+        }
+        return fallbackSymbol
+    }
 
     /// Intake and outflow, assigned **by temperature rather than by position**.
     ///
@@ -110,11 +154,26 @@ public enum InsideLayout {
         let sorted = airflow.sorted { $0.celsius < $1.celsius }
         guard let coolest = sorted.first else { return [] }
         guard let warmest = sorted.last, sorted.count > 1 else {
-            return [Block(id: coolest.key, label: "Airflow", celsius: coolest.celsius, role: .intake)]
+            return [Block(
+                id: coolest.key, label: "Airflow", celsius: coolest.celsius,
+                role: .intake, symbolName: "wind"
+            )]
         }
         return [
-            Block(id: coolest.key, label: "Air in", celsius: coolest.celsius, role: .intake),
-            Block(id: warmest.key, label: "Air out", celsius: warmest.celsius, role: .outflow),
+            Block(
+                id: coolest.key,
+                label: "Air in",
+                celsius: coolest.celsius,
+                role: .intake,
+                symbolName: "wind"
+            ),
+            Block(
+                id: warmest.key,
+                label: "Air out",
+                celsius: warmest.celsius,
+                role: .outflow,
+                symbolName: "wind"
+            ),
         ]
     }
 }
