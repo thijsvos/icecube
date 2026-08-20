@@ -249,7 +249,14 @@ public actor SystemSMCProvider: SMCProviding {
         if let discoveredFans {
             return discoveredFans
         }
-        let count = try await Int(connection.readDouble("FNum"))
+        // `Int(someDouble)` traps on NaN/±inf and on anything past Int.max, so a
+        // garbage `FNum` would take down the app process rather than the fan
+        // list. `SensorReader.readFans()` guards the identical read on the
+        // daemon side and has since it was written; this copy did not.
+        let rawCount = try await connection.readDouble("FNum")
+        guard let count = Int(exactly: rawCount.rounded(.towardZero)), (0 ... 64).contains(count) else {
+            throw IceCubeError.smcDecodingFailed(key: "FNum", type: "fan count", bytes: [])
+        }
         // Mode-key casing is machine-wide; probe once with fan 0.
         let modeSuffix: String? = if count == 0 {
             nil

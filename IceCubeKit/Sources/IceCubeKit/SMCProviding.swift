@@ -63,12 +63,14 @@ public extension SMCProviding {
         // with no `PSTR`/`PDTR` must still get fans and temperatures — the
         // whole app depends on those, and watts is an extra. `power()` already
         // returns nil for "no such key"; the `try?` covers a transport hiccup
-        // on a machine that does have one.
+        // on a machine that does have one. `try?` already flattens the
+        // `Double?` this returns (SE-0230), so no `?? nil` is needed to get
+        // back to one level of optional — there was one, and it did nothing.
         try await SMCSnapshot(
             date: Date(),
             fans: fans(),
             temperatures: temperatures(),
-            power: (try? power()) ?? nil
+            power: try? power()
         )
     }
 }
