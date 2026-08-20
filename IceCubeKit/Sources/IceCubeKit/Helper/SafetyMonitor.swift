@@ -19,26 +19,26 @@ import Foundation
 ///   is holding the fans at all — manual *or* curve, since a curve running on a
 ///   machine it cannot see is no safer than a fixed RPM → revert (flying blind
 ///   is not allowed).
-public struct SafetyMonitor: Sendable {
+struct SafetyMonitor: Sendable {
     /// Tunables, overridable in tests only — release code uses the defaults.
-    public struct Limits: Sendable {
-        public var watchdogTimeout: Duration = .seconds(HelperConstants.watchdogTimeout)
+    struct Limits: Sendable {
+        var watchdogTimeout: Duration = .seconds(HelperConstants.watchdogTimeout)
         /// CPU/GPU die sensors reach 95–105 °C under legitimate full load.
-        public var dieCeiling: Double = 104
+        var dieCeiling: Double = 104
         /// Everything else (airflow, SSD, battery…) should stay well below.
-        public var otherCeiling: Double = 95
+        var otherCeiling: Double = 95
         /// Consecutive over-ceiling ticks required to trigger (debounce).
-        public var ceilingDebounceTicks: Int = 3
+        var ceilingDebounceTicks: Int = 3
         /// Cooling releases once the offender is this far below its ceiling.
-        public var releaseDelta: Double = 5
+        var releaseDelta: Double = 5
         /// Consecutive failed sensor reads tolerated in manual/curve mode.
-        public var sensorFailureLimit: Int = 3
+        var sensorFailureLimit: Int = 3
 
-        public init() {}
+        init() {}
     }
 
     /// One tick's decision, in order of precedence.
-    public enum Verdict: Sendable, Equatable {
+    enum Verdict: Sendable, Equatable {
         /// Continue as configured.
         case ok
         /// Overheating: drive every fan at maximum until released.
@@ -52,7 +52,7 @@ public struct SafetyMonitor: Sendable {
     private var coolingActive = false
     private var sensorFailureTicks = 0
 
-    public init(limits: Limits = Limits()) {
+    init(limits: Limits = Limits()) {
         self.limits = limits
     }
 
@@ -70,7 +70,7 @@ public struct SafetyMonitor: Sendable {
     ///     `nil` if it never has.
     ///   - config: what the daemon is currently enforcing.
     ///   - temperatures: this tick's readings, or `nil` if the read failed.
-    public mutating func evaluate(
+    mutating func evaluate(
         heartbeatAge: Duration?,
         config: FanConfig,
         temperatures: [SensorReading]?
@@ -127,7 +127,7 @@ public struct SafetyMonitor: Sendable {
     /// ``evaluate(heartbeatAge:config:temperatures:)`` on purpose: a machine
     /// that went over the ceiling before the lid closed must not restart its
     /// debounce on the other side of it.
-    public mutating func evaluateCeiling(temperatures: [SensorReading]?) -> Verdict {
+    mutating func evaluateCeiling(temperatures: [SensorReading]?) -> Verdict {
         ceilingVerdict(temperatures, controlling: true)
     }
 

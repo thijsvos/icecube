@@ -32,7 +32,7 @@ public struct FanWriteOutcome: Sendable, Equatable {
 /// the firmware itself treats those as advisory (0 RPM can be accepted), so
 /// this clamp is the only real guard. The sequencer is pure over
 /// ``SMCControlPort`` with injected sleep, so every branch is unit-tested.
-public actor FanWriteSequencer {
+actor FanWriteSequencer {
     private let port: any SMCControlPort
     /// Injected so tests run instantly; the daemon passes real Task.sleep.
     private let sleep: @Sendable (Duration) async -> Void
@@ -42,12 +42,12 @@ public actor FanWriteSequencer {
     /// The probed suffix, once known. Exposed for ``WritePathReport``: which of
     /// the two spellings a generation uses is half of supporting it, and it was
     /// already being discovered here and then thrown away.
-    public var resolvedModeKeySuffix: String? {
+    var resolvedModeKeySuffix: String? {
         modeKeySuffix
     }
 
     /// Remembered after the first successful engage.
-    public private(set) var knownBranch: UnlockBranch?
+    private(set) var knownBranch: UnlockBranch?
 
     /// Retry cadence and budget for the Ftst path (per exelban/stats).
     static let ftstSettleDelay = Duration.seconds(3)
@@ -63,7 +63,7 @@ public actor FanWriteSequencer {
     /// which parks the fans — the outcome we actually want.
     private let shouldAbandon: @Sendable () -> Bool
 
-    public init(
+    init(
         port: any SMCControlPort,
         sleep: @escaping @Sendable (Duration) async -> Void = { try? await Task.sleep(for: $0) },
         shouldAbandon: @escaping @Sendable () -> Bool = { false }
@@ -87,7 +87,7 @@ public actor FanWriteSequencer {
     ///   than a quiet early return so the caller cannot mistake it for a
     ///   completed engage. The caller (daemon) reverts on throw, which parks
     ///   every fan this had already forced.
-    public func engageManual(targets: [Int: Double], fans: [Fan]) async throws -> FanWriteOutcome {
+    func engageManual(targets: [Int: Double], fans: [Fan]) async throws -> FanWriteOutcome {
         let suffix = try await resolveModeKeySuffix(fanIDs: fans.map(\.id))
         var clamped: [Int: Double] = [:]
         var branch: UnlockBranch = knownBranch ?? .direct
@@ -165,7 +165,7 @@ public actor FanWriteSequencer {
     /// swallowed the throw and recorded "all fans auto" regardless. Now every
     /// fan is attempted, `Ftst` is always cleared, and the failures are reported
     /// afterwards so the caller can escalate instead of believing it succeeded.
-    public func revertAllAuto(fans: [Fan]) async throws {
+    func revertAllAuto(fans: [Fan]) async throws {
         var firstFailure: Error?
         // SAFETY: this used to be `guard let suffix = try? … else { return }` — a
         // silent, non-throwing exit from a `throws` method whose contract is the
@@ -281,7 +281,7 @@ public actor FanWriteSequencer {
     /// filters on ``Fan/hasUsableRange`` *and* refuses a non-positive target at
     /// the write itself, so the forbidden value cannot reach the wire even if a
     /// future caller of this helper forgets the first rule.
-    public static func clamp(_ requested: Double, to fan: Fan) -> Double {
+    static func clamp(_ requested: Double, to fan: Fan) -> Double {
         guard fan.hasUsableRange else { return fan.maxRPM }
         guard requested.isFinite else { return fan.minRPM }
         return requested.clamped(to: fan.minRPM ... fan.maxRPM)
@@ -297,7 +297,7 @@ public actor FanWriteSequencer {
     /// `Mn`, so a control loop that verifies read-back against the un-clamped
     /// value would mismatch every tick and revert to auto. Producing exactly the
     /// value that will be written keeps command and verification in agreement.
-    public static func quantizedTarget(fraction: Double, fan: Fan, step: Double = 50) -> Double {
+    static func quantizedTarget(fraction: Double, fan: Fan, step: Double = 50) -> Double {
         let raw = fan.minRPM + fraction * (fan.maxRPM - fan.minRPM)
         let quantized = (raw / step).rounded() * step
         return clamp(quantized, to: fan)

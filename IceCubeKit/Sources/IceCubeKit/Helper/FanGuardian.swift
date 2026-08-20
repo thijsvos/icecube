@@ -35,10 +35,10 @@ import Foundation
 /// Pure decision engine, shaped exactly like ``SafetyMonitor``: readings in, an
 /// action out, no I/O and no clock — so every rung of the escalation ladder is
 /// unit-testable without a hot Mac. ``DaemonCore`` keeps the hardware writes.
-public struct FanGuardian: Sendable {
+struct FanGuardian: Sendable {
     /// What the daemon should do this tick. The daemon performs the I/O; every
     /// state decision has already been made here.
-    public enum Action: Sendable, Equatable {
+    enum Action: Sendable, Equatable {
         /// Nothing to do.
         case idle
         /// Drive (or re-aim) the fans along the built-in curve.
@@ -52,7 +52,7 @@ public struct FanGuardian: Sendable {
     }
 
     /// Tunables, overridable in tests only — release code uses the defaults.
-    public struct Limits: Sendable {
+    struct Limits: Sendable {
         /// Guardian considers engaging at this die temperature…
         ///
         /// Lowered from 75 on 2026-07-26 after observing the exact failure this
@@ -67,13 +67,13 @@ public struct FanGuardian: Sendable {
         /// genuinely cooling — at any speed within 400 RPM of the floor — is
         /// never overridden. This is a floor for "nobody is cooling a warm
         /// machine", not a second curve.
-        public var engageCelsius: Double = 68
+        var engageCelsius: Double = 68
         /// …and releases below this one (wide hysteresis, no flapping).
         ///
         /// Kept 10 °C below engage, as before. The gap is what stops the
         /// guardian handing back the moment it has helped and then immediately
         /// re-engaging.
-        public var releaseCelsius: Double = 58
+        var releaseCelsius: Double = 58
         /// Above this die temperature the fans are never left fully stopped.
         ///
         /// Measured on a Mac14,9: a STOPPED fan given a target reads 0 RPM for
@@ -97,9 +97,9 @@ public struct FanGuardian: Sendable {
         /// Holding the floor on a warm machine is also simply what the guardian
         /// is for: macOS parking the fans while the die sits in the sixties is
         /// the behaviour this app exists to correct.
-        public var keepSpinningCelsius: Double = 55
+        var keepSpinningCelsius: Double = 55
         /// …and the fans may stop again below this (wide hysteresis).
-        public var keepSpinningReleaseCelsius: Double = 45
+        var keepSpinningReleaseCelsius: Double = 45
         /// How hard a *stopped* fan is driven to get it turning, as a fraction
         /// of its range, before it settles back to the floor on the next tick.
         ///
@@ -113,7 +113,7 @@ public struct FanGuardian: Sendable {
         ///
         /// It never gets loud: a tick or two later the fan is most of the way to
         /// its floor, the guardian sees that and re-aims at the floor itself.
-        public var breakawayFraction: Double = 0.5
+        var breakawayFraction: Double = 0.5
         /// Below this fraction of its own minimum, a fan gets the breakaway
         /// drive rather than the floor; at or above it, the floor is enough.
         ///
@@ -123,9 +123,9 @@ public struct FanGuardian: Sendable {
         /// carried on decaying to a standstill and then sat there 9.4 s before
         /// the firmware got it moving again. A fan far below its minimum needs
         /// more than its minimum, whether or not it has actually stopped yet.
-        public var breakawayBelowFractionOfMin: Double = 0.75
+        var breakawayBelowFractionOfMin: Double = 0.75
         /// Consecutive warm-and-nobody-cooling ticks required to engage.
-        public var engageDebounceTicks = 2
+        var engageDebounceTicks = 2
         /// Ticks below the floor before the guardian holds the fans itself.
         ///
         /// One, i.e. no debounce, unlike every other ladder here — and that is
@@ -134,15 +134,15 @@ public struct FanGuardian: Sendable {
         /// it, so the guardian arrived after the stop it exists to prevent.
         /// There is nothing to debounce anyway: a fan nobody is forcing, below
         /// the minimum its own firmware reports, is not a noisy reading.
-        public var floorDebounceTicks = 1
+        var floorDebounceTicks = 1
         /// Consecutive ticks with a cool orphaned fan before the ladder starts.
-        public var orphanDebounceTicks = 3
+        var orphanDebounceTicks = 3
         /// A fan counts as "not cooling" when it trails demand by this much.
-        public var coolingSlackRPM: Double = 400
+        var coolingSlackRPM: Double = 400
         /// Below this RPM a fan is considered stopped.
-        public var stoppedRPM: Double = 100
+        var stoppedRPM: Double = 100
 
-        public init() {}
+        init() {}
     }
 
     private let limits: Limits
@@ -172,7 +172,7 @@ public struct FanGuardian: Sendable {
 
     private var state = State()
 
-    public init(limits: Limits = Limits()) {
+    init(limits: Limits = Limits()) {
         self.limits = limits
     }
 
@@ -183,13 +183,13 @@ public struct FanGuardian: Sendable {
     /// the person reading the popover — Ice Cube, not macOS, is the reason the
     /// fans are turning — and the alternative was a panel that said "macOS is
     /// controlling the fans" while the daemon held them at their minimum.
-    public var isActive: Bool {
+    var isActive: Bool {
         state.isActive || state.isHoldingFloor
     }
 
     /// Forgets every counter. Called on any mode transition, so a stale
     /// debounce can never leak across a revert or a new config.
-    public mutating func reset() {
+    mutating func reset() {
         state = State()
     }
 
@@ -227,7 +227,7 @@ public struct FanGuardian: Sendable {
     /// this path catches fans that are still turning, where keeping them costs
     /// nothing. Hold at or above the release line, let go below it — one number
     /// for both directions, so it cannot flap.
-    public mutating func handBack(fans: [Fan], dieCelsius: Double) -> Action {
+    mutating func handBack(fans: [Fan], dieCelsius: Double) -> Action {
         reset()
         guard dieCelsius >= limits.keepSpinningReleaseCelsius else {
             return .release(dieCelsius: dieCelsius)
@@ -251,7 +251,7 @@ public struct FanGuardian: Sendable {
     ///     skips this call entirely when the sensors do not answer, and holds the
     ///     previous decision instead. This doc said "or 0 if none could be read"
     ///     until 2026-08-16, which invited exactly that bug back.
-    public mutating func evaluate(fans: [Fan], dieCelsius: Double) -> Action {
+    mutating func evaluate(fans: [Fan], dieCelsius: Double) -> Action {
         if state.isActive {
             guard dieCelsius >= limits.releaseCelsius else {
                 state.isActive = false
@@ -413,7 +413,7 @@ public struct FanGuardian: Sendable {
     /// driven — mapping any fraction into a 0…0 range commands 0 RPM, which is
     /// forbidden everywhere in Ice Cube. ``DaemonCore``'s curve loop has always
     /// guarded this; the guardian's hand-rolled copy of the mapping did not.
-    public static func curveTargets(for fans: [Fan], dieCelsius: Double) -> [Int: Double] {
+    static func curveTargets(for fans: [Fan], dieCelsius: Double) -> [Int: Double] {
         let fraction: Double = if dieCelsius <= 70 {
             0
         } else {
