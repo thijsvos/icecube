@@ -202,7 +202,24 @@ struct WindowActivity: NSViewRepresentable {
 }
 
 struct InsideView: View {
+    /// Where this drawing is being shown, which is the only thing that differs
+    /// between the two.
+    ///
+    /// The popover variant is the same renderer at a smaller size — same
+    /// geometry, same motion, same colours — with the prose footer dropped and
+    /// the type scaled down. Nothing about the drawing is duplicated, because a
+    /// second copy of it is a second thing to keep in step, and this drawing has
+    /// already been redesigned four times.
+    enum Presentation {
+        /// Its own window: prose footer, and it follows ``InsideActivity``.
+        case window
+        /// Inside the menu-bar popover: canvas only, and it runs exactly while
+        /// the popover is on screen.
+        case popover
+    }
+
     @Bindable var state: AppState
+    var presentation: Presentation = .window
     @State private var motion = InsideMotion()
     @State private var cache = InsideCache()
     /// How hard to work right now. See ``InsideActivity``.
@@ -220,7 +237,7 @@ struct InsideView: View {
     /// and always frozen while another app is in front, where a once-a-second
     /// redraw cannot carry motion anyway.
     private var reduceMotion: Bool {
-        if !activity.animatesMotion {
+        if !effectiveActivity.animatesMotion {
             return true
         }
         if let choice = state.insideAnimation {
@@ -230,24 +247,52 @@ struct InsideView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            TimelineView(
-                .animation(
-                    minimumInterval: 1 / (activity.framesPerSecond ?? FanRotation.frameRate),
-                    paused: reduceMotion || activity.framesPerSecond == nil
-                )
-            ) { timeline in
-                Canvas { context, size in
-                    draw(context, size: size, seconds: timeline.date.timeIntervalSinceReferenceDate)
-                }
-                .accessibilityLabel(accessibilityText)
+        switch presentation {
+        case .window:
+            VStack(spacing: 0) {
+                canvas
+                    .frame(minHeight: 300)
+                    .background(WindowActivity(activity: $activity).allowsHitTesting(false))
+                footer
             }
-            .frame(minHeight: 300)
-            .background(WindowActivity(activity: $activity).allowsHitTesting(false))
-            footer
+            .frame(minWidth: 560, minHeight: 440)
+            .background(.background)
+        case .popover:
+            canvas
+                .frame(height: Self.popoverHeight)
+                .accessibilityLabel(accessibilityText)
         }
-        .frame(minWidth: 560, minHeight: 440)
-        .background(.background)
+    }
+
+    /// How much of the popover the drawing may take. Lives on
+    /// ``InsideStage`` so the geometry tests can use the real value.
+    static var popoverHeight: CGFloat {
+        InsideStage.popoverHeight
+    }
+
+    private var canvas: some View {
+        TimelineView(
+            .animation(
+                minimumInterval: 1 / (effectiveActivity.framesPerSecond ?? FanRotation.frameRate),
+                paused: reduceMotion || effectiveActivity.framesPerSecond == nil
+            )
+        ) { timeline in
+            Canvas { context, size in
+                draw(context, size: size, seconds: timeline.date.timeIntervalSinceReferenceDate)
+            }
+            .accessibilityLabel(accessibilityText)
+        }
+    }
+
+    /// In the popover there is no window to watch: it is on screen exactly when
+    /// the popover is, and it closes the moment you click elsewhere. That is a
+    /// better signal than anything ``WindowActivity`` could observe, so the
+    /// popover variant uses it directly.
+    private var effectiveActivity: InsideActivity {
+        switch presentation {
+        case .window: activity
+        case .popover: state.isPopoverVisible ? .foreground : .hidden
+        }
     }
 
     // MARK: - Values
@@ -321,7 +366,9 @@ struct InsideView: View {
     private func draw(_ context: GraphicsContext, size: CGSize, seconds: Double) {
         let fans = snapshot?.fans ?? []
         let stage = cache.stage(canvas: size, blowerCount: fans.count)
-        guard stage.chassis.width > 240, stage.chassis.height > 170 else { return }
+        // The floor lives on the stage, where a test can reach it — see
+        // `InsideStage.minimumDrawable` for what this cost when it did not.
+        guard stage.isDrawable else { return }
 
         let shell = cache.shape("shell") { Path(roundedRect: stage.chassis, cornerRadius: 18) }
         context.fill(shell, with: .color(.primary.opacity(0.03)))
@@ -342,7 +389,8 @@ struct InsideView: View {
                 phase: motion.bladePhase(
                     fan: fans[index].id, at: seconds,
                     turnsPerSecond: FanRotation.turnsPerSecond(rpm: fans[index].actualRPM, maxRPM: fans[index].maxRPM)
-                )
+                ),
+                scale: stage.typeScale
             )
         }
         drawLogicBoard(board, stage: stage)
@@ -527,7 +575,7 @@ struct InsideView: View {
             context,
             sources,
             slots: stage.slots(in: stage.siliconRow, count: sources.count, maxWidth: 104, maxHeight: 82),
-            prominent: true
+            prominent: true, scale: stage.typeScale
         )
     }
 
@@ -542,7 +590,7 @@ struct InsideView: View {
             context,
             components,
             slots: stage.slots(in: stage.componentRow, count: components.count, maxWidth: 92, maxHeight: 66),
-            prominent: false
+            prominent: false, scale: stage.typeScale
         )
     }
 
@@ -557,19 +605,20 @@ struct InsideView: View {
 
     /// Which edge is which, and the air temperature at each.
     private func drawEdgeLabels(_ context: GraphicsContext, stage: InsideStage) {
+        let edgeSize = max(9, 11 * stage.typeScale)
         let intakeC = blocks.first { $0.role == .intake }
         let outflowC = blocks.first { $0.role == .outflow }
         let exhaustText = outflowC.map { "exhaust  \(style.reading($0.celsius))" } ?? "exhaust"
         context.draw(
-            cache.text("edge:\(exhaustText)", dark: isDark, in: context) {
-                Text(exhaustText).font(.caption2).foregroundStyle(.secondary)
+            cache.text("edge:\(exhaustText):\(edgeSize)", dark: isDark, in: context) {
+                Text(exhaustText).font(.system(size: edgeSize)).foregroundStyle(.secondary)
             },
             at: CGPoint(x: stage.chassis.midX, y: stage.chassis.minY - 5), anchor: .bottom
         )
         let intakeText = intakeC.map { "air in  \(style.reading($0.celsius))" } ?? "air in"
         context.draw(
-            cache.text("edge:\(intakeText)", dark: isDark, in: context) {
-                Text(intakeText).font(.caption2).foregroundStyle(.secondary)
+            cache.text("edge:\(intakeText):\(edgeSize)", dark: isDark, in: context) {
+                Text(intakeText).font(.system(size: edgeSize)).foregroundStyle(.secondary)
             },
             at: CGPoint(x: stage.chassis.midX, y: stage.chassis.maxY + 5), anchor: .top
         )
@@ -583,7 +632,9 @@ struct InsideView: View {
     /// the impeller, gathered by a volute whose radius grows around the turn,
     /// and pushed out of one outlet into the fins. That is true of every model
     /// this app runs on, which a traced diagram of one machine would not be.
-    private func drawBlower(_ context: GraphicsContext, at frame: CGRect, fan: Fan, phase: Double) {
+    private func drawBlower(
+        _ context: GraphicsContext, at frame: CGRect, fan: Fan, phase: Double, scale: CGFloat
+    ) {
         let centre = CGPoint(x: frame.midX, y: frame.midY)
         let radius = frame.width / 2
         // The outlet faces the fin stack, which sits towards the back edge.
@@ -666,6 +717,11 @@ struct InsideView: View {
         )
         // The fan's own name, so "the left fan" on screen is the one on your
         // left in the machine.
+        // Only where there is room. In the popover these would sit under a
+        // 22 pt blower and collide with the tiles below — and `PopoverFanCard`
+        // is already showing both fans' speeds a few points further up, so the
+        // compact drawing would be repeating it.
+        guard scale > 0.75 else { return }
         let fanText = "\(fan.name)  \(RPM.text(fan.actualRPM))"
         context.draw(
             cache.text("fan:\(fanText)", dark: isDark, in: context) {
@@ -690,7 +746,8 @@ struct InsideView: View {
     /// opacity. A full-strength border around every tile was most of why the
     /// first version read as a grid of boxes rather than a set of readings.
     private func drawRow(
-        _ context: GraphicsContext, _ row: [InsideLayout.Block], slots: [CGRect], prominent: Bool
+        _ context: GraphicsContext, _ row: [InsideLayout.Block], slots: [CGRect],
+        prominent: Bool, scale: CGFloat
     ) {
         for (block, frame) in zip(row, slots) {
             let colour = Theme.temperatureColor(block.celsius, dark: isDark)
@@ -714,37 +771,49 @@ struct InsideView: View {
             )
             context.stroke(shape, with: .color(colour.opacity(prominent ? 0.45 : 0.28)), lineWidth: 0.75)
 
-            let valueSize: CGFloat = prominent ? 25 : 19
-            let iconSize: CGFloat = prominent ? 15 : 12
-            let labelSize: CGFloat = prominent ? 11 : 10
+            // Scaled, not fixed. A 25 pt reading inside a tile 46 pt wide —
+            // which is what the popover's ~250 pt chassis produces — overflows
+            // it. The floor keeps the compact form readable rather than letting
+            // it shrink away.
+            let tile = InsideTileLayout(height: frame.height, scale: scale, prominent: prominent)
 
             // The colour is part of the key: a resolved run carries its own
             // colour, so two tiles at different temperatures must not share one.
-            context.draw(
-                cache.text("icon:\(block.symbolName):\(iconSize):\(heatKey)", dark: isDark, in: context) {
-                    Text(Image(systemName: block.symbolName))
-                        .font(.system(size: iconSize, weight: .medium))
-                        .foregroundStyle(colour)
-                },
-                at: CGPoint(x: frame.midX, y: frame.minY + frame.height * 0.22), anchor: .center
-            )
+            if let icon = tile.icon {
+                context.draw(
+                    cache.text("icon:\(block.symbolName):\(icon.fontSize):\(heatKey)", dark: isDark, in: context) {
+                        Text(Image(systemName: block.symbolName))
+                            .font(.system(size: icon.fontSize, weight: .medium))
+                            .foregroundStyle(colour)
+                    },
+                    at: CGPoint(x: frame.midX, y: frame.minY + icon.y), anchor: .center
+                )
+            }
             let valueText = "\(Int(style.absolute(block.celsius).rounded()))°"
             context.draw(
-                cache.text("value:\(valueText):\(valueSize)", dark: isDark, in: context) {
+                cache.text("value:\(valueText):\(tile.value.fontSize)", dark: isDark, in: context) {
                     Text(valueText)
-                        .font(.system(size: valueSize, weight: .semibold, design: .rounded).monospacedDigit())
+                        .font(.system(size: tile.value.fontSize, weight: .semibold, design: .rounded)
+                            .monospacedDigit())
                         .foregroundStyle(.primary)
                 },
-                at: CGPoint(x: frame.midX, y: frame.minY + frame.height * 0.53), anchor: .center
+                at: CGPoint(x: frame.midX, y: frame.minY + tile.value.y), anchor: .center
             )
-            context.draw(
-                cache.text("label:\(block.label):\(labelSize)", dark: isDark, in: context) {
-                    Text(block.label)
-                        .font(.system(size: labelSize, weight: .medium))
-                        .foregroundStyle(.secondary)
-                },
-                at: CGPoint(x: frame.midX, y: frame.minY + frame.height * 0.81), anchor: .center
-            )
+            // At popover scale a component tile is about 34 pt wide and
+            // "Battery 1" is not. The icon is what identifies these — that is
+            // what it was added for — so the word is what gives way, and only
+            // on the small tiles. The silicon keeps its label at every size,
+            // because "CPU" fits and is the thing people look for.
+            if let label = tile.label {
+                context.draw(
+                    cache.text("label:\(block.label):\(label.fontSize)", dark: isDark, in: context) {
+                        Text(block.label)
+                            .font(.system(size: label.fontSize, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    },
+                    at: CGPoint(x: frame.midX, y: frame.minY + label.y), anchor: .center
+                )
+            }
         }
     }
 }

@@ -119,6 +119,9 @@ struct SettingsGeneralTab: View {
                         WindowOpener.open(WindowOpener.ID.inside, using: openWindow)
                     }
                     .controlSize(.small)
+                    Text("To show it in the popover too, see **Menu → In the menu**.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
         }

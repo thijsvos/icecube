@@ -42,6 +42,7 @@ final class AppState: PopoverLifecycleObserving {
     static let dismissedSetupKey = "hasDismissedSetup"
     static let insideEnabledKey = "experimental.inside"
     static let insideAnimationKey = "experimental.inside.animates"
+    static let insideInPopoverKey = "experimental.inside.popover"
 
     /// The app-wide "keep the curve running when Ice Cube quits" toggle.
     ///
@@ -111,6 +112,18 @@ final class AppState: PopoverLifecycleObserving {
     /// not be able to switch a feature on in the owner's real preferences.
     var isInsideEnabled: Bool {
         didSet { defaults.set(isInsideEnabled, forKey: Self.insideEnabledKey) }
+    }
+
+    /// Whether a compact Inside runs inside the popover as well as in its own
+    /// window.
+    ///
+    /// Separate from ``isInsideEnabled`` because they are different asks. The
+    /// window is somewhere you go; the popover is what you glance at, and
+    /// putting a continuously-redrawing drawing in the surface people open
+    /// twenty times a day is a bigger commitment than opening one on purpose.
+    /// Only reachable while the feature itself is on.
+    var showsInsideInPopover: Bool {
+        didSet { defaults.set(showsInsideInPopover, forKey: Self.insideInPopoverKey) }
     }
 
     /// Whether the Inside window animates, or `nil` to follow the system's
@@ -443,6 +456,7 @@ final class AppState: PopoverLifecycleObserving {
         prefersSilentOptionClick = defaults.bool(forKey: MenuBarMode.preferenceKey)
         hasDismissedSetup = defaults.bool(forKey: Self.dismissedSetupKey)
         isInsideEnabled = defaults.bool(forKey: Self.insideEnabledKey)
+        showsInsideInPopover = defaults.bool(forKey: Self.insideInPopoverKey)
         insideAnimation = defaults.object(forKey: Self.insideAnimationKey) as? Bool
         // Defaulted to the mock rather than to `SystemProcessSampler`, so a
         // caller that forgets the argument reads fiction instead of the user's

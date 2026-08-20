@@ -195,6 +195,25 @@ struct AppStateTests {
         )
     }
 
+    /// Two switches, not one, and the second must never be reachable without
+    /// the first — a compact drawing appearing in the popover of someone who
+    /// never turned the feature on is the failure the opt-in exists to prevent.
+    @Test("The popover copy is off by default and writes through the injected store")
+    func insideInPopoverIsOffAndIsolated() {
+        let graph = CompositionRoot.makeSimulatedForTesting()
+        #expect(graph.defaults.object(forKey: AppState.insideInPopoverKey) == nil)
+        let state = AppState(graph: graph, menuBarHost: { _ in SpyHost() })
+        #expect(!state.showsInsideInPopover, "an experimental surface must not arrive switched on")
+
+        state.showsInsideInPopover = true
+        #expect(graph.defaults.bool(forKey: AppState.insideInPopoverKey))
+        #expect(!(graph.defaults is UserDefaults), "and it must not have reached the real domain")
+
+        // The popover checks both, so turning the feature off must take the
+        // compact copy with it whatever this one says.
+        #expect(!state.isInsideEnabled, "the feature itself is still off")
+    }
+
     /// An unreachable window is the point of the switch, and a window the menu
     /// bar cannot close is the "a window nobody remembers opening" bug
     /// `closableFromMenuBar` exists for. Inside qualifies for the same reason

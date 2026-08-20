@@ -128,6 +128,13 @@ struct PopoverView: View {
                         persistsCurveWithoutApp: state.persistsCurveWithoutApp
                     )
                 }
+                // Above the charts and below the fan card: it is a picture of
+                // the same machine those two describe in numbers, and it reads
+                // as the summary they are the detail of.
+                if state.isInsideEnabled, state.showsInsideInPopover {
+                    InsideView(state: state, presentation: .popover)
+                        .popoverCard()
+                }
                 if state.chartSettings.showCharts {
                     DashboardView(state: state)
                 }

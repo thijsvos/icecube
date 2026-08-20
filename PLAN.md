@@ -689,6 +689,51 @@ Also fixed here: the airflow particles were a single flat colour, because the
 ramp ran between the two airflow sensors and those read 46.8 and 47.0 °C. It now
 runs on the die's rise above intake, which is a number that moves.
 
+### Inside in the popover (2026-08-20), v0.4.1
+
+A compact copy of the schematic above the charts, behind its own toggle. Same
+renderer at a smaller size — `InsideView` gained a `Presentation` mode rather
+than a second drawing, because a second copy is a second thing to keep in step
+and this one has been redesigned four times already.
+
+**Three defects, all found by looking at it and none by the suite**, which is
+the pattern this feature keeps repeating:
+
+- **It drew nothing at all.** `draw()` opened with
+  `guard chassis.width > 240, chassis.height > 170` — the *window's* numbers.
+  The popover produces 224 × 158, so the whole canvas returned before drawing
+  and the card sat empty. The floor now lives on `InsideStage` as
+  `minimumDrawable`, where a test can reach it.
+- **The reading was drawn through the word.** Tile contents sat at fixed
+  fractions of height (0.22 / 0.53 / 0.81) chosen against an 82 pt window tile;
+  a 39 pt popover tile put a 13 pt reading at y≈8–21 and a 9 pt label at
+  y≈18–27. `InsideTileLayout` now decides how many elements fit and where, and
+  exposes `hasOverlap`.
+- **The popover footer truncated** to `"Why is it..."` when Inside added a fifth
+  button to a row sized for four. Sizing it with `ViewThatFits` fixed the
+  truncation and produced something worse — a lone icon among four text buttons
+  — so the footer went back to four, every label `fixedSize()` so a future
+  overflow is visible rather than silent.
+
+**Two mutation results worth keeping.** A guard test *passed while the bug was
+reintroduced*: restoring the broken floor did not fail it, because the popover
+height had also been raised and 253 × 178 clears 240 × 170. It restated `210` as
+a literal, so it was testing its own arithmetic; it now derives the canvas from
+the real constants and asserts the floor sits below 70 % of the smallest real
+size. And the row-inset mutations survived, which showed the fix attribution was
+wrong — the insets are headroom, the band layout is the fix — and that is what
+prompted extracting `InsideTileLayout` in the first place.
+
+Settings follow the panes' own jobs: the popover toggle sits in **Menu → In the
+menu** beside *Live charts*, because that pane is "what the menu bar and popover
+show". The master switch, the animation toggle and the window launcher stay in
+**General → Experimental**. The animation toggle deliberately does not move with
+the popover one — it governs the window too, and hiding it inside a section that
+only appears when the popover copy is on would hide a live setting.
+
+Protocol stays at **28**: nothing daemon-side changed, so the daemon binary
+would behave identically. Stated rather than assumed, per docs/RELEASING.md.
+
 ## 7. Risks & mitigations
 - **SMC keys vary wildly per model** → curated map + fallback enumeration + community diagnostics pipeline (§3.3). Biggest ongoing cost; design for it.
 - **Free-Apple-ID helper approval unproven** → Phase 0.5 spike with the fallback documented *before* it runs (manual `sudo launchctl bootstrap` install for Phases 3–5).

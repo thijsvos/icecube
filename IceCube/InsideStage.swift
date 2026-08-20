@@ -41,6 +41,28 @@ struct InsideStage {
     /// and a temperature is what someone opened the window to read.
     static let maximumBlowerRadius: CGFloat = 26
 
+    /// Below this there is not enough room to draw anything legible.
+    ///
+    /// Lives here, beside the geometry it judges, because the first version of
+    /// it lived in the view and was written against the *window's* dimensions —
+    /// so when the same drawing was asked for at popover size (224 × 158) it
+    /// failed the check and the whole canvas silently drew nothing. A size
+    /// floor belongs with the thing that produces sizes, where a test can
+    /// reach it.
+    static let minimumDrawable = CGSize(width: 140, height: 100)
+
+    /// How tall the compact form is inside the popover.
+    ///
+    /// Here rather than on the view so a test can build the real canvas from it
+    /// — the first version of that test restated `210` as a literal, and
+    /// therefore passed against the very floor that had broken the feature.
+    static let popoverHeight: CGFloat = 210
+
+    /// Whether there is room to draw at all.
+    var isDrawable: Bool {
+        chassis.width > Self.minimumDrawable.width && chassis.height > Self.minimumDrawable.height
+    }
+
     let chassis: CGRect
     /// One fin stack per blower, along the back edge above it.
     let fins: [CGRect]
@@ -110,10 +132,13 @@ struct InsideStage {
         fins = finFrames
 
         logicBoard = CGRect(x: x(0.28), y: y(0.15), width: shell.width * 0.44, height: shell.height * 0.29)
-        siliconRow = logicBoard.insetBy(dx: 10, dy: 12)
+        // Proportional, not fixed. A flat 12 pt inset top and bottom takes 24 of
+        // the 51 pt this board has at popover size, leaving a 27 pt tile — too
+        // short for a reading and a label without them overlapping.
+        siliconRow = logicBoard.insetBy(dx: 10, dy: min(12, logicBoard.height * 0.12))
 
         componentBay = CGRect(x: x(0.08), y: y(0.53), width: shell.width * 0.84, height: shell.height * 0.30)
-        componentRow = componentBay.insetBy(dx: 12, dy: 10)
+        componentRow = componentBay.insetBy(dx: 12, dy: min(10, componentBay.height * 0.12))
 
         let ventHeight = shell.height * 0.16
         sideVents = [
@@ -121,6 +146,27 @@ struct InsideStage {
             CGRect(x: x(0.982) - 10, y: y(0.30), width: 10, height: ventHeight),
         ]
         frontNotch = CGRect(x: x(0.36), y: y(0.90), width: shell.width * 0.28, height: shell.height * 0.055)
+    }
+
+    /// Type size relative to the reference drawing, 0.52…1.
+    ///
+    /// Here rather than in the view because it is derived from the geometry and
+    /// because the rows have to be tall enough to hold type at this size —
+    /// which is a fact about the layout, and one that a test can only check if
+    /// both halves live together. They did not, and the reading overlapped the
+    /// label in the popover as a result.
+    var typeScale: CGFloat {
+        (chassis.width / Self.maximumWidth).clamped(to: 0.52 ... 1)
+    }
+
+    /// The tallest stack a tile has to hold: a reading and a label, plus the
+    /// air between them.
+    ///
+    /// 25 pt and 11 pt are the reference sizes `InsideView` draws at, times
+    /// 1.35 for leading. A row shorter than this cannot show two lines without
+    /// them touching.
+    var minimumRowHeightForTwoLines: CGFloat {
+        (25 + 11) * typeScale * 1.35
     }
 
     /// Evenly spaced frames along `row`, capped in both directions and centred
