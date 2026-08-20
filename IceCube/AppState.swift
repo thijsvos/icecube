@@ -510,10 +510,24 @@ final class AppState: PopoverLifecycleObserving {
     /// that is usually shut.
     private func restartPolling() {
         let seconds = pollInterval.effectiveSeconds(display: menuBarDisplay)
+        let wasRunning = pollTask != nil
         pollTask?.cancel()
         pollTask = nil
         poller = SMCPoller(provider: provider, interval: .seconds(seconds))
-        start()
+        // Re-subscribe only. This used to call `start()`, whose "a second call
+        // is a no-op" guard is `pollTask == nil` — which `restartPolling` has
+        // just made true, so the guard could never see it. Every poll-interval
+        // or menu-bar-display change therefore re-ran all of `start()`'s
+        // once-per-launch work: another update check, another sensor
+        // inventory, another `onFreshDecisions` assignment.
+        //
+        // `start()` is still the right call when polling was never running,
+        // because then that setup genuinely has not happened yet.
+        if wasRunning {
+            consumePollingEvents()
+        } else {
+            start()
+        }
     }
 
     deinit {
@@ -587,6 +601,14 @@ final class AppState: PopoverLifecycleObserving {
         helper.onFreshDecisions = { [weak self] fresh in
             self?.pendingDecisions.append(contentsOf: fresh)
         }
+        consumePollingEvents()
+    }
+
+    /// Subscribes `pollTask` to the current poller's stream.
+    ///
+    /// Split out of ``start()`` so ``restartPolling()`` can swap the poller
+    /// without re-running the once-per-launch work that sits above this.
+    private func consumePollingEvents() {
         let events = poller.events()
         pollTask = Task { [weak self] in
             for await event in events {
@@ -647,9 +669,20 @@ final class AppState: PopoverLifecycleObserving {
                     // not the recording.
                     await chartStore.ingest(new)
                     if !isPaused, isPopoverVisible {
-                        chartRows = await chartStore.rows(window: chartWindow)
-                            .filter { chartSettings.includesRow(id: $0.id) }
-                        chartXDomain = new.date.addingTimeInterval(-chartWindow) ... new.date
+                        // Capture before suspending, then re-validate — the same
+                        // rule `refreshCharts()` follows. Its comment names this
+                        // loop as the other half of that race, but only its own
+                        // side was ever fixed: reading `chartWindow` on both
+                        // sides of the await let the rows come from the window
+                        // the user just left and the axis from the one they
+                        // just picked, which is the mid-glance rescale the
+                        // anti-jump rules forbid.
+                        let window = chartWindow
+                        let rows = await chartStore.rows(window: window)
+                        if window == chartWindow {
+                            chartRows = rows.filter { chartSettings.includesRow(id: $0.id) }
+                            chartXDomain = new.date.addingTimeInterval(-window) ... new.date
+                        }
                     }
                 case let .failure(error):
                     // Keep the last good snapshot on screen. One transient
