@@ -227,7 +227,7 @@ struct CurveEditorView: View {
     }
 
     private var canApply: Bool {
-        guard case .connected = state.helper.connection else { return false }
+        guard state.helper.isConnected else { return false }
         return model.curve.isUsable && !state.isSimulated
     }
 

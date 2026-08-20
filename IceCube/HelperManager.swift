@@ -46,6 +46,20 @@ final class HelperManager {
     private(set) var connection: Connection = .disconnected
     private(set) var status: HelperStatus?
 
+    /// Whether the XPC channel is up, ignoring which version answered.
+    ///
+    /// Six call sites asked this by pattern-matching `.connected`, one of them
+    /// through an immediately-applied closure because it needed a value rather
+    /// than a branch. `Connection` carries an associated version that none of
+    /// them bound, so the match was only ever a boolean wearing a costume.
+    var isConnected: Bool {
+        if case .connected = connection {
+            true
+        } else {
+            false
+        }
+    }
+
     /// The daemon's decisions, accumulated past its own 20-entry cap.
     ///
     /// The daemon keeps 20 so `HelperStatus` stays small on the wire; the app
@@ -385,6 +399,15 @@ final class HelperManager {
         refreshRegistration()
         var handBackFailed = false
         if registration != .notRegistered {
+            // Connect first, or the paragraph above is aspirational rather than
+            // true: `HelperClient.call` throws `NotConnected` when `connection`
+            // is nil, which it is after any disconnect or invalidation. Turning
+            // fan control off while disconnected therefore failed before a
+            // single XPC message left the app, set `handBackFailed`, and told
+            // the user to restart their Mac — for a daemon that was reachable
+            // the whole time. `connect()` is idempotent, so this is free when
+            // the channel is already up.
+            client.connect()
             if case .failed = await run({ try await self.client.setAllAuto() }) {
                 handBackFailed = true
             }
@@ -663,13 +686,7 @@ final class HelperManager {
     @discardableResult
     func cyclePreset(in cycle: [Preset]) async -> Preset? {
         if let refusal = Self.quickSwitchRefusal(
-            connected: {
-                if case .connected = connection {
-                    true
-                } else {
-                    false
-                }
-            }(),
+            connected: isConnected,
             isSelfTesting: isSelfTesting
         ) {
             // Bound to a local first. `os.Logger`'s interpolation is an
@@ -816,7 +833,7 @@ final class HelperManager {
     /// `DaemonCore.selfTestWritePath()`.
     @discardableResult
     func runWritePathSelfTest() async -> WritePathReport? {
-        guard !isSelfTesting, case .connected = connection else { return nil }
+        guard !isSelfTesting, isConnected else { return nil }
         isSelfTesting = true
         defer { isSelfTesting = false }
         do {
@@ -959,7 +976,7 @@ final class HelperManager {
             await selfHeal(reason: "running service is an older version")
             return
         }
-        guard case .connected = connection else { return }
+        guard isConnected else { return }
         // A healthy connection ends the episode: a later wedge is a NEW fault
         // and deserves its own repair. Resetting only here — never on a failed
         // attempt — is what stops a service that cannot start from being

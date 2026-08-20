@@ -55,6 +55,9 @@ final class MemoryDefaults: KeyValueStore {
 /// assert on the conversation rather than only on the end state.
 @MainActor
 private final class FakeChannel: HelperChanneling {
+    /// Stands in for `HelperClient.NotConnected`, which is private to the app.
+    struct NotConnected: Error {}
+
     var onDisconnect: (() -> Void)?
     private(set) var isConnected = false
 
@@ -102,6 +105,14 @@ private final class FakeChannel: HelperChanneling {
     func setAllAuto() async throws {
         if let failure {
             throw failure
+        }
+        // Mirrors `HelperClient.call`, which guards `connection` and throws
+        // before sending anything. This double used to answer happily while
+        // disconnected, and that kindness is exactly why `unregister` shipped
+        // without a `connect()`: the only test that could have caught it was
+        // talking to a fake with no such requirement.
+        guard isConnected else {
+            throw NotConnected()
         }
         setAllAutoCount += 1
     }
@@ -237,6 +248,35 @@ struct HelperManagerTests {
             blocker: { blocker },
             powerSource: power
         )
+    }
+
+    // MARK: - Turning fan control off
+
+    /// The uninstall path's entire job, and it could not do it.
+    ///
+    /// `unregister` is reachable from a disconnected app — the button stays
+    /// enabled in that state deliberately, because the mach service is
+    /// demand-launched and a registered daemon is still there to answer. But
+    /// the hand-back went out through `HelperClient.call`, which throws
+    /// `NotConnected` on a nil connection, so the one call that drops the fans
+    /// to auto and clears the persisted curve never left the app. The user was
+    /// then told to restart their Mac, about a daemon that had been reachable
+    /// the whole time, while the curve survived to be resumed by the next
+    /// install.
+    @Test("Turning fan control off hands the fans back even from a disconnected app")
+    func unregisterHandsBackWhileDisconnected() async {
+        let registrar = FakeRegistrar()
+        registrar.status = .enabled
+        let channel = FakeChannel() // never connected, which is the point
+        let manager = makeManager(registrar: registrar, channel: channel, defaults: makeDefaults())
+
+        await manager.unregister()
+
+        #expect(
+            channel.setAllAutoCount == 1,
+            "the daemon must be dropped to auto before it is removed, or the fans are stranded"
+        )
+        #expect(registrar.unregisterCount == 1, "and the daemon still has to go away")
     }
 
     // MARK: - Registration status mapping
