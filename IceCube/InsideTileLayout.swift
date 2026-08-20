@@ -56,7 +56,21 @@ struct InsideTileLayout {
 
         var slot = 0
         if showsIcon {
-            icon = Element(y: band(slot), fontSize: (prominent ? 15 : 12) * scale)
+            // Floored, like the label below it. Scaled alone, a component
+            // glyph reached 12 × 0.52 ≈ 6 pt in the popover — smaller than the
+            // 9 pt the label is never allowed to go below, on the one tile
+            // where the label is dropped and the glyph is the *only* thing
+            // identifying a battery from an SSD from the wireless card. Below
+            // about 8 pt these stop being distinguishable shapes whatever the
+            // tile is doing, which is the same argument the label's floor makes.
+            //
+            // 12 is not arbitrary: it is the size the design already picked for
+            // a component icon at full scale, so the floor reads as "never draw
+            // one smaller than intended" rather than as a popover special case.
+            // The ceiling is the tile's top edge — at 40.6 pt with the icon
+            // centred at 10.1, anything past ~16.9 pt overflows it. Pinned by
+            // `elementsStayInsideTheTile`.
+            icon = Element(y: band(slot), fontSize: max(12, (prominent ? 15 : 12) * scale))
             slot += 1
         } else {
             icon = nil
