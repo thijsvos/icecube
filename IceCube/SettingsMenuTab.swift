@@ -31,6 +31,15 @@ struct SettingsMenuTab: View {
                 Toggle("Fan controls", isOn: $chart.showControls)
                 Toggle("Full temperature list", isOn: $chart.showTemperatureList)
                 Toggle("Live charts", isOn: $chart.showCharts)
+                // Beside "Live charts" because it is the same kind of decision —
+                // what the popover shows — and this pane is where those live.
+                // It first shipped in General next to the experimental switch
+                // that enables the feature, which put one popover toggle in a
+                // different tab from all the others.
+                if state.isInsideEnabled {
+                    Toggle("Inside cooling view", isOn: $state.showsInsideInPopover)
+                        .help("A compact live drawing of the heat path, above the charts.")
+                }
                 Toggle("Smoothly animate readings", isOn: $chart.smoothReadings)
                     .help(
                         "Numbers roll in place and gauge bars slide to each new reading; off makes them snap instantly"
