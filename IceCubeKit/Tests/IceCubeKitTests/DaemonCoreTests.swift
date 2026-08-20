@@ -788,6 +788,78 @@ struct DaemonCoreRevertTests {
     /// `apply()` guards itself with `applyGeneration`, so two applies can never
     /// reach this path. Only a daemon-initiated engage racing an incoming XPC
     /// message can, which is exactly what happened on the Mac14,9.
+    /// The engage-vs-revert guard, which nothing exercised.
+    ///
+    /// Found by mutation, not by reading: deleting **both** halves of the guard
+    /// —
+    ///
+    /// ```swift
+    /// guard generation == revertGeneration, revertsInFlight == 0 else { … }
+    /// ```
+    ///
+    /// — along with the `revertGeneration`/`revertsInFlight` bookkeeping that
+    /// feeds it left all 656 tests passing. The guard is correct, and it is the
+    /// reason an audit claim that `shutdown()` races an in-flight tick is
+    /// wrong; it simply had nothing defending it, so a future refactor could
+    /// have removed it in silence.
+    ///
+    /// The interleave: an engage parks mid-sequence holding the write lock, a
+    /// revert bumps the generation (which `asRevert` does *before* it queues
+    /// for the lock, so it lands while the engage is still parked), then the
+    /// gate opens. The engage finishes its writes into a world that has since
+    /// reverted, and must undo itself rather than leave the fans forced at a
+    /// target nobody is supervising.
+    @Test("An engage that finishes after a revert undoes itself")
+    func engageResumingAfterARevertStandsDown() async throws {
+        let smc = FakeSMC(temperature: 55)
+        let core = makeCore(smc: smc)
+        await core.heartbeat()
+
+        // The engage parks mid-sequence, holding the write lock.
+        await smc.gateWrites(on: "F1Tg")
+        async let engage: Void = core.apply(manualConfig(5000))
+        while await !smc.isGated() {
+            await Task.yield()
+        }
+
+        // The revert bumps `revertGeneration` on its way in, then queues.
+        async let revert: Void = core.setAllAuto()
+        for _ in 0 ..< 60 {
+            await Task.yield()
+        }
+
+        await smc.openGate()
+        _ = try? await engage
+        await revert
+
+        // Whatever the interleave, the daemon must not report auto while the
+        // fans are still forced — the exact state the guard exists to make
+        // unreachable, and the one a stranded engage produces.
+        let status = await core.currentStatus()
+        // Matched on the guard's OWN wording, for the reason the neighbouring
+        // test records: the end state alone cannot see this guard. The revert
+        // hands the fans back whether or not the engage stood down, so an
+        // assertion about fan mode passes with the whole generation check
+        // deleted — which is exactly how it went untested. This string is
+        // produced by nothing else.
+        #expect(
+            status.recentEvents.contains { $0.contains("fan write raced a revert") },
+            "the engage did not notice the revert: \(status.recentEvents)"
+        )
+        #expect(status.mode == .auto, "the revert is the newer decision and must win")
+        // Not `== .auto`: a completed hand-back writes mode 0 and then *attempts*
+        // mode 3, giving the fan back to `thermalmonitord`, so 3 is the healthy
+        // end state and asserting 0 would fail on correct code. `.forced` is the
+        // one value that means the engage's write survived the revert.
+        for fan in 0 ... 1 {
+            let mode = try await smc.readDouble("F\(fan)Md")
+            #expect(
+                mode != Double(FanMode.forced.rawValue),
+                "fan \(fan) still forced while the daemon reports auto — the engage outlived the revert"
+            )
+        }
+    }
+
     @Test("A decision superseded while queued stands down instead of landing last")
     func staleWriteStandsDownBehindTheLock() async throws {
         let smc = FakeSMC(temperature: 55)

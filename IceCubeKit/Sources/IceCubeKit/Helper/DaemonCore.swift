@@ -1322,94 +1322,97 @@ public actor DaemonCore {
     ///   for auto, or we lost control); false only for daemon shutdown, where
     ///   the intent should survive the restart.
     private func revertEverything(reason: String, clearsPersistence: Bool = true) async {
-        _ = writeIntent.issue()
-        revertGeneration &+= 1
-        revertsInFlight += 1
-        defer { revertsInFlight -= 1 }
-
-        // SAFETY: a revert that wrote NOTHING must never be recorded as done.
-        // `(try? readFans()) ?? []` used to hand an empty array to
-        // `revertAllAuto`, whose `fanIDs.min()` is nil → throws → the caller's
-        // `try?` returns immediately. Zero SMC writes — yet the state below
-        // still declared `.auto`, which silently disarms the watchdog, the
-        // ceiling AND the guardian for fans that are physically still forced.
-        // Nothing in the tick recovers that, so we must keep control instead.
-        var reverted = false
-        for attempt in 1 ... Self.revertReadAttempts {
-            // Only a *failed read* is worth retrying. An empty list is a real
-            // answer on a fanless Mac (the M2 Air is in the curated model set),
-            // and treating that as a failure would pin the daemon in
-            // `revertPending` forever, re-reverting nothing on every tick.
-            guard let fans = try? await readFans() else {
-                if attempt < Self.revertReadAttempts {
-                    await sleep(.milliseconds(200))
+        // Through `asRevert`, not hand-paired increments. This is the path the
+        // helper's own doc comment was written about — "a scoped helper rather
+        // than hand-paired increments, because the pairing is a safety property"
+        // — and it was the one revert that did not use it, duplicating all four
+        // lines verbatim. Identical behaviour; the point is that a change to
+        // what a revert must do now reaches every revert, including this one.
+        await asRevert {
+            // SAFETY: a revert that wrote NOTHING must never be recorded as done.
+            // `(try? readFans()) ?? []` used to hand an empty array to
+            // `revertAllAuto`, whose `fanIDs.min()` is nil → throws → the caller's
+            // `try?` returns immediately. Zero SMC writes — yet the state below
+            // still declared `.auto`, which silently disarms the watchdog, the
+            // ceiling AND the guardian for fans that are physically still forced.
+            // Nothing in the tick recovers that, so we must keep control instead.
+            var reverted = false
+            for attempt in 1 ... Self.revertReadAttempts {
+                // Only a *failed read* is worth retrying. An empty list is a real
+                // answer on a fanless Mac (the M2 Air is in the curated model set),
+                // and treating that as a failure would pin the daemon in
+                // `revertPending` forever, re-reverting nothing on every tick.
+                guard let fans = try? await readFans() else {
+                    if attempt < Self.revertReadAttempts {
+                        await sleep(.milliseconds(200))
+                    }
+                    continue
                 }
-                continue
-            }
-            guard !fans.isEmpty else {
-                reverted = true // nothing to hand back
+                guard !fans.isEmpty else {
+                    reverted = true // nothing to hand back
+                    break
+                }
+                do {
+                    try await withWriteLock { try await self.sequencer.revertAllAuto(fans: fans) }
+                    reverted = true
+                } catch {
+                    // Throttled on the same counter as the summary 20 lines below.
+                    // Unthrottled, a stuck SMC wrote one of these every 2 s — which
+                    // not only floods the log but flushes the decision timeline,
+                    // since the app keeps the last 20 and this would be all of
+                    // them. The one decision worth surfacing is "revert is still
+                    // failing", not 1800 copies of it an hour.
+                    if failedRevertAttempts % 30 == 0 {
+                        record("revert attempt \(attempt) failed: \(error.localizedDescription)")
+                    }
+                }
                 break
             }
-            do {
-                try await withWriteLock { try await self.sequencer.revertAllAuto(fans: fans) }
-                reverted = true
-            } catch {
-                // Throttled on the same counter as the summary 20 lines below.
-                // Unthrottled, a stuck SMC wrote one of these every 2 s — which
-                // not only floods the log but flushes the decision timeline,
-                // since the app keeps the last 20 and this would be all of
-                // them. The one decision worth surfacing is "revert is still
-                // failing", not 1800 copies of it an hour.
-                if failedRevertAttempts % 30 == 0 {
-                    record("revert attempt \(attempt) failed: \(error.localizedDescription)")
-                }
-            }
-            break
-        }
-        // Release the SMC connection: thermalmonitord reliably resumes fan
-        // control only once the writer's connection is gone (field-observed).
-        await resetPort()
+            // Release the SMC connection: thermalmonitord reliably resumes fan
+            // control only once the writer's connection is gone (field-observed).
+            await resetPort()
 
-        guard reverted else {
-            // Hold every safety net armed and retry on the next tick, rather
-            // than claiming an auto state we did not actually reach.
-            revertPending = true
-            revertPendingReason = reason
-            status.lastWriteVerified = false
-            // Throttled: the tick retries every 2 s, and an SMC that stays
-            // broken would otherwise write ~1800 lines an hour into a log whose
-            // whole job is making each write auditable. First failure and every
-            // 30th (~1 min) is enough to see it is still stuck.
-            if failedRevertAttempts % 30 == 0 {
-                record("SAFETY: revert could not be applied (\(reason)) — retrying every tick, control retained")
+            guard reverted else {
+                // Hold every safety net armed and retry on the next tick, rather
+                // than claiming an auto state we did not actually reach.
+                revertPending = true
+                revertPendingReason = reason
+                status.lastWriteVerified = false
+                // Throttled: the tick retries every 2 s, and an SMC that stays
+                // broken would otherwise write ~1800 lines an hour into a log whose
+                // whole job is making each write auditable. First failure and every
+                // 30th (~1 min) is enough to see it is still stuck.
+                if failedRevertAttempts % 30 == 0 {
+                    record("SAFETY: revert could not be applied (\(reason)) — retrying every tick, control retained")
+                }
+                failedRevertAttempts &+= 1
+                return
             }
-            failedRevertAttempts &+= 1
-            return
+            if failedRevertAttempts > 0 {
+                record("revert succeeded after \(failedRevertAttempts) failed attempt(s)")
+            }
+            failedRevertAttempts = 0
+            revertPending = false
+            revertPendingReason = nil
+            config = .auto
+            coolingOverride = false
+            verifyFailures = 0
+            followers = [:]
+            curveTargets = [:]
+            // One reset, not a hand-picked subset: the old code cleared the engage
+            // debounce here but left the orphan-ladder counters stale, so the next
+            // orphaned tick could skip the gentle re-park stage.
+            guardian.reset()
+            monitor = SafetyMonitor()
+            if clearsPersistence {
+                store.clear() // a user/safety revert cancels the boot promise
+            }
+            status.mode = .auto
+            status.activeCurve = nil
+            status.appliedTargets = [:]
+            status.guardianActive = false
+            record("all fans auto (\(reason))")
         }
-        if failedRevertAttempts > 0 {
-            record("revert succeeded after \(failedRevertAttempts) failed attempt(s)")
-        }
-        failedRevertAttempts = 0
-        revertPending = false
-        revertPendingReason = nil
-        config = .auto
-        coolingOverride = false
-        verifyFailures = 0
-        followers = [:]
-        curveTargets = [:]
-        // One reset, not a hand-picked subset: the old code cleared the engage
-        // debounce here but left the orphan-ladder counters stale, so the next
-        // orphaned tick could skip the gentle re-park stage.
-        guardian.reset()
-        monitor = SafetyMonitor()
-        if clearsPersistence {
-            store.clear() // a user/safety revert cancels the boot promise
-        }
-        status.mode = .auto
-        status.activeCurve = nil
-        status.appliedTargets = [:]
-        status.guardianActive = false
-        record("all fans auto (\(reason))")
     }
 
     // MARK: - Curve control loop (Phase 4)
