@@ -650,6 +650,45 @@ integers, so the fractional part never moved. And two survivors turned out to be
 deleted rather than defended: an unobservable branch is one no test can protect,
 and leaving it in invites someone to write a test that only appears to.
 
+### Inside, after profiling it on the owner's Mac (2026-08-19)
+
+The window was measured at **26 % CPU** while sitting behind a terminal, against
+**0.3 %** for the app with it closed. Six changes, all measured:
+
+- **It redrew while nobody could see it.** The only pause condition was Reduce
+  Motion. The first fix — pause on `NSWindow.occlusionState` — was *built,
+  shipped and then thrown away*, because it does nothing: the observer attached,
+  the notification fired, and macOS reported `visible=true` for the whole time
+  the window sat under a full-screen window of another app. 25.9 % covered,
+  25.9 % uncovered. `occlusionState` only drops `.visible` when the system is
+  confident the window is entirely behind opaque content, and with vibrancy and
+  transparency about it frequently is not. ``InsideActivity`` replaces it with
+  signals that are dependable — `isVisible`/`isMiniaturized` and
+  `NSApp.isActive` — and does not freeze a backgrounded window outright: the
+  readings keep arriving at 1 Hz, the rate they change at, while the motion
+  stops. **26 % → 1.3 %** in the case that actually happens.
+- **Every colour was dynamic.** `Theme.temperatureColor` returns an
+  `NSColor(name:)` carrying a resolution closure — right for a `View` that must
+  survive a theme switch, wrong inside a `Canvas` that rebuilds each frame
+  anyway. Measured **2.184 µs against 0.074 µs** for the concrete form, plus the
+  per-use resolution SwiftUI was doing in the render pass.
+- **Text was laid out 30 times a second** to say what changes once a second.
+- **Static geometry was rebuilt every frame** — a fin stack is sixty line
+  segments — and 28 particles were 28 `Path` allocations and 28 fills, now six
+  colour buckets.
+- **60 fps went back to 30.** The alias margin comes from the safety factor and
+  the blade count, not the frame rate; five blades keep 2.0 rev/s.
+
+Profile across the exercise: SwiftUICore 2862 → 892, CoreText 770 → 122,
+CoreGraphics 304 → 110. Foreground is ~14 %, which is close to the floor for a
+30 fps SwiftUI `Canvas`; going lower means fewer frames, fewer particles, or not
+using `Canvas`. Cutting the particle count was considered and **not** done —
+batching got the cost without removing any.
+
+Also fixed here: the airflow particles were a single flat colour, because the
+ramp ran between the two airflow sensors and those read 46.8 and 47.0 °C. It now
+runs on the die's rise above intake, which is a number that moves.
+
 ## 7. Risks & mitigations
 - **SMC keys vary wildly per model** → curated map + fallback enumeration + community diagnostics pipeline (§3.3). Biggest ongoing cost; design for it.
 - **Free-Apple-ID helper approval unproven** → Phase 0.5 spike with the fallback documented *before* it runs (manual `sudo launchctl bootstrap` install for Phases 3–5).

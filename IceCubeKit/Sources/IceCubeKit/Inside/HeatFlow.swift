@@ -82,6 +82,48 @@ public enum HeatFlow {
         return total / Double(usable.count)
     }
 
+    /// How much of the die's rise above the incoming air the exhaust air is
+    /// drawn as carrying.
+    ///
+    /// **A visual scale, not a measurement, and the only invented number in
+    /// this file.** Air leaving a laptop's fins sits somewhere between the
+    /// intake and the heatsink base, which is itself well below the die — a
+    /// third is the plausible middle of that for this class of machine. It
+    /// exists because the alternative is drawing air that reaches die
+    /// temperature, which would be a lie, or drawing no warming at all, which
+    /// is what the sensors force (below).
+    public static let carriedShare = 0.34
+
+    /// The temperature to draw the air at, `progress` of the way along its
+    /// path — 0 at the intake vent, 1 leaving the exhaust.
+    ///
+    /// **Why this is not simply an interpolation between the two airflow
+    /// sensors.** It was, and it produced particles of a single flat colour on
+    /// real hardware. `TaLP` and `TaRF` read **46.8 °C and 47.0 °C** on Mac14,9
+    /// under load (docs/THERMAL.md): they sit centimetres apart in the same
+    /// duct, and neither is at an end of the airflow. There is no measured
+    /// spread between them to colour with — the same finding that removed this
+    /// window's "heat is not leaving" state.
+    ///
+    /// So the ramp is an **illustration of heat pickup**, and its size is tied
+    /// to something real: `dieRise`, the hottest silicon above the incoming
+    /// air, which is the heat actually being carried away. An idle machine's
+    /// air barely changes colour; a working one's visibly warms across the
+    /// fins. The direction is cool-to-warm because that is the direction heat
+    /// moves — air enters cool, crosses the heatsink, and leaves hot. Drawing
+    /// it the other way would show heat flowing into the machine.
+    ///
+    /// Bounded by the die: air cannot leave hotter than the thing heating it.
+    public static func airTemperature(progress: Double, intake: Double, dieRise: Double?) -> Double {
+        guard let dieRise, dieRise > 0, progress.isFinite, intake.isFinite else { return intake }
+        // Flat up to the blower, then warming across the fin stack — the heat
+        // is picked up at the fins, not on the way to them.
+        let crossing = ((progress - 0.62) / 0.38).clamped(to: 0 ... 1)
+        // Smoothstep, so the colour eases rather than switching at one point.
+        let eased = crossing * crossing * (3 - 2 * crossing)
+        return intake + dieRise * carriedShare * eased
+    }
+
     /// The state to report for a snapshot.
     ///
     /// A fanless Mac never reaches ``State/hotAndUncooled``. It has no fans by

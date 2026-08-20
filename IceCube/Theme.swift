@@ -54,6 +54,32 @@ enum Theme {
         })
     }
 
+    /// The same ramp, already resolved for one appearance.
+    ///
+    /// ``temperatureColor(_:)`` returns a **dynamic** colour: an
+    /// `NSColor(name:)` carrying a closure that AppKit re-runs whenever the
+    /// appearance might have changed. That is exactly right for a `View` that
+    /// is built once and has to survive the user switching to dark mode — and
+    /// exactly wrong inside a `Canvas` draw, which rebuilds everything every
+    /// frame anyway.
+    ///
+    /// Measured: **2.184 µs** to build the dynamic form against **0.074 µs**
+    /// for this one, thirty times cheaper — and that is only the construction.
+    /// The dynamic colour additionally makes SwiftUI resolve it again during
+    /// the render pass (`AppKitPlatformColorDefinition.resolvedHDRColor`, which
+    /// is what showed up when the Inside window was profiled at 26 % CPU).
+    ///
+    /// The caller passes the appearance it is drawing in, so the colour is
+    /// still correct in both themes — the decision simply moves from once per
+    /// use to once per frame.
+    static func temperatureColor(_ celsius: Double, dark: Bool) -> Color {
+        let t = ((celsius - 45) / (95 - 45)).clamped(to: 0 ... 1)
+        let hue = 0.58 * (1 - t)
+        return dark
+            ? Color(hue: hue, saturation: 0.55 + 0.25 * t, brightness: 0.78 + 0.12 * t)
+            : Color(hue: hue, saturation: 0.72 + 0.22 * t, brightness: 0.60 + 0.12 * t)
+    }
+
     /// Shared metrics so grouped surfaces line up on one rhythm instead of
     /// per-view guesses — consistent radius/spacing is a core "premium" cue.
     enum Metrics {
