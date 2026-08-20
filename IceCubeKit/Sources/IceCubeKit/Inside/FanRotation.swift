@@ -22,18 +22,26 @@ import Foundation
 public enum FanRotation {
     /// The canvas redraw rate the alias ceiling is derived from, frames/second.
     ///
-    /// Was 30, which was a mistake worth recording: combined with the values
-    /// below it put the fastest drawn fan *exactly* on the Nyquist limit, which
-    /// is the one rate at which a rotating object is guaranteed to look
-    /// stationary. A fan that stops moving when the machine works hardest is
-    /// the opposite of the point.
-    public static let frameRate = 60.0
+    /// Went 30 → 60 to fix a stutter, then back to 30 once the stutter turned
+    /// out to have a different cause, and both moves are worth recording.
+    ///
+    /// At 30 fps with the *original* nine blades and a `frameRate / 2` cap, the
+    /// fastest drawn fan sat *exactly* on Nyquist — the one rate at which a
+    /// rotating object is guaranteed to look stationary. Doubling the frame
+    /// rate hid that, but the real fix was the safety factor and the blade
+    /// count below, not the frame rate. Doubling it also doubled every
+    /// per-frame cost, and profiling the window at **26 % CPU** is what sent
+    /// this back to 30: the alias margin now comes from
+    /// ``aliasSafetyFactor`` and ``bladeCount``, which cost nothing.
+    public static let frameRate = 30.0
 
     /// Blades drawn per blower. Not the real count — Apple's blowers have 31
     /// or 61 unevenly spaced blades, which at any drawable size is a grey
-    /// smudge. Seven reads as a fan, and fewer blades buy more rotation speed
-    /// before aliasing, because what aliases is *blade passes*, not turns.
-    public static let bladeCount = 7
+    /// smudge. Five reads as a fan, and fewer blades buy more rotation speed
+    /// before aliasing, because what aliases is *blade passes*, not turns —
+    /// which is what lets the frame rate come back down to 30 without the
+    /// blades slowing.
+    public static let bladeCount = 5
 
     /// How much of the frame rate the blade-pass rate may use.
     ///
@@ -47,8 +55,9 @@ public enum FanRotation {
     /// The fastest the blades may appear to turn, RPM.
     ///
     /// `bladeCount × revolutions/second` must stay under
-    /// `frameRate / aliasSafetyFactor`. At 60 fps and seven blades that is
-    /// 2.9 rev/s — about 171 RPM — which is a visibly, smoothly spinning fan.
+    /// `frameRate / aliasSafetyFactor`. At 30 fps and five blades that is
+    /// 2 rev/s — 120 RPM — which is a visibly, smoothly spinning fan, and
+    /// faster than the seven-blade 60 fps arrangement it replaced.
     /// Faster fans are drawn at this rate with more blur rather than more
     /// speed, and the true figure is printed beside the drawing.
     public static var maximumDisplayRPM: Double {

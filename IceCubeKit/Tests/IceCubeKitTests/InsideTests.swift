@@ -206,6 +206,56 @@ struct HeatFlowTests {
         #expect(HeatFlow.state(for: Fixtures.snapshot(cpu: 88, rpm: 1100)) == .working, "16 % of range")
     }
 
+    /// The particles were a single flat colour on real hardware, because the
+    /// ramp ran between the two airflow sensors and those read 46.8 and
+    /// 47.0 °C — 0.2 °C apart, both in the same duct. The ramp is now driven by
+    /// the die's rise above the incoming air, which is a number that actually
+    /// moves.
+    @Test("Air warms across the fins, and does so visibly when the machine is working")
+    func airWarmsAcrossTheFins() {
+        let cold = HeatFlow.airTemperature(progress: 0, intake: 30, dieRise: 45)
+        let atFins = HeatFlow.airTemperature(progress: 0.62, intake: 30, dieRise: 45)
+        let out = HeatFlow.airTemperature(progress: 1, intake: 30, dieRise: 45)
+        #expect(cold == 30, "at the vent it is the air that came in, unchanged")
+        #expect(atFins == 30, "and it stays that way until it reaches the heatsink")
+        #expect(out > cold + 8, "leaving, it must be visibly warmer — got \(out)")
+    }
+
+    /// Air cannot leave hotter than the thing heating it. The ramp is an
+    /// illustration, so it needs a bound that keeps it from illustrating
+    /// something impossible.
+    @Test("The air never draws hotter than the silicon heating it")
+    func airNeverExceedsTheDie() {
+        for rise in stride(from: 0.0, through: 80, by: 5) {
+            for progress in stride(from: 0.0, through: 1, by: 0.05) {
+                let air = HeatFlow.airTemperature(progress: progress, intake: 30, dieRise: rise)
+                #expect(air >= 30, "air must never draw cooler than what came in")
+                #expect(air <= 30 + rise, "air at \(air) exceeds the die at \(30 + rise)")
+            }
+        }
+    }
+
+    /// An idle machine is not moving heat, so its air must not be drawn as if
+    /// it were — that would be inventing a gradient the way the removed
+    /// "heat is not leaving" state would have.
+    @Test("With nothing to carry, the air does not change colour at all")
+    func idleAirDoesNotWarm() {
+        #expect(HeatFlow.airTemperature(progress: 1, intake: 30, dieRise: nil) == 30)
+        #expect(HeatFlow.airTemperature(progress: 1, intake: 30, dieRise: 0) == 30)
+        #expect(HeatFlow.airTemperature(progress: 1, intake: 30, dieRise: -5) == 30, "and never runs backwards")
+        #expect(HeatFlow.airTemperature(progress: .nan, intake: 30, dieRise: 40) == 30)
+    }
+
+    @Test("Warming only ever increases along the path")
+    func warmingIsMonotonic() {
+        var last = -Double.infinity
+        for progress in stride(from: 0.0, through: 1, by: 0.02) {
+            let air = HeatFlow.airTemperature(progress: progress, intake: 28, dieRise: 50)
+            #expect(air >= last, "air cooled from \(last) to \(air) at \(progress)")
+            last = air
+        }
+    }
+
     /// A fanless Air has no fans by design and its thermal design assumes none.
     /// Telling its owner nothing is cooling their Mac would be alarming and
     /// wrong — the same distinction `FanBand.fanless` is a separate case for.
@@ -439,6 +489,54 @@ struct PhaseIntegratorTests {
         integrator.advance(to: 5, turnsPerSecond: 2)
         #expect(integrator.phase == beforeBackwards)
         #expect(integrator.advance(to: 5.1, turnsPerSecond: 2) != beforeBackwards, "and resumes after")
+    }
+}
+
+/// The policy that decides how hard the window works, written after the first
+/// attempt at it — pausing on `NSWindow.occlusionState` — was measured doing
+/// nothing at all.
+@Suite("InsideActivity — how hard the window should be working")
+struct InsideActivityTests {
+    @Test("A window that is not on screen does not draw at all")
+    func hiddenIsPaused() {
+        let hidden = InsideActivity.current(onScreen: false, appActive: true)
+        #expect(hidden == .hidden)
+        #expect(hidden.framesPerSecond == nil, "nil is what stops the TimelineView")
+        #expect(!hidden.animatesMotion)
+    }
+
+    /// The case the whole policy exists for: a monitoring window left open
+    /// beside the thing being monitored. Freezing it outright would break what
+    /// it is for, so the readings keep arriving and only the motion stops.
+    @Test("Behind another app the readings still update, but the motion stops")
+    func backgroundKeepsReadingsAndDropsMotion() {
+        let background = InsideActivity.current(onScreen: true, appActive: false)
+        #expect(background == .background)
+        #expect(background.framesPerSecond == 1, "one frame a second is the rate the readings arrive at")
+        #expect(!background.animatesMotion, "motion at 1 fps would read as the stutter, not as motion")
+    }
+
+    @Test("In front it runs at the full rate")
+    func foregroundIsFullRate() {
+        let foreground = InsideActivity.current(onScreen: true, appActive: true)
+        #expect(foreground == .foreground)
+        #expect(foreground.framesPerSecond == FanRotation.frameRate)
+        #expect(foreground.animatesMotion)
+    }
+
+    /// The saving is the point, so it is the thing asserted rather than assumed
+    /// from the constants.
+    @Test("Backgrounding costs at least an order of magnitude less drawing")
+    func backgroundIsDramaticallyCheaper() throws {
+        let front = try #require(InsideActivity.foreground.framesPerSecond)
+        let back = try #require(InsideActivity.background.framesPerSecond)
+        #expect(back * 10 <= front, "\(back) fps against \(front) is not worth the machinery")
+    }
+
+    @Test("Motion only ever runs in exactly one state")
+    func onlyForegroundAnimates() {
+        let animating = InsideActivity.allCases.filter(\.animatesMotion)
+        #expect(animating == [.foreground])
     }
 }
 

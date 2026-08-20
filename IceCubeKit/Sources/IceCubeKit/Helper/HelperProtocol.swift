@@ -137,7 +137,22 @@ public enum HelperConstants {
     ///     daemon behind a v27 app still strands the fans on every one of those
     ///     paths, and nothing on the app side can see that it did — which is the
     ///     exact shape `docs/RELEASING.md` wrote this rule for.
-    public static let protocolVersion = "27"
+    /// v28: two daemon behaviour changes that shipped in `e9267b3` without a
+    ///     bump, caught while preparing v0.4.0. `apply(.curve)` narrated an
+    ///     engage it had not made — `runCurveTick()` returned `Void`, so
+    ///     `record("curve engaged")` ran even when the engage had failed and
+    ///     been reverted — and `FanWriteSequencer.engageManual` gained a
+    ///     `guard target > 0` refusing a non-positive RPM at the write itself,
+    ///     rather than trusting every caller to have clamped first.
+    ///
+    ///     **The XPC surface is byte-identical, again.** The bump is here
+    ///     because a v27 daemon behind a v28 app is still the one that will
+    ///     write a zero target if a caller ever forgets, and still the one that
+    ///     claims a curve is running when it is not. Both fixes live entirely
+    ///     in the daemon binary, which is precisely the case
+    ///     `docs/RELEASING.md` says to bump for: *"If the daemon binary would
+    ///     behave differently, bump it — protocol change or not."*
+    public static let protocolVersion = "28"
     /// How often the app sends a heartbeat while connected.
     public static let heartbeatInterval: TimeInterval = 5
     /// SAFETY: no heartbeat for this long → the daemon's watchdog reverts to
