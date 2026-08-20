@@ -110,6 +110,24 @@ struct SystemSMCProviderTests {
 
     // MARK: - Fans
 
+    /// `Int(someDouble)` is a trapping conversion: NaN, ±infinity and anything
+    /// past `Int.max` crash the process rather than throwing. `FNum` comes
+    /// straight off firmware, and this is the app's read path, so the crash
+    /// would be the UI dying on a bad reading with no way for the user to tell
+    /// why. The daemon's `SensorReader.readFans()` has guarded the identical
+    /// read since it was written, with a comment saying why; this copy was
+    /// written as `Int(try await connection.readDouble("FNum"))`.
+    @Test(
+        "A garbage fan count throws instead of trapping",
+        arguments: [Double.nan, .infinity, -.infinity, 1e30, -1, 65]
+    )
+    func garbageFanCountThrows(raw: Double) async {
+        let provider = SystemSMCProvider(connection: FakeReadPort(values: ["FNum": raw]))
+        await #expect(throws: IceCubeError.self) {
+            try await provider.fans()
+        }
+    }
+
     @Test("A fan's fields come through, and its range is usable")
     func fansAreRead() async throws {
         let provider = SystemSMCProvider(connection: FakeReadPort(values: Self.fans()))
