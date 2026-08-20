@@ -74,6 +74,39 @@ struct InsideTileLayoutTests {
         #expect(full.elements.count == 3)
     }
 
+    /// The gap that let a too-large icon through.
+    ///
+    /// `hasOverlap` only compares elements with *each other*, and
+    /// `elementsStayOrderedAndInside` only checks their **centres**. So an icon
+    /// big enough to spill out of the top of its tile satisfied both: raising
+    /// the component floor to 20 pt put its span at −1.9 … 22.2 in a tile that
+    /// starts at 0, and the whole suite stayed green. The top edge is the
+    /// binding constraint on icon size in the popover — the value below has far
+    /// more room — so it is the one that needed pinning.
+    @Test("Every element's glyphs stay inside the tile, not just their centres")
+    func elementsStayInsideTheTile() {
+        for (name, stage) in Self.stages() {
+            for (kind, row, prominent) in [
+                ("silicon", stage.siliconRow, true),
+                ("component", stage.componentRow, false),
+            ] {
+                let height = stage.slots(in: row, count: 2, maxWidth: 104, maxHeight: 82)
+                    .first?.height ?? row.height
+                let tile = InsideTileLayout(height: height, scale: stage.typeScale, prominent: prominent)
+                for element in tile.elements {
+                    let size = Double(element.fontSize)
+                    let top = Double(element.span.lowerBound)
+                    let bottom = Double(element.span.upperBound)
+                    #expect(top >= 0, "\(name)/\(kind): \(size) pt spills off the top (\(top))")
+                    #expect(
+                        bottom <= height,
+                        "\(name)/\(kind): \(size) pt spills off the bottom (\(bottom) > \(Double(height)))"
+                    )
+                }
+            }
+        }
+    }
+
     /// Whatever the size, the order on screen is icon, reading, label.
     @Test("Elements stay in order and inside the tile", arguments: [30.0, 39.0, 55.0, 82.0, 120.0])
     func elementsStayOrderedAndInside(_ height: Double) {
