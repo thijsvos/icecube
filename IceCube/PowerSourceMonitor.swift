@@ -26,14 +26,13 @@ protocol PowerSourceObserving: AnyObject {
     func start()
 }
 
-extension PowerSourceObserving {
-    var onChange: (@MainActor () -> Void)? {
-        get { nil }
-        set {}
-    }
-
-    func start() {}
-}
+// No default implementations here, deliberately. There were — `onChange`
+// returning nil with a no-op setter, and an empty `start()` — and all three
+// conformers already implemented both, so the defaults could never run. What
+// they could do is absorb a fourth conformer that forgot one: a power monitor
+// that silently never starts, or that accepts an `onChange` and drops it, with
+// the compiler saying nothing. `HelperManager` sets `onChange` and calls
+// `start()` on this seam, so both silences are load-bearing failures.
 
 /// The real thing: IOKit notifications for speed, with the app's existing 5 s
 /// poll underneath as a guarantee.
