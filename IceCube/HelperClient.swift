@@ -143,7 +143,22 @@ final class HelperClient {
 
     // MARK: - Plumbing
 
-    private struct NotConnected: Error {}
+    /// No live XPC connection to the helper.
+    ///
+    /// `LocalizedError`, because this one reaches the user. `HelperManager`
+    /// funnels every failed command through `lastError = error.localizedDescription`,
+    /// and a bare `Error` struct renders there as the type name — "NotConnected"
+    /// in the Settings window, which tells nobody anything. The message says
+    /// what to do about it instead.
+    struct NotConnected: LocalizedError, Equatable {
+        var errorDescription: String? {
+            "Not connected to the Ice Cube helper."
+        }
+
+        var recoverySuggestion: String? {
+            "The helper may still be starting up. Try again in a moment."
+        }
+    }
 
     /// Runs one XPC call inside a single continuation.
     ///

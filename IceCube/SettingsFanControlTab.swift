@@ -22,7 +22,7 @@ struct SettingsFanControlTab: View {
     private var fanControlTab: some View {
         Form {
             Section {
-                if case .connected = state.helper.connection {
+                if state.helper.isConnected {
                     Picker("Active preset", selection: presetBinding) {
                         ForEach(state.presets.all) { Text($0.name).tag(Optional($0.id)) }
                         // An edited curve or manual mode matches no preset at
@@ -150,7 +150,7 @@ struct SettingsFanControlTab: View {
 
     @ViewBuilder
     private var writePathCheck: some View {
-        if case .connected = state.helper.connection {
+        if state.helper.isConnected {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
                     Button("Check Fan Control") {
