@@ -109,7 +109,82 @@ struct PopoverView: View {
         Task { await state.helper.cyclePreset(in: state.presets.all) }
     }
 
+    /// What the scrolling half measured, and what the pinned half measured.
+    /// Both start at 0, which `PopoverLayout.scrollHeight` reads as "no
+    /// decision yet" and answers with no constraint.
+    @State private var contentHeight: CGFloat = 0
+    @State private var footerHeight: CGFloat = 0
+
+    /// The height the popover has to live in. `visibleFrame` has already
+    /// excluded the menu bar and the Dock. No screen at all (headless, or mid
+    /// display change) means no constraint, matching `PopoverTemperatureCards`.
+    private var availableHeight: CGFloat {
+        NSScreen.main?.visibleFrame.height ?? .infinity
+    }
+
+    /// The footer is **outside** the scrolling region, on purpose.
+    ///
+    /// It used to be the last child of one unbounded `VStack`, so when the
+    /// content grew past the screen the footer was simply the part that fell
+    /// off the bottom — Settings and Quit, unreachable, with no scroll bar to
+    /// reveal them. How tall the content gets is a user setting (six selectable
+    /// chart series at 44/64/92 pt each, plus the 240 pt Inside card), so no
+    /// amount of budgeting the *content* can guarantee the footer survives.
+    /// Taking it out of the scroll makes that guarantee structural.
     private var liveContent: some View {
+        VStack(spacing: 0) {
+            ScrollView(.vertical) {
+                scrollingContent
+                    .background(
+                        GeometryReader { geometry in
+                            Color.clear.preference(key: PopoverHeightKey.self, value: geometry.size.height)
+                        }
+                    )
+            }
+            // `nil` while everything fits, so a minimal popover stays its
+            // natural size instead of being padded out to fill a tall display.
+            .frame(
+                height: PopoverLayout.scrollHeight(
+                    contentHeight: contentHeight,
+                    footerHeight: footerHeight,
+                    availableHeight: availableHeight
+                )
+            )
+            .scrollBounceBehavior(.basedOnSize)
+            pinnedFooter
+        }
+        .frame(width: Theme.Metrics.popoverWidth)
+        .onPreferenceChange(PopoverHeightKey.self) { height in
+            // `@Sendable` under Swift 6, so the assignment hops to the main
+            // actor rather than capturing it. `@State` is `Sendable`, so the
+            // capture itself is fine.
+            Task { @MainActor in contentHeight = height }
+        }
+        .onPreferenceChange(PopoverFooterHeightKey.self) { height in
+            Task { @MainActor in footerHeight = height }
+        }
+    }
+
+    private var pinnedFooter: some View {
+        VStack(alignment: .leading, spacing: Theme.Metrics.sectionSpacing) {
+            Divider()
+            if case let .available(version, url) = state.updates.status {
+                PopoverUpdateRow(version: version, url: url)
+            }
+            PopoverFooter(state: state, dismissPopover: dismissPopover)
+        }
+        .padding(.horizontal, Theme.Metrics.popoverPadding)
+        .padding(.bottom, Theme.Metrics.popoverPadding)
+        .padding(.top, Theme.Metrics.sectionSpacing)
+        .frame(width: Theme.Metrics.popoverWidth, alignment: .leading)
+        .background(
+            GeometryReader { geometry in
+                Color.clear.preference(key: PopoverFooterHeightKey.self, value: geometry.size.height)
+            }
+        )
+    }
+
+    private var scrollingContent: some View {
         VStack(alignment: .leading, spacing: Theme.Metrics.sectionSpacing) {
             PopoverHeader(state: state)
             if let errorMessage = state.errorMessage {
@@ -140,14 +215,9 @@ struct PopoverView: View {
                 }
                 PopoverTemperatureCards(state: state)
             }
-            Divider()
-            if case let .available(version, url) = state.updates.status {
-                PopoverUpdateRow(version: version, url: url)
-            }
-            PopoverFooter(state: state, dismissPopover: dismissPopover)
         }
         .padding(Theme.Metrics.popoverPadding)
-        .frame(width: Theme.Metrics.popoverWidth)
+        .frame(width: Theme.Metrics.popoverWidth, alignment: .leading)
     }
 
     // MARK: - Header
@@ -173,5 +243,22 @@ struct PopoverView: View {
 extension AppState {
     var readingAnimation: Animation? {
         chartSettings.smoothReadings ? .easeInOut(duration: 0.35) : nil
+    }
+}
+
+/// The scrolling half's measured height, reported up from a background reader.
+private struct PopoverHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// The pinned half's measured height. Separate key, because the two are read
+/// against each other and one `max` over both would hide the smaller.
+private struct PopoverFooterHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
