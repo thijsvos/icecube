@@ -237,7 +237,16 @@ struct PopoverView: View {
                 PopoverTemperatureCards(state: state)
             }
         }
-        .padding(Theme.Metrics.popoverPadding)
+        // No bottom padding, deliberately. The gap above the divider belongs to
+        // `pinnedFooter`'s top padding, and when this view carried one too the
+        // two stacked: 14 + 10 = 24 pt of dead space between the last card and
+        // the buttons, where the single `VStack` this replaced had 10. Splitting
+        // one padded stack into two is exactly how that goes unnoticed.
+        //
+        // Correct in the scrolling case as well: the 10 pt sits *outside* the
+        // scroll view, so a list scrolled to its end still clears the divider.
+        .padding(.horizontal, Theme.Metrics.popoverPadding)
+        .padding(.top, Theme.Metrics.popoverPadding)
         .frame(width: Theme.Metrics.popoverWidth, alignment: .leading)
     }
 
