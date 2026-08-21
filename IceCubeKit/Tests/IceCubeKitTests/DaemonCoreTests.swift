@@ -1533,6 +1533,42 @@ struct DaemonCoreSleepTests {
         #expect(await core.sleepLatch.parkLanded)
     }
 
+    /// Found by mutating every deletable guard in `DaemonCore` and seeing which
+    /// deletions the suite failed to notice. This one it did not.
+    ///
+    /// `keepFansSpinning` exists so a quitting app cannot leave a hot Mac with
+    /// coasting fans, and it is gated on `config.mode == .auto` — which, at its
+    /// only meaningful call site, means "the revert that just ran actually
+    /// landed". When the revert *fails*, `revertEverything` returns early with
+    /// `config` untouched and `revertPending` set, and the daemon is still
+    /// holding the fans. Grabbing them again at the guardian's floor would
+    /// overwrite the targets a retrying revert is trying to clear, and would do
+    /// it while the daemon believes it has lost control.
+    ///
+    /// Deleting the guard leaves every existing test green, because on the
+    /// happy path the revert succeeds and the guard is vacuously true. Only a
+    /// failed revert can see it.
+    @Test("A failed hand-back does not let the app-quit path grab the fans back")
+    func keepFansSpinningStandsDownWhenTheRevertFailed() async throws {
+        let smc = FakeSMC(temperature: 90) // hot enough that the guardian would hold the floor
+        let core = makeCore(smc: smc)
+        await core.connectionEstablished()
+        try await core.apply(manualConfig(5000))
+
+        // The hand-back cannot land: mode 0 never sticks.
+        await smc.breakWrite("F0Md")
+        await smc.clearWrites()
+        await core.connectionInvalidated()
+
+        let pending = await core.revertPending
+        let events = await core.currentStatus().recentEvents
+        #expect(pending, "the premise: the revert did not land")
+        #expect(
+            !events.contains { $0.contains("holding the fans at minimum") },
+            "keepFansSpinning ran after a revert that never landed: \(events)"
+        )
+    }
+
     /// FIELD REGRESSION (Mac14,9, 2026-07-28 09:25:45). A tick fired 9 ms into
     /// the pre-sleep hand-back — between the `F0Tg` and `F0Md` writes — saw
     /// `parkLanded` still false because `parkHardware` had not RETURNED yet, and
