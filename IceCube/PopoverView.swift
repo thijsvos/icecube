@@ -133,24 +133,27 @@ struct PopoverView: View {
     /// Taking it out of the scroll makes that guarantee structural.
     private var liveContent: some View {
         VStack(spacing: 0) {
-            ScrollView(.vertical) {
-                scrollingContent
-                    .background(
-                        GeometryReader { geometry in
-                            Color.clear.preference(key: PopoverHeightKey.self, value: geometry.size.height)
-                        }
-                    )
+            // Only wrapped in a `ScrollView` when it actually has to scroll.
+            //
+            // It was unconditionally wrapped, with a `nil` frame height meaning
+            // "everything fits, size naturally". That is not what `nil` does to
+            // a `ScrollView`: a scroll view has no intrinsic height, so an
+            // unconstrained one collapses to nothing. With Live charts and
+            // Inside switched off — the default, and the common case — the
+            // popover rendered as its footer and nothing else. The tall
+            // configuration worked, because that one takes the capped branch
+            // and gets an explicit height, which is why measuring only the
+            // reported case missed it.
+            switch presentation {
+            case .natural:
+                measuredContent
+            case let .scrolling(height):
+                ScrollView(.vertical) {
+                    measuredContent
+                }
+                .frame(height: height)
+                .scrollBounceBehavior(.basedOnSize)
             }
-            // `nil` while everything fits, so a minimal popover stays its
-            // natural size instead of being padded out to fill a tall display.
-            .frame(
-                height: PopoverLayout.scrollHeight(
-                    contentHeight: contentHeight,
-                    footerHeight: footerHeight,
-                    availableHeight: availableHeight
-                )
-            )
-            .scrollBounceBehavior(.basedOnSize)
             pinnedFooter
         }
         .frame(width: Theme.Metrics.popoverWidth)
@@ -163,6 +166,24 @@ struct PopoverView: View {
         .onPreferenceChange(PopoverFooterHeightKey.self) { height in
             Task { @MainActor in footerHeight = height }
         }
+    }
+
+    private var presentation: PopoverLayout.Presentation {
+        PopoverLayout.presentation(
+            contentHeight: contentHeight,
+            footerHeight: footerHeight,
+            availableHeight: availableHeight
+        )
+    }
+
+    /// The cards, reporting their own height so the decision above can be made.
+    private var measuredContent: some View {
+        scrollingContent
+            .background(
+                GeometryReader { geometry in
+                    Color.clear.preference(key: PopoverHeightKey.self, value: geometry.size.height)
+                }
+            )
     }
 
     private var pinnedFooter: some View {

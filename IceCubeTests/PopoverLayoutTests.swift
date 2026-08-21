@@ -24,35 +24,62 @@ struct PopoverLayoutTests {
     private static let reportedFooter: CGFloat = 96
     private static let reportedScreen: CGFloat = 1130
 
-    @Test("Content that fits is left alone, so a small popover stays small")
-    func shortContentIsUnconstrained() {
+    private func presentation(
+        content: CGFloat,
+        footer: CGFloat = 96,
+        screen: CGFloat = 1130
+    ) -> PopoverLayout.Presentation {
+        PopoverLayout.presentation(contentHeight: content, footerHeight: footer, availableHeight: screen)
+    }
+
+    /// **The regression that shipped in v0.4.2.** The cards were always wrapped
+    /// in a `ScrollView`, and "everything fits" was expressed as a `nil` frame
+    /// height. A scroll view has no intrinsic height, so an unconstrained one
+    /// collapses to nothing: with Live charts and Inside off — the default —
+    /// the popover drew its footer and no content whatsoever.
+    ///
+    /// It went unnoticed because the tall configuration takes the other branch
+    /// and gets an explicit height, and the tall configuration was the only one
+    /// measured. This is the assertion that says content which fits must never
+    /// be handed to a scroll view.
+    @Test(
+        "Content that fits is drawn plainly, never in a scroll view",
+        arguments: [1.0, 100.0, 300.0, 700.0, 1000.0]
+    )
+    func contentThatFitsIsNeverScrolled(content: Double) {
         #expect(
-            PopoverLayout.scrollHeight(contentHeight: 300, footerHeight: 96, availableHeight: 1130) == nil,
-            "a 300 pt popover on a 1130 pt screen must not be stretched to fill it"
+            presentation(content: CGFloat(content)) == .natural,
+            "\(content) pt fits in 1130 and must render at its natural height"
         )
     }
 
-    /// The regression, in the numbers it was reported in.
-    @Test("The reported 1216 pt popover is capped so the footer survives")
-    func theReportedOverflowIsCapped() throws {
-        let height = PopoverLayout.scrollHeight(
-            contentHeight: Self.reportedContent,
-            footerHeight: Self.reportedFooter,
-            availableHeight: Self.reportedScreen
-        )
-        let scroll = try #require(height)
-        #expect(scroll < Self.reportedContent, "it has to give way somewhere")
+    @Test("Before the first measurement the cards are drawn so they can measure themselves")
+    func unmeasuredContentIsNatural() {
+        #expect(presentation(content: 0) == .natural)
+    }
+
+    /// The bug this file was originally written for, in the numbers it was
+    /// reported in.
+    @Test("The reported 1216 pt popover scrolls so the footer survives")
+    func theReportedOverflowScrolls() {
+        guard case let .scrolling(height) = presentation(
+            content: Self.reportedContent,
+            footer: Self.reportedFooter,
+            screen: Self.reportedScreen
+        ) else {
+            Issue.record("the popover that ran off the screen has to scroll")
+            return
+        }
+        #expect(height < Self.reportedContent, "it has to give way somewhere")
         #expect(
-            scroll + Self.reportedFooter + PopoverLayout.bottomMargin <= Self.reportedScreen,
+            height + Self.reportedFooter + PopoverLayout.bottomMargin <= Self.reportedScreen,
             "the whole popover, footer included, has to be on the screen"
         )
     }
 
     /// The property that makes this structural rather than arithmetic: it holds
-    /// for content of *any* height, including heights no current combination of
-    /// settings can produce. That is the point — the previous fix was correct
-    /// for the configurations it was measured against and wrong for the one the
-    /// user had.
+    /// for content of any height, including heights no current combination of
+    /// settings can produce.
     @Test(
         "However tall the content, the popover fits and the footer is on screen",
         arguments: [400.0, 900.0, 1120.0, 1216.0, 2000.0, 5000.0]
@@ -60,11 +87,10 @@ struct PopoverLayoutTests {
     func anyContentHeightLeavesTheFooterReachable(content: Double) {
         for screen in [CGFloat(1130), 900, 1400, 1800] {
             for footer in [CGFloat(60), 96, 140] {
-                let scroll = PopoverLayout.scrollHeight(
-                    contentHeight: CGFloat(content),
-                    footerHeight: footer,
-                    availableHeight: screen
-                ) ?? CGFloat(content)
+                let scroll: CGFloat = switch presentation(content: CGFloat(content), footer: footer, screen: screen) {
+                case .natural: CGFloat(content)
+                case let .scrolling(height): height
+                }
                 let total = scroll + footer
                 let fits = total <= screen || scroll == PopoverLayout.minimumScrollHeight
                 #expect(fits, "content \(content) on \(Double(screen)) pt: popover \(Double(total)) pt")
@@ -74,18 +100,10 @@ struct PopoverLayoutTests {
 
     /// `SensorListMetrics` learned this the hard way and this type inherits the
     /// lesson: a poisoned screen height must not collapse the popover.
-    @Test("No screen, or a poisoned one, leaves the content unconstrained")
-    func noScreenMeansNoConstraint() {
+    @Test("No screen, or a poisoned one, draws naturally rather than sizing from nonsense")
+    func noScreenMeansNatural() {
         for screen in [CGFloat.infinity, .nan, .signalingNaN] {
-            #expect(
-                PopoverLayout.scrollHeight(contentHeight: 4000, footerHeight: 96, availableHeight: screen) == nil,
-                "a popover must never be sized from a number that is not one"
-            )
+            #expect(presentation(content: 4000, screen: screen) == .natural)
         }
-    }
-
-    @Test("Before the first measurement arrives nothing is constrained")
-    func zeroContentIsUnconstrained() {
-        #expect(PopoverLayout.scrollHeight(contentHeight: 0, footerHeight: 96, availableHeight: 1130) == nil)
     }
 }

@@ -33,34 +33,49 @@ nonisolated enum PopoverLayout {
     /// that point a scroll bar is the honest answer rather than a smaller one.
     static let minimumScrollHeight: CGFloat = 220
 
-    /// The height to give the scrolling region, or `nil` to leave it
-    /// unconstrained because everything fits.
+    /// How to present the popover's cards.
     ///
+    /// A two-case answer rather than an optional height, because the two cases
+    /// are different *views*, not the same view with and without a constraint.
+    /// That distinction was the bug: the cards were unconditionally wrapped in
+    /// a `ScrollView` and "it fits" was expressed as a `nil` frame height. A
+    /// scroll view has no intrinsic height, so an unconstrained one collapses
+    /// to nothing — the popover rendered as its footer and no content at all,
+    /// for every user whose cards fit, which is the default configuration.
+    ///
+    /// Making it an enum means "fits" cannot be spelled as "a scroll view with
+    /// no height" again without changing this type and the tests below it.
+    enum Presentation: Equatable {
+        /// Draw the cards plainly, at their natural height. **Not** a scroll
+        /// view — see above.
+        case natural
+        /// Draw them in a scroll view pinned to this height.
+        case scrolling(height: CGFloat)
+    }
+
     /// - Parameters:
-    ///   - contentHeight: what the scrolling content actually measured, or 0
-    ///     before the first measurement has arrived.
-    ///   - footerHeight: the pinned block below it — divider, optional update
-    ///     row, footer buttons, bottom padding.
+    ///   - contentHeight: what the cards actually measured, or 0 before the
+    ///     first measurement has arrived.
+    ///   - footerHeight: the pinned block below them — divider, optional
+    ///     update row, footer buttons, bottom padding.
     ///   - availableHeight: `NSScreen.visibleFrame.height`, or `.infinity` when
     ///     there is no screen to ask.
-    /// - Returns: `nil` when the content fits and should size naturally, so a
-    ///   small popover stays small instead of being padded out to fill a tall
-    ///   display.
-    static func scrollHeight(
+    ///
+    /// Before the first measurement `contentHeight` is 0 and the answer is
+    /// ``Presentation/natural``, so the cards render at full height and measure
+    /// themselves. Starting them inside a zero-height scroll view would starve
+    /// the geometry read that decides their height, and they would never grow.
+    static func presentation(
         contentHeight: CGFloat,
         footerHeight: CGFloat,
         availableHeight: CGFloat
-    ) -> CGFloat? {
-        // Before the first measurement lands there is nothing to decide, and
-        // constraining to 0 would flash an empty popover on open.
-        guard contentHeight > 0 else { return nil }
+    ) -> Presentation {
+        guard contentHeight > 0 else { return .natural }
         let budget = availableHeight - footerHeight - bottomMargin
-        // `budget` is NaN or infinite when there is no screen: fall through to
-        // "no constraint" rather than to the floor, the same choice
-        // `SensorListMetrics` makes for the same reason. Argument order in
-        // `min` is load-bearing: a NaN *second* argument yields the first, so
-        // the measured content wins over a poisoned budget either way.
-        guard budget.isFinite, contentHeight > budget else { return nil }
-        return max(minimumScrollHeight, budget)
+        // `budget` is NaN or infinite when there is no screen: draw naturally
+        // rather than sizing from a number that is not one. `SensorListMetrics`
+        // documents the same hazard for the same reason.
+        guard budget.isFinite, contentHeight > budget else { return .natural }
+        return .scrolling(height: max(minimumScrollHeight, budget))
     }
 }
