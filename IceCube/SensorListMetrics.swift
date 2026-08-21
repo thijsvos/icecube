@@ -52,16 +52,43 @@ nonisolated enum SensorListMetrics {
     /// private.
     static let rowSpacing: CGFloat = 3
 
-    /// Everything in the popover that is **not** the scrollable region, in the
-    /// tallest configuration a user can select: header, fan card, control card,
-    /// chart card, divider, footer, the section gaps and the outer padding —
-    /// measured at 629 pt — plus the 10 pt gap above the Sensors card and that
-    /// card's own 41 pt of title and padding.
+    /// Everything in the popover that is **not** the scrollable region and not
+    /// the Inside card: header, fan card, control card, chart card, divider,
+    /// footer, the section gaps and the outer padding — measured at 629 pt —
+    /// plus the 10 pt gap above the Sensors card and that card's own 41 pt of
+    /// title and padding.
     ///
-    /// Deliberately the *worst* case. Using the average would let the clamp
-    /// promise a fit it cannot deliver to the user who turned everything on,
-    /// and that user is precisely the one who also turned this list on.
+    /// Deliberately the *worst* case of the things it covers. Using the average
+    /// would let the clamp promise a fit it cannot deliver to the user who
+    /// turned everything on, and that user is precisely the one who also turned
+    /// this list on.
+    ///
+    /// **It stopped being the whole story when Inside shipped.** This number is
+    /// a measurement, and a measurement of "the tallest configuration" goes
+    /// stale the moment a new card can appear above the list. Inside did
+    /// exactly that: with it on, the reserved list was computed as though 240 pt
+    /// of schematic were not there, the popover grew past the bottom of the
+    /// screen, and the footer — Settings, Quit — went with it. So the Inside
+    /// card is ``insideCardHeight`` and is added by ``layout(sensorCount:availableHeight:showsInside:)``
+    /// rather than folded in here: it is opt-in and off by default, and baking
+    /// it into the constant would cost every user who does not run it 240 pt of
+    /// sensor list to pay for a card they never see.
     static let popoverChrome: CGFloat = 680
+
+    /// What the Inside card adds when it is shown in the popover: the
+    /// schematic's own height, the card padding around it, and the section gap
+    /// above it.
+    ///
+    /// Spelled out rather than computed from `InsideStage.popoverHeight` and
+    /// `Theme.Metrics`, because this enum is `nonisolated` and both of those are
+    /// MainActor-isolated — the same reason `SensorsWindowMetrics` writes its
+    /// measurements as plain numbers. `insideCardHeightMatchesTheCard` pins the
+    /// sum, so the two still cannot drift; the check just happens in a test
+    /// rather than in the type system.
+    ///
+    /// 210 (`InsideStage.popoverHeight`) + 2 × 10 (`cardPadding`) + 10
+    /// (`sectionSpacing`).
+    static let insideCardHeight: CGFloat = 240
 
     // MARK: - The bounds
 
@@ -102,8 +129,13 @@ nonisolated enum SensorListMetrics {
     ///   - availableHeight: `NSScreen.visibleFrame.height` for the screen the
     ///     popover hangs on, or `.infinity` when there is no screen to ask —
     ///     which falls back to ``maximumListHeight``, not to the floor.
-    static func layout(sensorCount: Int, availableHeight: CGFloat) -> Layout {
+    ///   - showsInside: whether the Inside card is above the list right now.
+    ///     Deliberately **not** defaulted: a default is how the Inside card
+    ///     went unaccounted for in the first place, and the next card added to
+    ///     the popover should have to answer this question out loud.
+    static func layout(sensorCount: Int, availableHeight: CGFloat, showsInside: Bool) -> Layout {
         let wanted = contentHeight(sensorCount: sensorCount)
+        let chrome = popoverChrome + (showsInside ? insideCardHeight : 0)
         // The ceiling is floored first, so a small display cannot push the
         // screen-relative limit below the floor and leave the two clamps
         // fighting.
@@ -113,7 +145,7 @@ nonisolated enum SensorListMetrics {
         // yields `x` while a NaN *first* argument yields NaN — and NaN here
         // would collapse the region to the floor. `availableHeight` is the one
         // that can be strange, so it goes second. Pinned by a test.
-        let cap = max(minimumListHeight, min(maximumListHeight, availableHeight - popoverChrome))
+        let cap = max(minimumListHeight, min(maximumListHeight, availableHeight - chrome))
         return Layout(height: min(wanted, cap), scrolls: wanted > cap)
     }
 }

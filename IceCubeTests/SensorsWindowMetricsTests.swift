@@ -180,8 +180,17 @@ struct SensorsWindowMetricsTests {
 @MainActor
 @Suite("SensorListMetrics — the popover's sensor list stays inside the screen")
 struct SensorListMetricsTests {
-    private func layout(_ count: Int, screen: CGFloat = 1130) -> SensorListMetrics.Layout {
-        SensorListMetrics.layout(sensorCount: count, availableHeight: screen)
+    private func layout(
+        _ count: Int,
+        screen: CGFloat = 1130,
+        inside: Bool = false
+    ) -> SensorListMetrics.Layout {
+        SensorListMetrics.layout(sensorCount: count, availableHeight: screen, showsInside: inside)
+    }
+
+    /// The whole popover, as the user sees it, for a given configuration.
+    private func popoverHeight(_ layout: SensorListMetrics.Layout, inside: Bool) -> CGFloat {
+        layout.height + SensorListMetrics.popoverChrome + (inside ? SensorListMetrics.insideCardHeight : 0)
     }
 
     /// A curated Mac shows its whole list, exactly, with no scroller and no
@@ -203,6 +212,64 @@ struct SensorListMetricsTests {
             many.height + SensorListMetrics.popoverChrome <= 1130,
             "the whole popover has to fit the screen it hangs on"
         )
+    }
+
+    /// What keeps the spelled-out constant honest. `SensorListMetrics` is
+    /// `nonisolated` and cannot read the MainActor-isolated values it describes,
+    /// so this is where the sum is checked.
+    @Test("The Inside card's reserved height matches the card actually drawn")
+    func insideCardHeightMatchesTheCard() {
+        #expect(
+            SensorListMetrics.insideCardHeight
+                == InsideStage.popoverHeight + Theme.Metrics.cardPadding * 2 + Theme.Metrics.sectionSpacing
+        )
+    }
+
+    /// The bug this parameter exists for, reported from a real machine: charts,
+    /// Inside and the sensor list all on, and the footer — Settings and Quit —
+    /// pushed off the bottom of the screen with no way to reach it.
+    ///
+    /// The list was reserving its full 349 pt as though the 240 pt schematic
+    /// above it were not there, because `popoverChrome` is a *measurement* of
+    /// "the tallest configuration a user can select" and it was taken before
+    /// Inside could appear in the popover. 680 + 240 + 349 = 1269 against 1132
+    /// points of usable screen.
+    @Test("With Inside on, the list yields enough height to keep the footer on screen")
+    func insideCardShrinksTheList() {
+        let without = layout(193, screen: 1132, inside: false)
+        let with = layout(193, screen: 1132, inside: true)
+
+        // Not "gives back exactly 240": without Inside the list is capped by
+        // `maximumListHeight` (349) rather than by the screen, so there is
+        // slack in the budget and only 137 pt of it has to be surrendered.
+        // What matters is the total, which is what the user sees.
+        #expect(with.height < without.height, "the list has to yield something")
+        #expect(
+            popoverHeight(with, inside: true) <= 1132,
+            "1132 pt of screen; this is the sum that used to come to 1269 and took the footer with it"
+        )
+        #expect(with.scrolls, "a 193-sensor list still cannot fit; it scrolls")
+    }
+
+    /// The property the old suite could not see. It asserted
+    /// `height + popoverChrome <= 1130` — the same stale constant on both
+    /// sides of the sum, so the arithmetic agreed with itself while the real
+    /// popover ran off the screen. Measuring every configuration against the
+    /// screen is what makes the next card added to the popover fail loudly.
+    @Test(
+        "The whole popover fits the screen in every configuration",
+        arguments: [6, 20, 64, 193]
+    )
+    func popoverAlwaysFits(sensorCount: Int) {
+        for screen in [CGFloat(1132), 1050, 1400, 1600] {
+            for inside in [false, true] {
+                let height = popoverHeight(layout(sensorCount, screen: screen, inside: inside), inside: inside)
+                #expect(
+                    height <= screen,
+                    "\(sensorCount) sensors, inside=\(inside): popover is \(Double(height)) pt "
+                )
+            }
+        }
     }
 
     /// `SensorStabilizer` makes the list monotone: it grows 8 → 20 rows over

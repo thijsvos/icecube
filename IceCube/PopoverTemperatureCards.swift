@@ -48,7 +48,11 @@ struct PopoverTemperatureCards: View {
         // reporting this second. `max` covers the moment before the inventory
         // lands, and the enumerating path where the two are the same thing.
         let count = max(state.sensorInventoryCount, state.temperatures.count)
-        let layout = SensorListMetrics.layout(sensorCount: count, availableHeight: availableHeight)
+        let layout = SensorListMetrics.layout(
+            sensorCount: count,
+            availableHeight: availableHeight,
+            showsInside: state.isInsideEnabled && state.showsInsideInPopover
+        )
         return VStack(alignment: .leading, spacing: Theme.Metrics.cardContentSpacing) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Sensors").premiumSectionLabel()
