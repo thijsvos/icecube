@@ -1,7 +1,6 @@
 // PopoverLayoutTests.swift — the footer stays reachable however tall the content gets.
 
 import Foundation
-@testable import IceCube
 import Testing
 
 /// The bug this suite exists for, measured rather than reasoned about.
