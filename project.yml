@@ -138,6 +138,7 @@ targets:
       - IceCube/FanControlStatus.swift
       - IceCube/SensorsWindowMetrics.swift
       - IceCube/SensorListMetrics.swift
+      - IceCube/PopoverLayout.swift
       - IceCube/MenuBarLabel.swift
       - IceCube/AppSettings.swift
       - IceCube/DecisionMarkers.swift
