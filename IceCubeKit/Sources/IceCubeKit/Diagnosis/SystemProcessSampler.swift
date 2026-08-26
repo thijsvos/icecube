@@ -96,6 +96,11 @@ public actor SystemProcessSampler: ProcessSampling {
         self.now = now
     }
 
+    public func reset() {
+        previous.removeAll()
+        previousDate = nil
+    }
+
     public func sample() async -> ProcessEnergyReading? {
         let date = now()
         let pids = Self.listPIDs()

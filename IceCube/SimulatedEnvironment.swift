@@ -56,6 +56,15 @@ enum SimulatedEnvironment {
             .wall
         }
 
+        /// Charging, always — so "Warm from charging" is demonstrable with no
+        /// hardware, no daemon and no charger, the same reason
+        /// `seedSimulatedDecisions` fabricates a decision timeline.
+        /// `MockSMCSimulation` idles `TB1T` at 38.5 °C, which is above the
+        /// threshold, so the row appears in a simulated run.
+        var isCharging: Bool {
+            true
+        }
+
         var onChange: (@MainActor () -> Void)?
         func start() {}
     }

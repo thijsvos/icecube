@@ -57,6 +57,17 @@ struct DiagnosisView: View {
                             }
                         }
                     }
+                    // Directly under the heat row: when this fires it IS the
+                    // answer to the window's title, and burying it under the
+                    // load and process sections would leave the user reading
+                    // twelve processes at 0.03 W first — which is exactly the
+                    // dead end that prompted it.
+                    if let charging = DiagnosisCopy.charging(
+                        verdict.charging, style: state.temperatureUnit.style
+                    ) {
+                        Divider()
+                        SectionRow(copy: charging)
+                    }
                     Divider()
                     SectionRow(
                         copy: DiagnosisCopy.load(verdict.load, style: state.temperatureUnit.style),

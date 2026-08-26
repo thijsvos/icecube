@@ -183,6 +183,7 @@ private final class FakeRegistrar: DaemonRegistering {
 /// whether the CI runner happens to be plugged in (it always is).
 @MainActor
 private final class FakePowerSource: PowerSourceObserving {
+    var isCharging = false
     var current: PowerProfilePolicy.PowerSource
     var onChange: (@MainActor () -> Void)?
     private(set) var startCalls = 0

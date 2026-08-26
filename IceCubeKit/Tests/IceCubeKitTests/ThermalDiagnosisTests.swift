@@ -284,11 +284,14 @@ struct ThermalDiagnosisTests {
             snapshot: Self.snapshot(cpu: 92, gpu: 70, airflow: 48, watts: 38, fans: [Self.fan(actual: 6700)]),
             resistance: 1.16,
             processes: Self.processes(attributed: 12),
-            curve: .balanced
+            curve: .balanced,
+            isCharging: false,
+            wasWarmFromCharging: false
         )
         #expect(verdict.heat == .measured(celsius: 92, label: "CPU P-core 1", band: .hot, headroom: 12))
         #expect(verdict.load == .explained(watts: 38, riseCelsius: 44, resistance: 1.16))
         #expect(verdict.cooling == .atMaximum(rpm: 6700))
+        #expect(verdict.charging == .silent, "not charging, so the fifth answer is silence")
         guard case let .measured(leading, _, top, attributed, unattributed, _) = verdict.source else {
             Issue.record("expected a measured source")
             return

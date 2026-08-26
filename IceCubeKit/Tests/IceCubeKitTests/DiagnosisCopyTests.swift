@@ -291,3 +291,45 @@ struct DiagnosisCopyTests {
         #expect(hover.contains("\(Int(SafetyMonitor.Limits().dieCeiling)) °C"))
     }
 }
+
+/// The charging row is the only copy in this window that names a cause, so what
+/// it says and — more importantly — when it says nothing at all are both pinned.
+@Suite("DiagnosisCopy — the charging row")
+struct DiagnosisChargingCopyTests {
+    @Test("Silence produces no row at all, not an empty one")
+    func silenceIsNoRow() {
+        #expect(DiagnosisCopy.charging(.silent, style: .celsius) == nil)
+    }
+
+    @Test("The row cites the reading and its limit, so the verdict stays checkable")
+    func rowCitesItsEvidence() throws {
+        let row = try #require(DiagnosisCopy.charging(.warm(batteryCelsius: 34.8), style: .celsius))
+        #expect(row.title == "Warm from charging")
+        let metric = try #require(row.metric)
+        #expect(metric.contains("35 °C"), "the battery reading, got \(metric)")
+        #expect(metric.contains("95 °C"), "and the limit it is nowhere near, got \(metric)")
+    }
+
+    /// The most useful sentence the window can produce here, and the one a
+    /// fan-control app is uniquely placed to write: a worried user's instinct is
+    /// to force the fans to maximum, which buys noise and nothing else.
+    @Test("It says the fans cannot help")
+    func itSaysTheFansCannotHelp() throws {
+        let row = try #require(DiagnosisCopy.charging(.warm(batteryCelsius: 35), style: .celsius))
+        let note = try #require(row.note)
+        #expect(note.lowercased().contains("fans cannot reach it"))
+    }
+
+    /// Every temperature in this row is an absolute, so all of them convert.
+    /// A stray hardcoded "33 °C" in the hover would leave a Fahrenheit user
+    /// reading one Celsius number in a sentence of Fahrenheit ones.
+    @Test("Nothing in the row is hardcoded Celsius")
+    func fahrenheitConvertsThroughout() throws {
+        let row = try #require(DiagnosisCopy.charging(.warm(batteryCelsius: 35), style: .fahrenheit))
+        let text = [row.title, row.metric, row.note, row.hover].compactMap(\.self).joined(separator: " ")
+        #expect(!text.contains("°C"), "a Celsius reading survived into Fahrenheit copy: \(text)")
+        #expect(text.contains("95 °F"), "the 35 °C battery reads as 95 °F")
+        #expect(text.contains("203 °F"), "the 95 °C limit reads as 203 °F")
+        #expect(text.contains("91 °F"), "skin at 33 °C reads as 91 °F")
+    }
+}

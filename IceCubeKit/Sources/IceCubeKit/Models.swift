@@ -146,6 +146,17 @@ public extension Collection<SensorReading> {
     func hottestCelsius(in sensorClass: SMCKeyMaps.SensorClass) -> Double? {
         lazy.filter { $0.sensorClass == sensorClass }.map(\.celsius).max()
     }
+
+    /// The warmest battery cell, or `nil` on a Mac that reports none.
+    ///
+    /// The warmest rather than the average because a MacBook reports a cell per
+    /// pack (`TB1T`, `TB2T`) and the hand rests on whichever is hotter.
+    /// `hottestCelsius(in: .ambient)` cannot stand in for this: `.ambient` is a
+    /// catch-all that also holds airflow, SSD and wireless, and on the Mac this
+    /// was measured on the airflow sensors were 5 °C *above* both cells.
+    var batteryCelsius: Double? {
+        lazy.filter { SMCKeyMaps.isBatteryKey($0.key) }.map(\.celsius).max()
+    }
 }
 
 /// One timestamped reading of all fans and sensors — what polling publishes.
