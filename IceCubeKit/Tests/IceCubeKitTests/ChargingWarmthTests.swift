@@ -51,7 +51,7 @@ struct ChargingWarmthTests {
 
     /// Below the onset there is nothing to explain: the case does not read as
     /// warm, so nobody is asking why it is.
-    @Test("A cool battery is silent even while charging", arguments: [20.0, 28.0, 31.9])
+    @Test("A cool battery is silent even while charging", arguments: [20.0, 28.0, 32.1, 33.9])
     func coolBatteryIsSilent(battery: Double) {
         #expect(
             ChargingWarmth.assess(
@@ -110,7 +110,7 @@ struct ChargingWarmthTests {
     /// which is exactly what it would do without the release band — a battery
     /// wandering by a tenth of a degree around 32 °C would rewrite the window
     /// once a second. Same arm/re-arm shape as `AlertManager.evaluate`.
-    @Test("Hysteresis: appears at 32, survives down to 30, gone below")
+    @Test("Hysteresis: appears at 34, survives down to 32, gone below")
     func hysteresisHoldsTheRowStill() {
         func assess(_ battery: Double, wasWarm: Bool) -> ChargingWarmth {
             ChargingWarmth.assess(
@@ -120,13 +120,13 @@ struct ChargingWarmthTests {
                 wasWarm: wasWarm
             )
         }
-        // Rising: nothing at 31.9, appears at 32.
-        #expect(assess(31.9, wasWarm: false) == .silent)
-        #expect(assess(32, wasWarm: false).isWarm)
-        // Falling: 31 would not have started it, but it does not stop it.
-        #expect(assess(31, wasWarm: true).isWarm, "a tenth of a degree must not close the row")
-        #expect(assess(30, wasWarm: true).isWarm)
-        #expect(assess(29.9, wasWarm: true) == .silent)
+        // Rising: nothing at 33.9, appears at 34.
+        #expect(assess(33.9, wasWarm: false) == .silent)
+        #expect(assess(34, wasWarm: false).isWarm)
+        // Falling: 33 would not have started it, but it does not stop it.
+        #expect(assess(33, wasWarm: true).isWarm, "a tenth of a degree must not close the row")
+        #expect(assess(32, wasWarm: true).isWarm)
+        #expect(assess(31.9, wasWarm: true) == .silent)
     }
 
     /// The two thresholds must stay ordered, or the release band inverts and
@@ -134,6 +134,32 @@ struct ChargingWarmthTests {
     @Test("The release threshold is below the onset")
     func thresholdsAreOrdered() {
         #expect(ChargingWarmth.releaseCelsius < ChargingWarmth.onsetCelsius)
+    }
+
+    /// The guard against the mistake this shipped with for a few hours.
+    ///
+    /// The onset was first set to 32 °C from skin physiology, with no idle
+    /// baseline to check it against. Measured on a Mac14,9 the same day, the
+    /// cells sit at **31.9 – 32.1 °C** plugged in and charged — so the original
+    /// threshold sat *on* the idle reading, and a Mac topping up from 99 %
+    /// would have claimed charging warmth while dissipating almost nothing.
+    ///
+    /// These are the readings that set the number, kept as a test so lowering
+    /// it back into the noise has to argue with hardware rather than with a
+    /// comment.
+    @Test("The onset clears a measured idle battery and sits under a charging one")
+    func onsetSitsBetweenIdleAndCharging() {
+        let idlePluggedInAndCharged = [31.9, 32.0, 32.1]
+        let whileCharging = [34.8, 36.2]
+        for idle in idlePluggedInAndCharged {
+            #expect(idle < ChargingWarmth.onsetCelsius, "\(idle) °C is idle and must stay silent")
+        }
+        for charging in whileCharging {
+            #expect(
+                charging >= ChargingWarmth.onsetCelsius,
+                "\(charging) °C was measured while charging and must be explained"
+            )
+        }
     }
 }
 

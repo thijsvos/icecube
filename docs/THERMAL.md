@@ -210,6 +210,19 @@ The gap this opens is wide. On a Mac14,9 charging, measured:
 | Airflow | 39.9 / 38.8 °C |
 | Fans | 5235 RPM |
 
+How much of that is the charging itself, measured on the same machine:
+
+| State | Warmest cell |
+|---|---|
+| Plugged in, **charged**, idle | 31.9 – 32.1 °C |
+| Charging, 100 % (finishing) | 34.8 °C |
+| Charging, 55 % | 36.2 °C |
+
+So charging is worth about **3–4 °C** at the cells. Small as a number, and
+plainly noticeable as a surface, which is the whole point of this section. It is
+also why Ice Cube reads `kIOPSIsChargingKey` rather than settling for "on wall
+power": the top row of that table is plugged in too, and has nothing to explain.
+
 Every sensor is comfortable. The case is still *distinctly* warm, because the
 34.8 °C battery spans the bottom of the machine and is the only one of those
 surfaces a hand ever touches — while the 56 °C die is buried under a heatsink
@@ -223,11 +236,26 @@ area rather than concentrated on the chip, and it fades once the battery fills.
 Ice Cube says so in *Why is it hot?* — the one cause it names outright, because
 it is the one it reads rather than infers.
 
-The second is that **the fans cannot do anything about it.** They move air
-across the heatsink and out through the hinge; the battery is not in that path.
-In the measurement above the fans were already at 5235 RPM and the cells were
-still near 35 °C. Forcing them to maximum buys noise and no relief — which is
-worth knowing before you try it.
+The second is that **raising the fans will not move that reading.** They pull
+air across the heatsink and out through the hinge; the battery is not in that
+path. In the measurement above the fans were already at 5235 RPM with the cells
+still near 35 °C.
+
+Read that narrowly, though — it is a fact about the battery, not about the
+machine. The two warm places on a MacBook have different causes and different
+remedies:
+
+| You feel it | Source | Do the fans help? |
+|---|---|---|
+| Under the palms / bottom case | Battery, charging | **No** — not in the airflow path |
+| Around the keyboard, space bar upward | SoC, under the deck | **Yes** — that is exactly what they cool |
+
+Measured on the same Mac an hour later: 25–50 W of system power with the fans
+at 2450 of 6800 RPM, the die at 58 °C, and the cells at a cool 31.9 °C. The
+keyboard was warm and the palm rest was not. Same machine, opposite answer —
+there the fans had enormous headroom and were the entire remedy.
+
+Worth knowing before reaching for the fan curve: check *where* it is warm first.
 
 ## How to read it
 
