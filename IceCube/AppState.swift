@@ -292,6 +292,13 @@ final class AppState: PopoverLifecycleObserving {
     func diagnosisAppeared() {
         Self.uiLog.notice("diagnosis window appeared — sampling processes")
         isDiagnosisVisible = true
+        // The sampler outlives the window, so its last cumulative reading is
+        // from whenever the window was last closed. Differencing against that
+        // divides one interval's energy by however long the window was shut,
+        // and the first pass on screen shows every process at a few hundredths
+        // of a watt — "nothing is using power", at the exact moment someone
+        // opened this to ask what is.
+        Task { [processSampler] in await processSampler.reset() }
     }
 
     /// The Diagnose window closed: stop sampling and drop what was collected.
@@ -570,7 +577,11 @@ final class AppState: PopoverLifecycleObserving {
             snapshot: new,
             resistance: coolingResistance,
             processes: processReading,
-            curve: helper.status?.activeCurve
+            curve: helper.status?.activeCurve,
+            isCharging: helper.isCharging,
+            // The previous verdict is the hysteresis state, so there is no
+            // separate property to keep in step with it.
+            wasWarmFromCharging: diagnosis?.charging.isWarm ?? false
         )
     }
 

@@ -46,6 +46,18 @@ final class HelperManager {
     private(set) var connection: Connection = .disconnected
     private(set) var status: HelperStatus?
 
+    /// Whether the battery is taking charge right now.
+    ///
+    /// Surfaced here because `HelperManager` owns the power-source monitor —
+    /// it needs one for the on-battery/on-wall preset rule — and the diagnosis
+    /// window needs the same fact for ``ChargingWarmth``. Read fresh on every
+    /// access, like the monitor's own `current`: charging stops without any
+    /// source transition, so a value cached on `onChange` would go stale the
+    /// moment the battery filled.
+    var isCharging: Bool {
+        powerSource.isCharging
+    }
+
     /// Whether the XPC channel is up, ignoring which version answered.
     ///
     /// Six call sites asked this by pattern-matching `.connected`, one of them

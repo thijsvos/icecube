@@ -212,9 +212,24 @@ and is now question 5. What remains out of reach:
 - **Comparing your Mac with anyone else's.** `R`'s reference is a sensor
   inside the case and its denominator is whatever this machine powers; the
   trend is self-comparison, forever.
-- **Naming the cause rather than ranking it.** Dust is the usual reason at a
-  slow pace, dried paste the next — but the app cannot see inside the machine
-  and its copy never claims to.
+- **Naming the cause rather than ranking it — with exactly one exception.**
+  Dust is the usual reason at a slow pace, dried paste the next, but the app
+  cannot see inside the machine and its copy never claims to.
+
+  The exception is **charging**, added 2026-08-26. The rule guards against
+  *inferring* a cause from a sensor pattern; charging is not inferred, it is
+  read from IOKit as a fact — `kIOPSIsChargingKey`, in the same dictionary
+  `PowerSourceMonitor` already fetches to answer wall-versus-battery. It is the
+  one cause the app does not have to guess at, which is why it is the one it
+  may name. See `ChargingWarmth`.
+
+  It earns the exception by covering a real dead end. Charging dissipates
+  roughly 6–10 W into the cells and charging circuitry — spread across the
+  bottom case rather than concentrated on the die — so the machine feels
+  distinctly warm while every question this window asks answers "nothing is
+  wrong", correctly. Measured on a Mac14,9 charging: die 56 °C, both cells
+  under 35 °C, no process above 0.03 W, fans already at 5235 RPM. The owner's
+  hand disagreed with all four numbers and all four were right.
 - **Any of this on a Mac with no power key or no airflow sensor.** No watts
   or no reference means no quotient; the row says which is missing rather
   than collecting a baseline forever.

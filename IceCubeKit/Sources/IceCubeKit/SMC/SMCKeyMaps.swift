@@ -210,6 +210,21 @@ public enum SMCKeyMaps {
         key.hasPrefix("Ta")
     }
 
+    /// Whether `key` names a **battery** sensor — `TB1T`, `TB2T`.
+    ///
+    /// Its own predicate for the same reason as ``isAirflowKey(_:)``: the
+    /// battery lands in `.ambient` along with the SSD, the wireless card and
+    /// airflow, and "the hottest `.ambient` sensor" is not the battery on any
+    /// Mac measured here — on a Mac14,9 charging, airflow read 39.9 °C while
+    /// both cells sat below 35 °C.
+    ///
+    /// It matters because the battery is not just another sensor: it spans the
+    /// bottom case, so it is the one reading that describes the surface a
+    /// person actually touches. See ``ChargingWarmth``.
+    public static func isBatteryKey(_ key: String) -> Bool {
+        key.hasPrefix("TB")
+    }
+
     // MARK: - SoC power (the feedforward signal)
 
     /// Candidate keys for **total system power in watts**, best first.

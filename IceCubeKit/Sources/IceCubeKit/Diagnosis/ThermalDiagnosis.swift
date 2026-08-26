@@ -146,12 +146,22 @@ public enum ThermalDiagnosis {
         public let load: Load
         public let source: Source
         public let cooling: Cooling
+        /// The one cause this window may name rather than rank. See
+        /// ``ChargingWarmth``.
+        public let charging: ChargingWarmth
 
-        public init(heat: Heat, load: Load, source: Source, cooling: Cooling) {
+        public init(
+            heat: Heat,
+            load: Load,
+            source: Source,
+            cooling: Cooling,
+            charging: ChargingWarmth
+        ) {
             self.heat = heat
             self.load = load
             self.source = source
             self.cooling = cooling
+            self.charging = charging
         }
     }
 
@@ -167,17 +177,33 @@ public enum ThermalDiagnosis {
     ///   - processes: the latest per-process sample, or `nil` before one exists.
     ///   - curve: the curve currently driving the fans, or `nil` when Ice Cube
     ///     is not in curve control.
+    ///   - isCharging: whether the battery is taking charge, read fresh from
+    ///     IOKit. Deliberately **not** defaulted: a default of `false` would
+    ///     let a caller forget it and silently disable ``ChargingWarmth``
+    ///     forever, with every test still green.
+    ///   - wasWarmFromCharging: what ``ChargingWarmth`` said last time, which
+    ///     is the whole of its hysteresis state. The caller owns it for the
+    ///     same reason it owns the settle window: this function is pure.
     public static func diagnose(
         snapshot: SMCSnapshot,
         resistance: Double?,
         processes: ProcessEnergyReading?,
-        curve: FanCurve?
+        curve: FanCurve?,
+        isCharging: Bool,
+        wasWarmFromCharging: Bool
     ) -> Verdict {
-        Verdict(
-            heat: heat(in: snapshot),
+        let heatVerdict = heat(in: snapshot)
+        return Verdict(
+            heat: heatVerdict,
             load: load(in: snapshot, resistance: resistance),
             source: source(in: snapshot, processes: processes),
-            cooling: cooling(in: snapshot, curve: curve)
+            cooling: cooling(in: snapshot, curve: curve),
+            charging: ChargingWarmth.assess(
+                isCharging: isCharging,
+                batteryCelsius: snapshot.temperatures.batteryCelsius,
+                heat: heatVerdict,
+                wasWarm: wasWarmFromCharging
+            )
         )
     }
 

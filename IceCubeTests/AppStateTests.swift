@@ -310,9 +310,14 @@ struct AppStateTests {
     /// behaviour of the real one.
     actor CountingSampler: ProcessSampling {
         private(set) var calls = 0
+        private(set) var resets = 0
         func sample() async -> ProcessEnergyReading? {
             calls += 1
             return nil
+        }
+
+        func reset() {
+            resets += 1
         }
     }
 }

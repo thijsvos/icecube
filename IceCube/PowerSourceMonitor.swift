@@ -15,6 +15,15 @@ import os
 protocol PowerSourceObserving: AnyObject {
     /// Where the Mac is drawing power right now. Read fresh on each call.
     var current: PowerProfilePolicy.PowerSource { get }
+    /// Whether the battery is actually taking charge right now. Read fresh, as
+    /// ``current`` is.
+    ///
+    /// Separate from ``current`` because `.wall` cannot answer it: plugged in
+    /// and filling, and plugged in and long since full, are the same case to
+    /// that property — and only the first turns watts into heat. Charging also
+    /// stops without any source transition, so ``onChange`` could not carry
+    /// this even if it were folded in.
+    var isCharging: Bool { get }
     /// Called on the main actor the moment IOKit reports a change, so a rule
     /// can act immediately instead of waiting for the next poll.
     ///
@@ -63,7 +72,11 @@ final class PowerSourceMonitor: PowerSourceObserving {
     private let log = Logger(subsystem: HelperConstants.logSubsystem, category: "xpc")
 
     var current: PowerProfilePolicy.PowerSource {
-        Self.read()
+        Self.read().source
+    }
+
+    var isCharging: Bool {
+        Self.read().isCharging
     }
 
     func start() {
@@ -115,21 +128,38 @@ final class PowerSourceMonitor: PowerSourceObserving {
     /// has no battery at all, and that is the honest answer for one, not a
     /// failure. It also means a machine that cannot be unplugged never sees a
     /// transition, so the rule simply never fires there.
-    private static func read() -> PowerProfilePolicy.PowerSource {
+    /// What one pass over the power-source list yields.
+    ///
+    /// Both facts come from the same `IOPSGetPowerSourceDescription`
+    /// dictionary, which this function already built and previously read a
+    /// single key from. `kIOPSIsChargingKey` is a second subscript on a value
+    /// held in hand — no extra IOKit call, no entitlement, nothing new linked.
+    struct Reading {
+        var source: PowerProfilePolicy.PowerSource = .wall
+        var isCharging = false
+    }
+
+    private static func read() -> Reading {
         guard let blob = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
               let sources = IOPSCopyPowerSourcesList(blob)?.takeRetainedValue()
               as? [CFTypeRef]
-        else { return .wall }
+        else { return Reading() }
 
+        var reading = Reading()
         for source in sources {
             guard let description = IOPSGetPowerSourceDescription(blob, source)?
-                .takeUnretainedValue() as? [String: Any],
-                let state = description[kIOPSPowerSourceStateKey] as? String
+                .takeUnretainedValue() as? [String: Any]
             else { continue }
-            if state == kIOPSBatteryPowerValue {
-                return .battery
+            // Charging is read from every source rather than only the one that
+            // decides `.battery`, because a Mac on wall power reports
+            // `kIOPSACPowerValue` and is precisely the case worth catching.
+            if description[kIOPSIsChargingKey] as? Bool == true {
+                reading.isCharging = true
+            }
+            if description[kIOPSPowerSourceStateKey] as? String == kIOPSBatteryPowerValue {
+                reading.source = .battery
             }
         }
-        return .wall
+        return reading
     }
 }

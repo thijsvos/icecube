@@ -48,6 +48,40 @@ public enum DiagnosisCopy {
         }
     }
 
+    // MARK: - Charging
+
+    /// The charging row, or `nil` when there is nothing to say.
+    ///
+    /// The only place this window names a cause instead of ranking one, and it
+    /// earns that by not guessing: charging is read from IOKit, not inferred
+    /// from a sensor pattern. See ``ChargingWarmth``.
+    ///
+    /// The note says the fans cannot help, which is the most useful sentence
+    /// the window can produce here and the one a fan-control app is uniquely
+    /// placed to write. Left unsaid, a worried user's next move is to force the
+    /// fans to maximum and get noise instead of relief — on the Mac this was
+    /// measured on, the fans were already at 5235 RPM with both cells still
+    /// above 34 °C, because the battery is not in the airflow path at all.
+    ///
+    /// The physics goes in the hover, not the note, under the file's governing
+    /// rule: the verdict and the numbers stay on screen, and the explanation is
+    /// there for whoever wants it.
+    public static func charging(_ warmth: ChargingWarmth, style: TemperatureStyle) -> Row? {
+        guard case let .warm(celsius) = warmth else { return nil }
+        let ceiling = SafetyMonitor.Limits().otherCeiling
+        return Row(
+            title: "Warm from charging",
+            metric: "battery \(style.reading(celsius)) · limit \(style.reading(ceiling))",
+            note: "The battery spans the bottom of the case, so it is the surface you feel. "
+                + "The fans cannot reach it — they cool the heatsink, not the battery.",
+            hover: "Charging dissipates a few watts in the cells and charging circuitry, spread "
+                + "across the whole bottom case rather than concentrated on the chip. Skin is about "
+                + "\(style.reading(33)), and aluminium conducts well, so a case at this temperature "
+                + "leaves your hand nowhere to shed heat and reads as warm — while the cells "
+                + "themselves are nowhere near their limit. It fades once charging finishes."
+        )
+    }
+
     // MARK: - Temperature
 
     /// The heat headline.

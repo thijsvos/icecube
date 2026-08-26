@@ -118,6 +118,20 @@ public protocol ProcessSampling: Sendable {
     /// counter to difference and answers on the first call, so a simulated run
     /// never sits on the "measuring" state.
     func sample() async -> ProcessEnergyReading?
+
+    /// Forgets the previous cumulative reading, so the next ``sample()`` starts
+    /// a fresh interval instead of differencing against a stale one.
+    ///
+    /// Called when the diagnosis window opens. Without it, a sampler that
+    /// survives the window being closed divides one interval's energy by the
+    /// entire time the window was shut: reopen after an hour and every process
+    /// shows a few hundredths of a watt for one tick before self-correcting.
+    /// That reads as "nothing is using power", which is exactly the wrong
+    /// answer to have on screen at the moment someone opens the window to ask.
+    ///
+    /// No default implementation, deliberately — a sampler that silently
+    /// ignored this would reintroduce the bug with the compiler saying nothing.
+    func reset() async
 }
 
 /// A deterministic fake process list for simulated mode and tests.
@@ -132,6 +146,10 @@ public protocol ProcessSampling: Sendable {
 /// a plausible number of PIDs are marked unreadable so that caveat is visible
 /// in screenshots too.
 public struct MockProcessSampler: ProcessSampling {
+    /// Nothing to forget: every reading is a pure function of the clock, so
+    /// there is no cumulative counter being differenced.
+    public func reset() async {}
+
     private let now: @Sendable () -> Date
 
     /// The first fake PID, chosen **above Darwin's PID ceiling** (99999) so a

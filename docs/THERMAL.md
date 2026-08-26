@@ -183,6 +183,52 @@ the 5 W floor, so a deeply idle Mac may legitimately show `—`.
   those hours. Whole days can pass with nothing recorded. That is the settle
   rule working, not a gap in the data.
 
+## Warm to the touch is a different scale from hot for the hardware
+
+The two questions people ask — *"is my Mac too hot?"* and *"why does it feel
+hot?"* — have different answers, and a Mac can be a firm **no** to the first
+while being obviously **yes** to the second.
+
+Skin sits at roughly **33 °C**. Whether a surface feels warm is not about its
+temperature in isolation but about which way heat flows between it and your
+hand. Below about 30 °C a surface draws heat *out* of your skin and reads as
+cool. Around 33 °C the flow stops and it reads as neutral. Above that your hand
+stops shedding heat, and the nervous system reports that as *warm* — long before
+anything is thermally interesting to the machine.
+
+Aluminium sharpens this. It conducts far better than plastic, so a metal case
+reaches equilibrium with your palm almost immediately, while a plastic laptop at
+the identical temperature feels milder. Unibody Macs feel hotter than their
+numbers for a reason that has nothing to do with their cooling.
+
+The gap this opens is wide. On a Mac14,9 charging, measured:
+
+| | |
+|---|---|
+| Hottest die | 56 °C (limit 104 °C) |
+| Battery cells | 34.8 / 33.9 °C (limit 95 °C) |
+| Airflow | 39.9 / 38.8 °C |
+| Fans | 5235 RPM |
+
+Every sensor is comfortable. The case is still *distinctly* warm, because the
+34.8 °C battery spans the bottom of the machine and is the only one of those
+surfaces a hand ever touches — while the 56 °C die is buried under a heatsink
+nobody can reach.
+
+**Two consequences worth knowing.**
+
+The first is that a warm case during charging is expected. Charging dissipates
+roughly 6–10 W in the cells and charging circuitry, spread over a large flat
+area rather than concentrated on the chip, and it fades once the battery fills.
+Ice Cube says so in *Why is it hot?* — the one cause it names outright, because
+it is the one it reads rather than infers.
+
+The second is that **the fans cannot do anything about it.** They move air
+across the heatsink and out through the hinge; the battery is not in that path.
+In the measurement above the fans were already at 5235 RPM and the cells were
+still near 35 °C. Forcing them to maximum buys noise and no relief — which is
+worth knowing before you try it.
+
 ## How to read it
 
 At a **comparable fan speed**, on **your own machine**:
