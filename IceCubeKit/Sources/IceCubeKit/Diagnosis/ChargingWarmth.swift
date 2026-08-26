@@ -34,20 +34,37 @@ public enum ChargingWarmth: Sendable, Equatable {
     /// The warmth is the battery taking charge.
     case warm(batteryCelsius: Double)
 
-    /// Where a surface stops feeling neutral and starts feeling warm.
+    /// Where charging warmth becomes worth explaining.
     ///
-    /// Chosen from skin physiology rather than from any one Mac's baseline:
-    /// against ~33 °C skin, a surface below about 30 °C still draws heat away
-    /// and reads as cool, and by 32 °C it does not. Deliberately *not* derived
-    /// from the machine's own idle battery temperature, because there is no
-    /// reliable idle to compare against — the number that matters is how it
-    /// feels to a hand, and a hand does not know what this Mac idles at.
-    public static let onsetCelsius: Double = 32
+    /// First chosen at 32 °C from skin physiology alone — against ~33 °C skin a
+    /// surface below about 30 °C reads as cool and by 32 °C it does not — with
+    /// no idle baseline to check it against. Measured on a Mac14,9 the same
+    /// day, that turned out to be exactly the wrong number:
+    ///
+    /// | State | Warmest cell |
+    /// | --- | --- |
+    /// | Plugged in, charged, idle | **31.9 – 32.1 °C** |
+    /// | Charging, 100 % (finishing) | 34.8 °C |
+    /// | Charging, 55 % | 36.2 °C |
+    ///
+    /// A 32 °C onset sits *on* the idle baseline, so a Mac merely topping up
+    /// from 99 % would trip it while dissipating almost nothing. 34 °C clears
+    /// idle by two degrees and sits below every reading taken while genuinely
+    /// charging, which is the gap the threshold is supposed to name.
+    ///
+    /// Skin physiology set the shape of the rule and hardware set the number.
+    /// Both were needed: physiology alone put it a whole degree into the noise.
+    public static let onsetCelsius: Double = 34
 
-    /// Release below this, so the row cannot flicker on and off around the
-    /// onset. Same arm/re-arm shape as `AlertManager.evaluate`, with a smaller
-    /// gap because these are small numbers moving slowly.
-    public static let releaseCelsius: Double = 30
+    /// Release below this, so the row cannot flicker around the onset. Same
+    /// arm/re-arm shape as `AlertManager.evaluate`, with a smaller gap because
+    /// these are small numbers moving slowly.
+    ///
+    /// 32 °C is the measured idle baseline: while charging continues the row
+    /// holds until the cells fall back to where they sit when they are not.
+    /// When charging *stops*, `isCharging` closes the row on its own and this
+    /// threshold never comes into it.
+    public static let releaseCelsius: Double = 32
 
     /// - Parameters:
     ///   - isCharging: read fresh from `PowerSourceObserving.isCharging`.

@@ -56,12 +56,23 @@ public enum DiagnosisCopy {
     /// earns that by not guessing: charging is read from IOKit, not inferred
     /// from a sensor pattern. See ``ChargingWarmth``.
     ///
-    /// The note says the fans cannot help, which is the most useful sentence
-    /// the window can produce here and the one a fan-control app is uniquely
-    /// placed to write. Left unsaid, a worried user's next move is to force the
-    /// fans to maximum and get noise instead of relief — on the Mac this was
-    /// measured on, the fans were already at 5235 RPM with both cells still
-    /// above 34 °C, because the battery is not in the airflow path at all.
+    /// The note is precise about **two** things, and the first draft was wrong
+    /// about both.
+    ///
+    /// It says *where*: under the palms, not at the keyboard. The battery spans
+    /// the bottom case; the SoC sits under the top of the keyboard deck. A
+    /// reader who feels heat at the space bar is feeling the chip, and copy
+    /// that said "it is the surface you feel" told them otherwise.
+    ///
+    /// And it scopes the fan claim to this reading rather than to the machine.
+    /// "The fans cannot reach it" is true of the battery and misleading about
+    /// everything else: measured on a Mac14,9 charging at 55 % with a
+    /// heat-soaked chassis, the fans sat at 2748 of 6800 RPM with real headroom
+    /// and would have cooled the deck considerably. Telling that user the fans
+    /// could not help would have been wrong guidance in the one place they were
+    /// most likely to act on it. What stays true in every state is that raising
+    /// them will not move *this* number, because the battery is not in the
+    /// airflow path — so that is what it says.
     ///
     /// The physics goes in the hover, not the note, under the file's governing
     /// rule: the verdict and the numbers stay on screen, and the explanation is
@@ -72,8 +83,9 @@ public enum DiagnosisCopy {
         return Row(
             title: "Warm from charging",
             metric: "battery \(style.reading(celsius)) · limit \(style.reading(ceiling))",
-            note: "The battery spans the bottom of the case, so it is the surface you feel. "
-                + "The fans cannot reach it — they cool the heatsink, not the battery.",
+            note: "The battery spans the bottom of the case, so this warmth is under your palms "
+                + "rather than at the keyboard. Raising the fans will not change it — they cool "
+                + "the heatsink, not the battery.",
             hover: "Charging dissipates a few watts in the cells and charging circuitry, spread "
                 + "across the whole bottom case rather than concentrated on the chip. Skin is about "
                 + "\(style.reading(33)), and aluminium conducts well, so a case at this temperature "

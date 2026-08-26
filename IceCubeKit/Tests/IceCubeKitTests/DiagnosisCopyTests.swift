@@ -310,14 +310,31 @@ struct DiagnosisChargingCopyTests {
         #expect(metric.contains("95 °C"), "and the limit it is nowhere near, got \(metric)")
     }
 
-    /// The most useful sentence the window can produce here, and the one a
-    /// fan-control app is uniquely placed to write: a worried user's instinct is
-    /// to force the fans to maximum, which buys noise and nothing else.
-    @Test("It says the fans cannot help")
-    func itSaysTheFansCannotHelp() throws {
+    /// The note must scope its fan claim to **this reading**, not to the
+    /// machine. An earlier draft said "the fans cannot reach it", which is true
+    /// of the battery and misleading about everything else — measured on a Mac
+    /// charging with a heat-soaked chassis, the fans were at 2748 of 6800 RPM
+    /// and would have cooled the keyboard deck considerably. Telling that user
+    /// the fans could not help would have been wrong exactly where they were
+    /// most likely to act on it.
+    @Test("The fan claim is about the battery reading, not about the machine")
+    func fanClaimIsScopedToTheReading() throws {
         let row = try #require(DiagnosisCopy.charging(.warm(batteryCelsius: 35), style: .celsius))
-        let note = try #require(row.note)
-        #expect(note.lowercased().contains("fans cannot reach it"))
+        let note = try #require(row.note).lowercased()
+        #expect(note.contains("raising the fans will not change it"))
+        #expect(!note.contains("cannot reach"), "too broad — it reads as \"the fans are useless\"")
+    }
+
+    /// And it must say *where*, because the two warm places on a MacBook have
+    /// different causes: the battery is under the palms, the SoC is under the
+    /// top of the keyboard. A reader feeling heat at the space bar is feeling
+    /// the chip, and copy claiming "the surface you feel" told them otherwise.
+    @Test("The note locates the warmth under the palms, not at the keyboard")
+    func noteLocatesTheWarmth() throws {
+        let row = try #require(DiagnosisCopy.charging(.warm(batteryCelsius: 35), style: .celsius))
+        let note = try #require(row.note).lowercased()
+        #expect(note.contains("palms"))
+        #expect(note.contains("keyboard"))
     }
 
     /// Every temperature in this row is an absolute, so all of them convert.
