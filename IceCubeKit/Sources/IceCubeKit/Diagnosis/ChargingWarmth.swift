@@ -43,9 +43,15 @@ public enum ChargingWarmth: Sendable, Equatable {
     ///
     /// | State | Warmest cell |
     /// | --- | --- |
+    /// | On battery, discharging | 24.4 °C |
     /// | Plugged in, charged, idle | **31.9 – 32.1 °C** |
     /// | Charging, 100 % (finishing) | 34.8 °C |
     /// | Charging, 55 % | 36.2 °C |
+    ///
+    /// The first row was taken at 26.4 W and the last at 11.1 W — more than
+    /// twice the work, 12 °C cooler cells. Battery temperature tracks current
+    /// through the cells, not workload, which is the premise this whole type
+    /// rests on.
     ///
     /// A 32 °C onset sits *on* the idle baseline, so a Mac merely topping up
     /// from 99 % would trip it while dissipating almost nothing. 34 °C clears

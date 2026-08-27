@@ -210,18 +210,35 @@ The gap this opens is wide. On a Mac14,9 charging, measured:
 | Airflow | 39.9 / 38.8 °C |
 | Fans | 5235 RPM |
 
-How much of that is the charging itself, measured on the same machine:
+How much of that is the charging itself, measured across four states on the same
+machine on the same day:
 
-| State | Warmest cell |
-|---|---|
-| Plugged in, **charged**, idle | 31.9 – 32.1 °C |
-| Charging, 100 % (finishing) | 34.8 °C |
-| Charging, 55 % | 36.2 °C |
+| State | System power | Warmest cell |
+|---|---|---|
+| On battery, discharging | 26.4 W | **24.4 °C** |
+| Plugged in, **charged**, idle | ~28 W | 32.0 °C |
+| Charging, 100 % (finishing) | — | 34.8 °C |
+| Charging, 55 % | 11.1 W | **36.2 °C** |
 
-So charging is worth about **3–4 °C** at the cells. Small as a number, and
-plainly noticeable as a surface, which is the whole point of this section. It is
-also why Ice Cube reads `kIOPSIsChargingKey` rather than settling for "on wall
-power": the top row of that table is plugged in too, and has nothing to explain.
+**Compare the first and last rows.** The machine was doing *more than twice the
+work* while discharging, and its cells were **12 °C cooler**. Battery
+temperature does not track workload at all — it tracks whether current is moving
+through the cells. That is the whole premise of the charging explanation in *Why
+is it hot?*, and it is hard to demonstrate more starkly than that.
+
+Two other things fall out of the table.
+
+Charging is worth roughly **4 °C** at the cells over sitting plugged in and
+full. Small as a number, plainly noticeable as a surface — which is the point of
+this section, and the reason Ice Cube reads `kIOPSIsChargingKey` rather than
+settling for "on wall power". Row two is plugged in too, and has nothing to
+explain.
+
+And **being plugged in at all is worth about 7.5 °C** before any charging
+happens (24.4 → 32.0 °C). The battery is full in both cases; the difference is
+the charger circuitry and running the machine from AC. So "warm because plugged
+in" and "warm because charging" are genuinely different magnitudes stacked on
+each other, and Ice Cube only claims the second.
 
 Every sensor is comfortable. The case is still *distinctly* warm, because the
 34.8 °C battery spans the bottom of the machine and is the only one of those
