@@ -109,13 +109,22 @@ public enum SimulatedCoolingHistory {
         case .improved: progress < 0.7 ? 0.60 : 0.51 // cleaned five weeks ago
         }
 
-        // Two to three idle readings most days; the sparse story keeps the
+        // Four to six idle readings most days; the sparse story keeps the
         // idle band to the early weeks only, so no band spans both epochs.
+        //
+        // The count was two to three until 2026-09-01. That is plenty for the
+        // trend, which runs on day medians, but `CoolingLaw` fits a line
+        // through *raw* records and those are kept for only
+        // `CoolingHistory.rawRetentionDays` — so a week held 17 idle readings
+        // and 2 loaded ones, and the loaded band could never reach
+        // `CoolingLaw.minimumRecordsPerBand`. A real machine records up to 288
+        // a day; this was never meant to model that sparsity, it just was not
+        // asked to be denser.
         let idleDays = story != .sparse || progress < 0.3
         if idleDays {
-            let count = 2 + Int(noise(dayOffset, 1) * 2)
+            let count = 4 + Int(noise(dayOffset, 1) * 3)
             for k in 0 ..< count {
-                let hour = 9.0 + Double(k) * 3 + noise(dayOffset, 10 + k) * 0.8
+                let hour = 8.0 + Double(k) * 2 + noise(dayOffset, 10 + k) * 0.8
                 guard let date = timeIfPast(dayStart, hour: hour, now: now) else { continue }
                 records.append(idleRecord(
                     at: date,
@@ -134,12 +143,21 @@ public enum SimulatedCoolingHistory {
             case .jump, .stable, .baseline, .sparse: 0.90
             case .improved: progress < 0.7 ? 1.02 : 0.90
             }
-            let hour = 13.0 + noise(dayOffset, 3) * 4
-            if let date = timeIfPast(dayStart, hour: hour, now: now) {
+            // A sustained work session, not a single instant: the recorder
+            // writes one settled reading every five minutes for as long as the
+            // machine holds still, so a loaded afternoon produces a cluster.
+            // Six to ten — half an hour to fifty minutes of steady work — is
+            // what it takes for the loaded band to clear
+            // `CoolingLaw.minimumRecordsPerBand` inside the seven days of raw
+            // records that survive `CoolingHistory.compact`.
+            let count = 6 + Int(noise(dayOffset, 6) * 5)
+            for k in 0 ..< count {
+                let hour = 13.0 + Double(k) * 0.5 + noise(dayOffset, 20 + k) * 0.3
+                guard let date = timeIfPast(dayStart, hour: hour, now: now) else { continue }
                 records.append(loadedRecord(
                     at: date,
-                    r: loadedBase * jitter(offset: dayOffset * 10 + 7),
-                    offset: dayOffset * 10 + 7
+                    r: loadedBase * jitter(offset: dayOffset * 10 + 7 + k),
+                    offset: dayOffset * 10 + 7 + k
                 ))
             }
         }
