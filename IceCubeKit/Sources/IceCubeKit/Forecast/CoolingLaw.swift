@@ -92,7 +92,7 @@ public struct CoolingLaw: Sendable, Equatable {
         /// How many records the fit rests on.
         public let records: Int
         /// The range of draw the fit was built from, watts. Outside it the line
-        /// is extrapolation, and callers are expected to care.
+        /// is extrapolation.
         public let wattsRange: ClosedRange<Double>
 
         /// Predicted die rise above airflow at a given draw, never negative.
@@ -100,9 +100,42 @@ public struct CoolingLaw: Sendable, Equatable {
         /// Clamped at zero because the line is only fitted where readings
         /// exist: below the intercept's crossing it would predict a die
         /// *colder* than the air moving past it, which is not a thing.
+        ///
+        /// **Says nothing about whether the draw is one this band was measured
+        /// at.** Ask ``covers(watts:)`` first — see the note on that method for
+        /// what happens when nobody does.
         public func rise(atWatts watts: Double) -> Double {
             max(0, slope * watts + intercept)
         }
+
+        /// Whether this band was measured at anything like this draw.
+        ///
+        /// **The bug this exists for.** `wattsRange` was recorded from the
+        /// start, described as the range "outside which the line is
+        /// extrapolation, and callers are expected to care" — and then no
+        /// caller cared. Both `CoolingLaw.coolestBand(atWatts:)` and the
+        /// forecast's fixed-point search evaluated every band's line at the
+        /// current draw regardless of what that band had ever seen.
+        ///
+        /// Caught in simulated mode, where the seeded history holds an idle
+        /// band recorded at 14–25 W and a loaded band at 34–62 W. Asked what
+        /// the fans would buy at 48 W, the idle band's line — extrapolated
+        /// 2.3× past its data — came out 18.9 °C *cooler* than the loaded one,
+        /// and the app was one merge away from telling someone to **slow their
+        /// fans down to cool the machine**.
+        ///
+        /// The margin is deliberate but small. A line is still roughly itself
+        /// just outside the readings that produced it; 20 % beyond either end
+        /// is a working tolerance, and 130 % beyond is a different regime.
+        public func covers(watts: Double) -> Bool {
+            let margin = (wattsRange.upperBound - wattsRange.lowerBound) * Self.extrapolationMargin
+            return watts >= wattsRange.lowerBound - margin
+                && watts <= wattsRange.upperBound + margin
+        }
+
+        /// How far past a band's measured range its line may still be trusted,
+        /// as a fraction of that range.
+        public static let extrapolationMargin = 0.20
     }
 
     /// The fitted bands, keyed by fan-speed band. Absent means not measurable.
@@ -135,8 +168,13 @@ public struct CoolingLaw: Sendable, Equatable {
     /// genuinely depends on one: bands differ in both slope and intercept, so
     /// which is coolest can change with load. Answering without being told the
     /// load would be picking one silently.
+    ///
+    /// Only bands that were actually measured near this draw are considered —
+    /// see ``Band/covers(watts:)`` for the backwards advice that came out when
+    /// they were not.
     public func coolestBand(atWatts watts: Double) -> (band: FanBand, law: Band)? {
         bands
+            .filter { $0.value.covers(watts: watts) }
             .min { $0.value.rise(atWatts: watts) < $1.value.rise(atWatts: watts) }
             .map { ($0.key, $0.value) }
     }
