@@ -170,19 +170,34 @@ public struct ThermalTimeConstant: Sendable, Equatable {
     /// which on a laptop means the three samples straddled something that was
     /// not a thermal ramp.
     ///
-    /// **This is a plausibility guard, not a measurement.** Reasoning from
-    /// `R ≈ 0.9 °C/W` (`docs/THERMAL.md`, Mac14,9) and a heatsink assembly of
-    /// order 50–150 J/°C puts `τ = R·C` near 45–135 s, and the die's own fast
-    /// pole is a few seconds. Nobody has measured it on this hardware.
+    /// A plausibility guard, and — since 2026-09-01 — a measured one.
     ///
-    /// The last constant here set from first principles alone was
-    /// ``ChargingWarmth/onsetCelsius``, chosen at 32 °C from skin physiology
-    /// and corrected to 34 °C the same day when the cells turned out to idle at
-    /// 31.9–32.1 °C — it had been sitting *on* the baseline it was meant to
-    /// clear. Physiology set the shape of that rule and hardware set its
-    /// number. Same split here: the method below is sound, these bounds are
-    /// placeholders, and `docs/THERMAL.md` gets the measured distribution
-    /// before any of it reaches a user.
+    /// These bounds shipped as pure reasoning: from `R ≈ 0.9 °C/W`
+    /// (`docs/THERMAL.md`, Mac14,9) and a heatsink assembly of order
+    /// 50–150 J/°C, `τ = R·C` lands near 45–135 s, with the die's own fast pole
+    /// a few seconds below that. The comment here said so, and said that nobody
+    /// had measured it, because the last constant set from first principles
+    /// alone — ``ChargingWarmth/onsetCelsius`` — shipped a degree inside the
+    /// noise it was meant to clear.
+    ///
+    /// It has now been measured. `icecube-diag --forecast 1800` over 28 minutes
+    /// of ordinary use on a Mac14,9, 89 accepted estimates:
+    ///
+    /// | p10 | p25 | **p50** | p75 | p90 |
+    /// | --- | --- | --- | --- | --- |
+    /// | 38.6 s | 49.0 s | **73.7 s** | 130.4 s | 207.8 s |
+    ///
+    /// The reasoning was right: 73.7 s sits near the middle of the predicted
+    /// 45–135 s. **The bounds are unchanged, and that is the finding** — they
+    /// were set wide enough to be a guard rather than a filter, and the
+    /// measurement confirms nothing real is being clipped. Seven of 1,689 ticks
+    /// were rejected as implausible.
+    ///
+    /// Do not narrow these toward the measured distribution. They exist to
+    /// catch a triple that straddled something which was not a thermal ramp —
+    /// which produces seconds or many minutes — not to make the median tidier.
+    /// A bound inside the real spread would bias the answer while looking
+    /// stricter.
     public static let minimumPlausible: TimeInterval = 15
 
     /// The longest τ this will believe. See ``minimumPlausible``.
@@ -192,6 +207,17 @@ public struct ThermalTimeConstant: Sendable, Equatable {
     ///
     /// One ramp must not set the constant. Twenty spreads the answer across
     /// several separate stretches of work on any real machine.
+    ///
+    /// Confirmed by the 2026-09-01 measurement run rather than assumed: the
+    /// reported median was **68–75 s across the 33 readings** taken from the
+    /// 23rd accepted estimate onward, a 7 s spread over the following sixteen
+    /// minutes. Twenty is where the answer stops moving, so waiting for more
+    /// would buy nothing and cost the user an hour of silence.
+    ///
+    /// What it costs: ~5 % of ticks are accepted on a real machine in ordinary
+    /// use (89 of 1,689), so the first answer arrives after roughly twelve
+    /// minutes of the app running. That is a background estimator's timescale,
+    /// not a user's, which is why nothing waits on it.
     public static let minimumEstimates = 20
 
     /// Most recent estimates kept.
