@@ -43,6 +43,7 @@ final class AppState: PopoverLifecycleObserving {
     static let insideEnabledKey = "experimental.inside"
     static let insideAnimationKey = "experimental.inside.animates"
     static let insideInPopoverKey = "experimental.inside.popover"
+    static let forecastEnabledKey = "experimental.forecast"
 
     /// The app-wide "keep the curve running when Ice Cube quits" toggle.
     ///
@@ -112,6 +113,30 @@ final class AppState: PopoverLifecycleObserving {
     /// not be able to switch a feature on in the owner's real preferences.
     var isInsideEnabled: Bool {
         didSet { defaults.set(isInsideEnabled, forKey: Self.insideEnabledKey) }
+    }
+
+    /// Whether the diagnosis window shows where the temperature is heading.
+    ///
+    /// Off by default, and behind the same injected `defaults` seam the Inside
+    /// switches use, so a simulated session cannot turn a feature on in the
+    /// owner's real preferences.
+    ///
+    /// Opt-in for a reason this row has and the others do not: every sibling in
+    /// that window reports something measured, and this one reports a
+    /// projection from a model that fits one thermal pole to a machine with
+    /// two. `ForecastCopy` works hard to keep the two legible apart, and a
+    /// switch the user threw themselves is the last part of that.
+    ///
+    /// Also `false` genuinely means *not enabled* here, so `bool(forKey:)`
+    /// returning `false` for an absent key is exactly the wanted default —
+    /// the same argument ``isInsideEnabled`` makes.
+    var isForecastEnabled: Bool {
+        didSet {
+            defaults.set(isForecastEnabled, forKey: Self.forecastEnabledKey)
+            if !isForecastEnabled {
+                forecast = nil
+            }
+        }
     }
 
     /// Whether a compact Inside runs inside the popover as well as in its own
@@ -249,6 +274,22 @@ final class AppState: PopoverLifecycleObserving {
     /// value type, held like the tracker above it.
     @ObservationIgnored private var historyRecorder = CoolingRecorder()
 
+    /// How fast this Mac's die approaches what it is heading for.
+    ///
+    /// Fed every tick, like ``cooling`` and for the same reason inverted: the
+    /// settle window needs an unbroken run of samples because a gap resets it,
+    /// and this needs one because a gap costs it the three-minute window an
+    /// estimate spans. Fed regardless of whether the feature is switched on —
+    /// it is arithmetic on samples already being read, and a user who enables
+    /// the row should not then wait twelve minutes for it to say anything.
+    @ObservationIgnored private var timeConstant = ThermalTimeConstant()
+
+    /// What each fan speed buys on this Mac, refitted **only when a record is
+    /// appended** — the same reasoning as ``coolingTrend`` directly above.
+    /// It is a pure function of the record set, so recomputing between records
+    /// would burn cycles to produce an identical answer.
+    @ObservationIgnored private var coolingLaw = CoolingLaw()
+
     /// Clears the history and re-evaluates at once — the verdict must not
     /// keep claiming "worse than June" about readings that no longer exist.
     func clearCoolingHistory() {
@@ -272,6 +313,22 @@ final class AppState: PopoverLifecycleObserving {
     /// See ``ThermalDiagnosis``. Published rather than computed on demand so
     /// the view never runs the reasoning during layout.
     private(set) var diagnosis: ThermalDiagnosis.Verdict?
+
+    /// How many time-constant estimates have been accepted so far.
+    ///
+    /// Read-only, and not published: it changes on a timescale no view should
+    /// redraw for. Exists so a test can watch the estimator actually
+    /// accumulate — see ``ingestForecastSample(_:)``.
+    var forecastEstimateCount: Int {
+        timeConstant.estimateCount
+    }
+
+    /// Where the temperature is heading, or `nil` when the window is shut or
+    /// the feature is off.
+    ///
+    /// Published rather than computed on demand, for the reason ``diagnosis``
+    /// gives: the view must never run the reasoning during layout.
+    private(set) var forecast: ThermalForecast.Verdict?
 
     /// The most recent per-process sample. Kept between ticks so a pass that
     /// cannot produce a rate (the first one) leaves the previous answer up
@@ -311,6 +368,7 @@ final class AppState: PopoverLifecycleObserving {
         isDiagnosisVisible = false
         processReading = nil
         diagnosis = nil
+        forecast = nil
     }
 
     /// Frozen display (recording continues; see `togglePaused`).
@@ -464,6 +522,7 @@ final class AppState: PopoverLifecycleObserving {
         hasDismissedSetup = defaults.bool(forKey: Self.dismissedSetupKey)
         isInsideEnabled = defaults.bool(forKey: Self.insideEnabledKey)
         showsInsideInPopover = defaults.bool(forKey: Self.insideInPopoverKey)
+        isForecastEnabled = defaults.bool(forKey: Self.forecastEnabledKey)
         insideAnimation = defaults.object(forKey: Self.insideAnimationKey) as? Bool
         // Defaulted to the mock rather than to `SystemProcessSampler`, so a
         // caller that forgets the argument reads fiction instead of the user's
@@ -583,6 +642,64 @@ final class AppState: PopoverLifecycleObserving {
             // separate property to keep in step with it.
             wasWarmFromCharging: diagnosis?.charging.isWarm ?? false
         )
+        forecast = isForecastEnabled ? projectForecast(new) : nil
+    }
+
+    /// Offers one tick to the time-constant estimator.
+    ///
+    /// Skips silently when the snapshot is missing any of the three inputs, for
+    /// the same reason `CoolingEfficiency.Tracker` clears its window: a sample
+    /// stitched across a gap is worse than no sample.
+    ///
+    /// Internal rather than private so a test can drive it with scripted
+    /// snapshots. **The call site in `consumePollingEvents` is not covered**,
+    /// and cannot be at test timescales: one estimate spans three minutes of
+    /// steady machine, so a run long enough to observe the difference between
+    /// feeding and not feeding is a run no test suite should contain. Deleting
+    /// that one line would leave every test green and the forecast permanently
+    /// silent. Stated rather than pretended away, in the same spirit as
+    /// `SimulatedIsolationTests`' note about the line wiring `ChartSettings` to
+    /// its store.
+    func ingestForecastSample(_ snapshot: SMCSnapshot) {
+        guard let watts = snapshot.power,
+              let ambient = CoolingEfficiency.ambient(from: snapshot.temperatures),
+              let die = snapshot.temperatures.hottestDieCelsius
+        else { return }
+        let usable = snapshot.fans.filter(\.hasUsableRange)
+        let fraction = usable.isEmpty
+            ? 0
+            : usable.map { $0.actualRPM / $0.maxRPM }.reduce(0, +) / Double(usable.count)
+        timeConstant.ingest(ThermalTimeConstant.Observation(
+            date: snapshot.date,
+            dieCelsius: die,
+            ambientCelsius: ambient,
+            watts: watts,
+            fanFraction: fraction
+        ))
+    }
+
+    /// The projection for this tick, or a named gap.
+    ///
+    /// `isLoadSteady` is answered by the settle tracker rather than guessed:
+    /// a settled window is by definition one whose draw has held within
+    /// `CoolingEfficiency.powerTolerance`, which is the same condition the
+    /// forecast needs for its equilibrium to mean anything.
+    private func projectForecast(_ snapshot: SMCSnapshot) -> ThermalForecast.Verdict {
+        guard let watts = snapshot.power,
+              let ambient = CoolingEfficiency.ambient(from: snapshot.temperatures),
+              let die = snapshot.temperatures.hottestDieCelsius
+        else { return .unavailable(.loadNotSteady) }
+        return ThermalForecast.project(
+            dieCelsius: die,
+            ambientCelsius: ambient,
+            watts: watts,
+            fans: snapshot.fans,
+            curve: helper.status?.activeCurve,
+            law: coolingLaw,
+            tau: timeConstant.tau,
+            estimateCount: timeConstant.estimateCount,
+            isLoadSteady: cooling.isSettled
+        )
     }
 
     /// Starts consuming the 1 Hz polling stream. A second call is a no-op.
@@ -635,6 +752,7 @@ final class AppState: PopoverLifecycleObserving {
                     // makes a reading available the moment someone looks.
                     cooling.ingest(new)
                     coolingResistance = cooling.resistance
+                    ingestForecastSample(new)
                     // The recorder's spacing runs on the monotonic clock and
                     // its stamps on the snapshot's wall clock, so an NTP step
                     // can move a record's date but never cause a burst or a
@@ -645,6 +763,7 @@ final class AppState: PopoverLifecycleObserving {
                         history.append(record, fans: new.fans, now: new.date)
                         if let loaded = history.history {
                             coolingTrend = CoolingTrend.evaluate(loaded, now: new.date)
+                            coolingLaw = CoolingLaw.fit(loaded)
                         }
                     }
                     await refreshDiagnosis(new)

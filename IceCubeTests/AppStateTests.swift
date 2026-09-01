@@ -154,6 +154,69 @@ struct AppStateTests {
         #expect(!state.isInsideEnabled, "an experimental feature must not arrive switched on")
     }
 
+    /// Same contract as the Inside switch, for the same reasons, on the row
+    /// that most needs it: every sibling in the diagnosis window reports a
+    /// measurement and this one reports a projection, so the user throws the
+    /// switch themselves.
+    @Test("A store nobody has written reports the forecast as off")
+    func forecastIsOffUntilAskedFor() {
+        let graph = CompositionRoot.makeSimulatedForTesting()
+        #expect(graph.defaults.object(forKey: AppState.forecastEnabledKey) == nil, "nothing may have written it")
+        let state = AppState(graph: graph, menuBarHost: { _ in SpyHost() })
+        #expect(!state.isForecastEnabled, "an experimental feature must not arrive switched on")
+        #expect(state.forecast == nil, "and nothing may be published before it is asked for")
+    }
+
+    @Test("Turning the forecast on writes to the injected store")
+    func forecastTogglePersistsThroughTheSeam() {
+        let graph = CompositionRoot.makeSimulatedForTesting()
+        let state = AppState(graph: graph, menuBarHost: { _ in SpyHost() })
+
+        state.isForecastEnabled = true
+        #expect(graph.defaults.bool(forKey: AppState.forecastEnabledKey))
+        #expect(!(graph.defaults is UserDefaults), "and the store it landed in must not be the real one")
+
+        state.isForecastEnabled = false
+        #expect(!graph.defaults.bool(forKey: AppState.forecastEnabledKey), "and it must switch back off again")
+    }
+
+    /// Switching it off must clear the row, not leave the last projection on
+    /// screen. A stale forecast is worse than none: it keeps making a claim
+    /// about a machine it is no longer watching.
+    ///
+    /// The first version of this test **survived deleting the clearing code**.
+    /// It flipped the switch on and straight back off without ever running a
+    /// tick, so `forecast` had never been set and was `nil` either way — the
+    /// test asserted a value that could not have been anything else. It now
+    /// gets a projection on screen first, then takes it away.
+    @Test("Switching the forecast off clears what it was showing")
+    func forecastClearsWhenSwitchedOff() async {
+        let state = Self.state()
+        state.isForecastEnabled = true
+        state.diagnosisAppeared()
+
+        state.start()
+        try? await Task.sleep(for: .milliseconds(2500))
+        state.stop()
+        #expect(state.forecast != nil, "there must be something to clear")
+
+        state.isForecastEnabled = false
+        #expect(state.forecast == nil)
+    }
+
+    /// The keys must not collide, or one experimental switch silently drives
+    /// the other.
+    @Test("The experimental preference keys are distinct")
+    func experimentalKeysAreDistinct() {
+        let keys = [
+            AppState.insideEnabledKey,
+            AppState.insideInPopoverKey,
+            AppState.insideAnimationKey,
+            AppState.forecastEnabledKey,
+        ]
+        #expect(Set(keys).count == keys.count, "\(keys)")
+    }
+
     /// The seam `@AppStorage` broke three times: the toggle has to land in the
     /// store the graph handed over, or a simulated session writes a feature flag
     /// into the owner's real preferences.
@@ -304,6 +367,107 @@ struct AppStateTests {
         state.stop()
 
         #expect(await sampler.calls == 0, "a closed window must cost nothing")
+    }
+
+    /// The wiring, end to end: a tick has to reach the projection and publish
+    /// it, or every unit test below is testing code nothing calls.
+    ///
+    /// What it asserts is deliberately weak about the *content*. Two seconds
+    /// into a simulated run there is no time constant yet — an estimate spans
+    /// three minutes — so the honest verdict is a refusal, and that is exactly
+    /// what should be on screen. The claim here is that the row **exists and
+    /// says why it is quiet**, which is the whole design: a blank row reads as
+    /// a machine the app has decided is fine.
+    @Test("With the feature on, a tick publishes a forecast that names what it is waiting for")
+    func aTickPublishesTheForecast() async {
+        let state = Self.state()
+        state.isForecastEnabled = true
+        state.diagnosisAppeared()
+
+        state.start()
+        try? await Task.sleep(for: .milliseconds(2500))
+        state.stop()
+
+        guard case let .unavailable(gap) = state.forecast else {
+            Issue.record("expected a named refusal two seconds in, got \(String(describing: state.forecast))")
+            return
+        }
+        // Either honest answer this early: no transients measured yet, or the
+        // draw has not held still long enough to have an equilibrium.
+        switch gap {
+        case .noTimeConstantYet, .loadNotSteady: break
+        default: Issue.record("unexpected gap this early: \(gap)")
+        }
+    }
+
+    /// Closing the window must drop the projection, not leave the last one on
+    /// screen for whenever it is opened again. A stale forecast keeps making a
+    /// claim about a machine nobody is watching.
+    @Test("Closing the window clears the forecast")
+    func closingTheWindowClearsTheForecast() async {
+        let state = Self.state()
+        state.isForecastEnabled = true
+        state.diagnosisAppeared()
+
+        state.start()
+        try? await Task.sleep(for: .milliseconds(2500))
+        state.stop()
+        #expect(state.forecast != nil, "the row must have been up to begin with")
+
+        state.diagnosisDisappeared()
+        #expect(state.forecast == nil)
+    }
+
+    /// The estimator has to actually accumulate from the snapshots it is
+    /// handed, which a two-second tick run cannot show: one estimate spans
+    /// three minutes of steady machine. Driven directly instead, with a
+    /// scripted ramp at the same shape a real one has.
+    @Test("Feeding the estimator scripted snapshots accumulates estimates")
+    func estimatorAccumulatesFromSnapshots() {
+        let state = Self.state()
+        let epoch = Date(timeIntervalSince1970: 1_753_000_000)
+        var rise = 45.0
+
+        for tick in 0 ..< 260 {
+            rise = 5 + (rise - 5) * exp(-1.0 / 75)
+            let fans = [
+                Fan(
+                    id: 0,
+                    name: "L",
+                    mode: .system,
+                    actualRPM: 4500,
+                    targetRPM: 4500,
+                    minRPM: 2317,
+                    maxRPM: 6800
+                ),
+            ]
+            state.ingestForecastSample(SMCSnapshot(
+                date: epoch.addingTimeInterval(Double(tick)),
+                fans: fans,
+                temperatures: [
+                    SensorReading(key: "Tp01", label: "CPU", celsius: 40 + rise),
+                    SensorReading(key: "TaLP", label: "Airflow", celsius: 40),
+                ],
+                power: 40
+            ))
+        }
+        #expect(state.forecastEstimateCount > 0, "a clean 260 s ramp must yield estimates")
+    }
+
+    /// The switch has to gate the work, not just the drawing. A projection
+    /// computed and published for a feature nobody turned on is the cost this
+    /// row was made opt-in to avoid.
+    @Test("With the feature off, a tick publishes nothing at all")
+    func aTickPublishesNothingWhenOff() async {
+        let state = Self.state()
+        state.diagnosisAppeared()
+
+        state.start()
+        try? await Task.sleep(for: .milliseconds(2500))
+        state.stop()
+
+        #expect(state.diagnosis != nil, "the rest of the window must still work")
+        #expect(state.forecast == nil, "a switched-off feature must not publish")
     }
 
     /// A sampler that counts, and returns nothing — the documented first-call
