@@ -382,9 +382,31 @@ every verdict state is demonstrable and screenshot-able with no hardware.
 pruning exists because the outlier test caught mid-day pruning re-folding a
 day down to its own worst transient), the verdict's refusals, the file's
 custody, and the copy's honesty rules — mutation-verified per house practice.
-Deferred, deliberately: the R-vs-RPM "what the noise buys you" chart (the
-schema already carries everything it needs) and any notification for any
-trend state (#81's lesson stands).
+Deferred, deliberately: any notification for any trend state (#81's lesson
+stands).
+
+**The R-vs-RPM "what the noise buys you" question is answered, 2026-09-01** —
+not as a chart, and not from `R`. Eight PRs (#147–#160): the simulation gained
+a real fan→temperature loop; `ThermalTimeConstant` measures how fast the die
+moves, from the transients the settle rule discards; `CoolingLaw` fits `ΔT` per
+fan band; `ThermalForecast` solves the running curve as a fixed point; and one
+opt-in row in "Why is it hot?" says where a load settles, when, and what a
+different fan speed would buy.
+
+Two deviations from the plan worth recording:
+
+- **It fits a line per band, not a single `R`.** The project's own four
+  measurements span 1.8× in `R` with the *lowest* at the *lowest* fan speed,
+  which is backwards from the measured fan dependence. System power includes
+  watts that never cross the heatsink, a share largest at idle; a ratio has
+  nowhere to put that and an intercept does. `docs/THERMAL.md` carries the
+  table.
+- **τ was measured before any copy was written on it** — 73.7 s on the
+  Mac14,9, against 45–135 s predicted from `R·C`. The bounds did not change,
+  which was the finding: they were set as a guard rather than a filter.
+
+The one thing it deliberately does not do is command the fans. A model that has
+never run on hardware does not get a vote on the cooling.
 
 ### The hand-back audit (2026-08-14) — protocol v27
 
