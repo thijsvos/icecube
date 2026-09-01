@@ -174,7 +174,7 @@ public enum ThermalForecast {
             case let .failure(gap): return .unavailable(gap)
             }
         } else {
-            guard let band = law.band(context.band) else {
+            guard let band = law.band(context.band), band.covers(watts: watts) else {
                 return .unavailable(.bandNotMeasured(context.band))
             }
             settled = (ambientCelsius + band.rise(atWatts: watts), context.band)
@@ -256,8 +256,15 @@ public enum ThermalForecast {
     ) -> Result<(celsius: Double, band: FanBand), Gap> {
         // What each measured band settles at, and which band the curve would
         // then ask for.
-        let candidates = law.measuredBands.map { band in
-            let celsius = ambient + (law.band(band)?.rise(atWatts: watts) ?? 0)
+        //
+        // Only bands measured near *this* draw. A line evaluated far outside
+        // the readings that produced it is extrapolation, and on the seeded
+        // history it produced exactly backwards answers — see
+        // `CoolingLaw.Band.covers(watts:)`.
+        typealias Candidate = (band: FanBand, celsius: Double, wants: FanBand)
+        let candidates: [Candidate] = law.measuredBands.compactMap { band in
+            guard let fitted = law.band(band), fitted.covers(watts: watts) else { return nil }
+            let celsius = ambient + fitted.rise(atWatts: watts)
             return (
                 band: band,
                 celsius: celsius,

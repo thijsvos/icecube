@@ -98,6 +98,14 @@ struct SettingsGeneralTab: View {
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                Toggle("Forecast — where the temperature is heading", isOn: $state.isForecastEnabled)
+                    .help("Adds a row to \u{201C}Why is it hot?\u{201D} projecting where this load settles.")
+                Text(
+                    "Every other row in that window reports a measurement; this one reports a "
+                        + "projection, and needs about ten minutes of use before it can say anything."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
                 if state.isInsideEnabled {
                     Toggle("Animate the fans and airflow", isOn: Binding(
                         get: { state.insideAnimation ?? !systemReducesMotion },

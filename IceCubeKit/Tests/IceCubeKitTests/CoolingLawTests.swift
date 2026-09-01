@@ -184,6 +184,101 @@ struct CoolingLawTests {
         #expect(CoolingLaw.fit(records: backwards).band(.band(forFraction: 0.95)) == nil)
     }
 
+    // MARK: - Extrapolation
+
+    /// **The bug this was written for.** `wattsRange` was recorded from the
+    /// first commit, described as the range "outside which the line is
+    /// extrapolation, and callers are expected to care" — and no caller cared.
+    ///
+    /// Caught in simulated mode. The seeded history held an idle band measured
+    /// at 14–25 W and a loaded band at 34–62 W. Asked what the fans would buy
+    /// at 48 W, the idle band's line — extrapolated 2.3× past anything it had
+    /// seen — came out **18.9 °C cooler** than the loaded one, and the app was
+    /// one merge from telling someone to slow their fans down to cool the
+    /// machine.
+    @Test("A band is not asked about a draw it was never measured at")
+    func extrapolationIsRefused() throws {
+        let idleOnly = Self.records(slope: 0.5, intercept: 0, wattsFrom: 14, wattsTo: 25, fraction: 0.34)
+        let loaded = Self.records(slope: 0.9, intercept: 0, wattsFrom: 34, wattsTo: 62, fraction: 0.95)
+        let law = CoolingLaw.fit(records: idleOnly + loaded)
+
+        let idleBand = try #require(law.band(.band(forFraction: 0.34)))
+        #expect(idleBand.covers(watts: 20), "20 W is inside what it saw")
+        #expect(!idleBand.covers(watts: 48), "48 W is more than twice anything it saw")
+
+        // And the comparison must therefore not offer it.
+        let coolest = try #require(law.coolestBand(atWatts: 48))
+        #expect(
+            coolest.band == .band(forFraction: 0.95),
+            "at 48 W only the loaded band has evidence, got \(coolest.band)"
+        )
+    }
+
+    /// A small margin is deliberate: a line is still roughly itself just
+    /// outside the readings that produced it.
+    @Test("A draw just outside the measured range is still answered")
+    func smallMarginIsAllowed() throws {
+        let band = try #require(
+            CoolingLaw.fit(records: Self.records(wattsFrom: 20, wattsTo: 40)).band(.band(forFraction: 0.95))
+        )
+        #expect(band.covers(watts: 43), "3 W past a 20 W span is inside the margin")
+        #expect(!band.covers(watts: 55), "15 W past it is a different regime")
+    }
+
+    @Test("With no band measured near the draw, there is no comparison at all")
+    func noBandCoversTheDraw() {
+        let law = CoolingLaw.fit(records: Self.records(wattsFrom: 10, wattsTo: 20))
+        #expect(law.coolestBand(atWatts: 60) == nil)
+    }
+
+    // MARK: - The seeded history must teach the right thing
+
+    /// `docs/THERMAL.md` exists partly because a screenshot can teach a number
+    /// the hardware does not produce. The seeded history is where every
+    /// simulated screenshot comes from, so the law fitted from it has to be
+    /// **physically ordered**: at any given load, more fan must be cooler.
+    ///
+    /// It was not, until 2026-09-01. Each band carried a fixed `R` taken from a
+    /// different real measurement — 0.51 °C/W at idle, 0.90 under load — and
+    /// `R` genuinely varies with load, which is the whole reason this type fits
+    /// a line. Compared at one wattage those constants said the near-stopped
+    /// fans were coolest.
+    @Test("The seeded history fits a law where more fan is cooler at every load")
+    func seededLawIsPhysicallyOrdered() {
+        let history = SimulatedCoolingHistory.seed(.stable, endingAt: Self.epoch)
+        let law = CoolingLaw.fit(history)
+        #expect(law.measuredBands.count >= 3, "got \(law.measuredBands)")
+
+        for watts in [20.0, 35.0, 45.0] {
+            let ordered = law.measuredBands
+                .compactMap { band -> (Int, Double)? in
+                    guard let fit = law.band(band), fit.covers(watts: watts) else { return nil }
+                    return (band.sortKey, fit.rise(atWatts: watts))
+                }
+                .sorted { $0.0 < $1.0 }
+            guard ordered.count >= 2 else { continue }
+            for (slower, faster) in zip(ordered, ordered.dropFirst()) {
+                #expect(
+                    faster.1 < slower.1,
+                    "at \(watts) W band \(faster.0) must be cooler than band \(slower.0): \(ordered)"
+                )
+            }
+        }
+    }
+
+    /// Ground rule 3: the comparison has to be demonstrable with no hardware,
+    /// and it has to point the right way when it is.
+    @Test("The seeded history can offer a cooler fan speed, and it is a faster one")
+    func seededHistoryOffersAFasterFan() throws {
+        let law = CoolingLaw.fit(SimulatedCoolingHistory.seed(.stable, endingAt: Self.epoch))
+        let atMidLoad = try #require(law.coolestBand(atWatts: 35))
+        let slowest = try #require(law.measuredBands.first)
+        #expect(
+            atMidLoad.band.sortKey > slowest.sortKey,
+            "the coolest option at 35 W must be faster than the slowest measured band"
+        )
+    }
+
     @Test("An empty history yields an empty law rather than a crash or a zero")
     func emptyHistoryIsEmpty() {
         let law = CoolingLaw.fit(records: [])

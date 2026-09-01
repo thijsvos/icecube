@@ -35,6 +35,13 @@ import Foundation
 /// launches" until 2026-08-16, which stopped being true when the history
 /// shipped.)
 ///
+/// **"Where this is heading."** Same boundary, shorter clock. ``ThermalForecast``
+/// answers it (question 6 of `docs/DIAGNOSIS.md`), and needs the same two things
+/// this type is denied: a fitted cooling law and a measured time constant, both
+/// accumulated across launches. A snapshot cannot produce either, so this type
+/// says nothing about the future — and the window keeps the projection visibly
+/// apart from these four measurements for the reader's sake.
+///
 /// Pure by construction: no I/O, no clock, no hardware. Every input arrives as
 /// a parameter so the whole verdict is exercised against scripted values.
 public enum ThermalDiagnosis {

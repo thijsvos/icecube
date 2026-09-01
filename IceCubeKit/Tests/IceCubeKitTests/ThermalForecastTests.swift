@@ -46,13 +46,30 @@ struct ThermalForecastTests {
         }
     }
 
-    /// A law with a chosen line in each named band.
-    private static func law(_ entries: [(FanBand, slope: Double, intercept: Double)]) -> CoolingLaw {
+    /// A law with a chosen line in each named band, measured over `range`.
+    private static func law(
+        _ entries: [(FanBand, slope: Double, intercept: Double)],
+        measuredOver range: ClosedRange<Double> = 5 ... 60
+    ) -> CoolingLaw {
         var bands: [FanBand: CoolingLaw.Band] = [:]
         for entry in entries {
             bands[entry.0] = CoolingLaw.Band(
                 slope: entry.slope, intercept: entry.intercept,
-                residual: 0.5, records: 40, wattsRange: 5 ... 60
+                residual: 0.5, records: 40, wattsRange: range
+            )
+        }
+        return CoolingLaw(bands: bands)
+    }
+
+    /// A law whose bands were each measured over their own load range.
+    private static func law(
+        ranged entries: [(FanBand, slope: Double, intercept: Double, range: ClosedRange<Double>)]
+    ) -> CoolingLaw {
+        var bands: [FanBand: CoolingLaw.Band] = [:]
+        for entry in entries {
+            bands[entry.0] = CoolingLaw.Band(
+                slope: entry.slope, intercept: entry.intercept,
+                residual: 0.5, records: 40, wattsRange: entry.range
             )
         }
         return CoolingLaw(bands: bands)
@@ -257,6 +274,56 @@ struct ThermalForecastTests {
             Issue.record("past the ceiling there is nothing to count down to")
             return
         }
+    }
+
+    // MARK: - Extrapolation
+
+    /// The forecast must not settle in a band on the strength of a line
+    /// evaluated far outside anything that band was measured at.
+    ///
+    /// Band 3 here was fitted on idle draws (10–20 W) and, extrapolated to
+    /// 48 W, is the only self-consistent answer — so without the coverage
+    /// check the window would confidently report the machine settling with its
+    /// fans nearly stopped. Band 9 has the evidence at this draw but is not
+    /// self-consistent, so the honest outcome is a refusal.
+    @Test("The fixed point will not settle in a band that was never measured at this draw")
+    func solverRefusesToExtrapolate() {
+        // A gentle curve, so both candidate temperatures land inside band 3's
+        // own decile — which is what makes the extrapolated answer look
+        // self-consistent, and therefore what the guard has to catch.
+        let curve = FanCurve(points: [
+            CurvePoint(celsius: 60, fraction: 0.30),
+            CurvePoint(celsius: 95, fraction: 0.42),
+        ])
+        let law = Self.law(ranged: [
+            // Fitted on idle draws only. At 48 W its line predicts 73.8 °C, at
+            // which this curve asks for band 3 — so without the coverage check
+            // it is the one self-consistent answer, and the window would report
+            // the machine settling with its fans nearly stopped.
+            (.decile(3), slope: 0.6, intercept: 0, range: 10 ... 20),
+            // Has the evidence at 48 W, but settles at 69 °C where the curve
+            // asks for band 3 — so it is not self-consistent on its own.
+            (.decile(9), slope: 0.5, intercept: 0, range: 34 ... 62),
+        ])
+        let verdict = Self.project(die: 70, watts: 48, curve: curve, law: law)
+        guard case let .unavailable(gap) = verdict else {
+            Issue.record("expected a refusal, got \(verdict)")
+            return
+        }
+        guard case .bandNotMeasured = gap else {
+            Issue.record("expected bandNotMeasured, got \(gap)")
+            return
+        }
+    }
+
+    /// Same rule on the manual path, where there is no curve and the machine
+    /// simply stays where the fans were put.
+    @Test("Manual control is refused when this band has no readings at this draw")
+    func manualRefusesToExtrapolate() {
+        let law = Self.law([(.decile(6), slope: 1.0, intercept: -5)], measuredOver: 10 ... 20)
+        #expect(Self.gap(Self.project(watts: 48, law: law)) == .bandNotMeasured(.decile(6)))
+        // The same band, asked about a draw it actually saw, still answers.
+        #expect(Self.projection(Self.project(watts: 18, law: law)) != nil)
     }
 
     // MARK: - The counterfactual

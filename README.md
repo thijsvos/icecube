@@ -43,6 +43,7 @@ dependencies**; small footprint is a design goal, not an accident.
 | Power draw, and a cooling-efficiency index in °C/W — *is it hot, or is cooling failing?* | ✅ |
 | Cooling history: whether this Mac sheds heat as well as it did in June — persisted, per fan-speed band, with a verdict that refuses when the data cannot carry it | ✅ |
 | **"Why is it hot?"** — per-process watts, which silicon leads, and whether your curve has anything left | ✅ |
+| **Forecast** *(opt-in)* — where this load settles, roughly when, and what a different fan speed would buy, from your own Mac's measured cooling | ✅ |
 | Decision timeline: the charts mark *why* the fans moved, in the daemon's words | ✅ |
 | CSV history export, temperature alerts, launch at login, °C/°F | ✅ |
 | Update check via GitHub Releases — once a day, link only, never auto-install, switchable off | ✅ |
@@ -181,6 +182,41 @@ Process names never leave your Mac: they are absent from the diagnostics export,
 never written to disk, and collected only while the window is open. A simulated
 run reads no real process at all. [docs/DIAGNOSIS.md](docs/DIAGNOSIS.md) has the
 full accounting, including what the app cannot see.
+
+### Where this is heading
+
+Every fan tool shows the temperature *now* and lets you fire a rule once a
+threshold is crossed. Ice Cube can tell you where the temperature is **going**:
+
+```
+Where this is heading             settles at 91 °C · about 2 min
+  Your curve will take the fans to 5150 RPM as it climbs.
+  Running the fans harder would settle it at 82 °C instead, 9 °C cooler.
+```
+
+That last line is the point. The question this app exists for is *is the noise
+worth it?*, and this answers it in degrees **before** you pay for the noise —
+using how your Mac has actually behaved, at the fan speeds it has actually run,
+under the curve you drew.
+
+It works from two things measured on your own machine, both from data already
+being recorded: how much the die rises per watt at each fan speed, and how fast
+it gets there. The second comes from the transients the °C/W rule throws away —
+a die mid-ramp is useless for measuring cooling and is the only place a rate
+exists. Measured on the reference Mac14,9: **73.7 s**.
+
+**It is opt-in, in Settings → General → Experimental, and it refuses a lot.**
+Every other row in that window reports a measurement; this one reports a
+projection, so it is switched on deliberately and worded so the two are never
+confused. It needs about ten minutes of use before it can say anything, it will
+not answer for a fan speed your Mac has never run at, and it will not
+extrapolate a reading past the load range it was taken over. When it cannot
+answer it says which of those is missing, rather than going quiet.
+
+It never moves the fans. It is a description of where the machine is already
+going, not an instruction to it.
+[docs/THERMAL.md](docs/THERMAL.md) has the physics and the measurements;
+[docs/DIAGNOSIS.md](docs/DIAGNOSIS.md) has the rules it is held to.
 
 ## Safety design
 

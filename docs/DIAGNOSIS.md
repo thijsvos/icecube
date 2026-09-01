@@ -1,9 +1,9 @@
 # Why is it hot? — what Ice Cube can tell you, and what it cannot
 
-Ice Cube's Diagnose window answers four questions about this moment, and a
-fifth about the months behind it. This file explains where each answer comes
-from, why the numbers on screen deliberately do not add up, and the things the
-app cannot see at all.
+Ice Cube's Diagnose window answers four questions about this moment, a fifth
+about the months behind it, and a sixth — opt-in — about the next few minutes.
+This file explains where each answer comes from, why the numbers on screen
+deliberately do not add up, and the things the app cannot see at all.
 
 Every figure quoted here was measured on real hardware. Where something has not
 been measured, it says so.
@@ -24,7 +24,7 @@ hours. The fans were at 6800 RPM and the die at 71 °C. Ice Cube was fighting it
 the entire time and had no screen that could name the cause — the diagnosis took
 one API call the app was not making.
 
-## The five questions
+## The six questions
 
 ### 1. How hot is it?
 
@@ -126,6 +126,56 @@ no moment that deserves a warning, and colouring it would train the eye to
 ignore the one state that means *now* (the abrupt change, which does get the
 triangle). No trend state ever posts a notification.
 
+### 6. Where is this heading?
+
+Opt-in, off by default, in Settings → General → Experimental. The only row in
+this window that is not a measurement.
+
+Every other question here reports something read from the machine: the die is
+79 °C, the fans are at 5,150 RPM, this process drew 4.2 W. This one reports a
+**projection**, and says so in every state it can be in.
+
+It answers three things when it can:
+
+- **Where this load settles.** Not the current temperature — the one it is
+  heading for, from the cooling this Mac has measured for itself at this fan
+  speed.
+- **Roughly when.** Stated as "about 2 min", never as a countdown. A model this
+  approximate must not print `2:04`, and the formatting is where a reader looks
+  to know how much precision to grant a number.
+- **What the fans would buy.** If this Mac has run at a cooler fan speed and
+  recorded it, the row says what that speed would settle at instead. This is
+  the question the whole app exists for, answered *before* the noise is paid
+  for rather than after.
+
+If the projection crosses the 104 °C ceiling, it says when — and says that the
+safety rule will force the fans to maximum first, because it will.
+
+**The rule this row is governed by.** A projection must never be mistakable for
+a reading. Three things enforce that: the title is a direction ("Where this is
+heading") rather than a value; durations are approximate out loud; and every
+refusal names what is missing, so a quiet row reads as *waiting* rather than as
+a machine the app has decided is fine.
+
+**What it needs before it can speak.** A time constant, which takes about
+twenty measurements, each spanning three minutes of steady machine — roughly
+ten minutes of ordinary use. And settled readings at the fan speed it is
+currently in, which come from the same history the trend above uses. Until it
+has both, it says which one is missing.
+
+**What it is approximate about**, all named in the hover:
+
+- Silicon responds in seconds and the chassis in minutes. This fits the slower
+  of the two, so it is optimistic about the first few seconds of a load step.
+- It treats the airflow reading as fixed while that is in fact climbing, worth
+  a degree or two over a couple of minutes.
+- It claims nothing beyond half an hour.
+- **It never moves the fans.** It is a description of where the machine is
+  already going, not an instruction to it.
+
+Measured on a Mac14,9: τ = 73.7 s, from 89 estimates over 28 minutes of
+ordinary use. See `docs/THERMAL.md` for the distribution and the method.
+
 ## Why the numbers do not add up — and must not
 
 This is the most important section in the file.
@@ -212,6 +262,9 @@ and is now question 5. What remains out of reach:
 - **Comparing your Mac with anyone else's.** `R`'s reference is a sensor
   inside the case and its denominator is whatever this machine powers; the
   trend is self-comparison, forever.
+- **Predicting *why* a load will change.** Question 6 projects where the
+  current load is heading; it has nothing to say about whether that load is
+  about to stop, because nothing in the SMC knows what the user is about to do.
 - **Naming the cause rather than ranking it — with exactly one exception.**
   Dust is the usual reason at a slow pace, dried paste the next, but the app
   cannot see inside the machine and its copy never claims to.

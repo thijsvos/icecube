@@ -68,6 +68,18 @@ struct DiagnosisView: View {
                         Divider()
                         SectionRow(copy: charging)
                     }
+                    // Under heat and charging, above load: this is a claim
+                    // about where that heat is going, so it belongs beside the
+                    // number it is about rather than after the process list.
+                    // Absent entirely when the feature is off — `forecast` is
+                    // nil unless the user asked for it.
+                    if let forecast = state.forecast {
+                        Divider()
+                        SectionRow(
+                            copy: ForecastCopy.row(forecast, style: state.temperatureUnit.style),
+                            isWarning: ForecastCopy.isWarning(forecast)
+                        )
+                    }
                     Divider()
                     SectionRow(
                         copy: DiagnosisCopy.load(verdict.load, style: state.temperatureUnit.style),
