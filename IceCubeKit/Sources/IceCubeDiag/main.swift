@@ -9,10 +9,12 @@ import IceCubeKit
 //   swift run icecube-diag --simulated  run against the simulation instead
 //   swift run icecube-diag --watch [secs] CSV of fan/temp every 200 ms
 //   swift run icecube-diag --processes  per-process watts vs system total
+//   swift run icecube-diag --forecast [secs]  measure this Mac's thermal time constant
 let arguments = CommandLine.arguments
 let wantsJSON = arguments.contains("--json")
 let wantsWatch = arguments.contains("--watch")
 let wantsProcesses = arguments.contains("--processes")
+let wantsForecast = arguments.contains("--forecast")
 let simulated = arguments.contains("--simulated") || ProcessInfo.processInfo.environment["ICECUBE_SIMULATED"] == "1"
 
 let provider: any SMCProviding
@@ -106,6 +108,147 @@ func showProcesses(_ provider: any SMCProviding, sampler: any ProcessSampling) a
         print(String(format: "  %6.2f W  %@ (%d)", sample.watts, sample.name, sample.pid))
     }
     print("\nThese do not sum to the system total, and should not — see docs/DIAGNOSIS.md.")
+}
+
+/// Samples the SMC for `seconds`, feeding every tick to ``ThermalTimeConstant``,
+/// and prints the distribution of τ it accepted plus why it refused the rest.
+///
+/// **This is an instrument, not a feature.** `ThermalTimeConstant`'s plausible
+/// band is reasoning from `R ≈ 0.9 °C/W` and a heatsink of order 50–150 J/°C —
+/// nobody has measured τ on real hardware. The last constant in this project
+/// set from first principles alone was `ChargingWarmth.onsetCelsius`, which
+/// shipped a degree inside the noise it was meant to clear and was corrected
+/// the same day. So the bounds stay placeholders until a run of this prints a
+/// distribution, and no user-facing copy ships before that.
+///
+/// The refusal tally matters as much as the median. A gate that rejects
+/// everything is indistinguishable, from the outside, from a machine that
+/// never ramps — and the two call for opposite fixes.
+func forecast(_ provider: any SMCProviding, seconds: Double) async {
+    var subject = ThermalTimeConstant()
+    var refusals: [String: Int] = [:]
+    var ticks = 0
+    let started = ContinuousClock.now
+
+    print("Sampling for \(Int(seconds)) s. Give the Mac something to do — a build, a render —")
+    print("then let it go quiet again. Transients are the only place a time constant lives.\n")
+
+    while (ContinuousClock.now - started) < .seconds(seconds) {
+        if let snapshot = try? await provider.snapshot(),
+           let watts = snapshot.power,
+           let ambient = CoolingEfficiency.ambient(from: snapshot.temperatures),
+           let die = snapshot.temperatures.filter(\.sensorClass.isDie).map(\.celsius).max()
+        {
+            let usable = snapshot.fans.filter(\.hasUsableRange)
+            let fraction = usable.isEmpty
+                ? 0
+                : usable.map { $0.actualRPM / $0.maxRPM }.reduce(0, +) / Double(usable.count)
+            subject.ingest(ThermalTimeConstant.Observation(
+                date: snapshot.date,
+                dieCelsius: die,
+                ambientCelsius: ambient,
+                watts: watts,
+                fanFraction: fraction
+            ))
+            ticks += 1
+            let name = subject.lastRefusal.map { "\($0)".prefix(while: { $0 != "(" }) } ?? "accepted"
+            refusals[String(name), default: 0] += 1
+            if ticks % 30 == 0 {
+                let tau = subject.tau.map { String(format: "%.0f s", $0) } ?? "—"
+                print("  \(ticks) ticks · \(subject.estimateCount) estimates · τ \(tau)")
+            }
+        }
+        try? await Task.sleep(for: .seconds(1))
+    }
+
+    print("\nTime constant")
+    if subject.estimateCount == 0 {
+        print("  no estimates — the machine never ramped with everything else held still")
+    } else {
+        for p in [10.0, 25.0, 50.0, 75.0, 90.0] {
+            let value = subject.percentile(p).map { String(format: "%6.1f s", $0) } ?? "     —"
+            print("  p\(Int(p))\(p < 100 ? " " : "")  \(value)")
+        }
+        print("  estimates: \(subject.estimateCount) of \(ticks) ticks")
+        let reported = subject.tau.map { String(format: "%.0f s", $0) } ?? "— (below the evidence bar)"
+        print("  reported:  \(reported)")
+        print(
+            "  band:      \(Int(ThermalTimeConstant.minimumPlausible))–\(Int(ThermalTimeConstant.maximumPlausible)) s (placeholder — this run is what replaces it)"
+        )
+    }
+
+    print("\nWhy the rest were refused")
+    for (reason, count) in refusals.sorted(by: { $0.value > $1.value }) {
+        print(String(format: "  %-26@ %4d", reason as NSString, count))
+    }
+
+    print("\nCooling law (from the recorded history)")
+    switch loadedHistory() {
+    case let .success(history):
+        let law = CoolingLaw.fit(history)
+        if law.measuredBands.isEmpty {
+            print("  no band has enough records with a wide enough spread of draw yet")
+            print("  (\(history.records.count) raw records, needs \(CoolingLaw.minimumRecordsPerBand) per band")
+            print("   spanning \(Int(CoolingLaw.minimumPowerSpreadFraction * 100)) % of their mean)")
+        } else {
+            for band in law.measuredBands {
+                guard let fit = law.band(band) else { continue }
+                print(String(
+                    format: "  band %-2d  ΔT = %.3f·W %@ %.1f   n=%d  %.1f–%.1f W  residual %.2f °C",
+                    band.sortKey, fit.slope, (fit.intercept < 0 ? "−" : "+") as NSString,
+                    abs(fit.intercept), fit.records,
+                    fit.wattsRange.lowerBound, fit.wattsRange.upperBound, fit.residual
+                ))
+            }
+        }
+    case let .failure(why):
+        print("  \(why.message)")
+    }
+}
+
+/// Reads the app's cooling history from disk, read-only.
+///
+/// `CoolingHistoryStore` lives in the app target, so this reaches the file
+/// directly rather than importing UI code into a CLI. It only ever reads —
+/// a diagnostic tool that could rewrite the history it is reporting on would
+/// be a bad trade for a few lines saved.
+func loadedHistory() -> Result<CoolingHistory, HistoryUnavailable> {
+    let path = FileManager.default
+        .homeDirectoryForCurrentUser
+        .appending(path: "Library/Application Support/IceCube/cooling-history.json")
+    guard let data = try? Data(contentsOf: path) else {
+        return .failure(HistoryUnavailable("no history file yet — run the app for a while first"))
+    }
+    switch CoolingHistory.decode(
+        data,
+        modelIdentifier: HostInfo.modelIdentifier(),
+        isSimulated: simulated,
+        serialNumber: HostInfo.serialNumber()
+    ) {
+    case let .loaded(history):
+        return .success(history)
+    case let .readOnly(reason):
+        // A file newer than this build understands carries no decoded history
+        // to report on, and must not be rewritten to make one.
+        return .failure(HistoryUnavailable("history is newer than this build (\(reason))"))
+    case let .startFresh(reason):
+        return .failure(HistoryUnavailable("history unusable: \(reason)"))
+    }
+}
+
+/// Why there is no history to fit. A named type only because `Result` needs
+/// its failure to be an `Error`; the message is the whole of it.
+struct HistoryUnavailable: Error {
+    let message: String
+    init(_ message: String) {
+        self.message = message
+    }
+}
+
+if wantsForecast {
+    let seconds = arguments.compactMap(Double.init).first ?? 600
+    await forecast(provider, seconds: seconds)
+    exit(0)
 }
 
 if wantsProcesses {

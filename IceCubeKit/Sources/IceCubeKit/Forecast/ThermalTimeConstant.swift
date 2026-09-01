@@ -50,17 +50,44 @@ public struct ThermalTimeConstant: Sendable, Equatable {
 
     /// Spacing between the three samples an estimate is built from, seconds.
     ///
-    /// The measurement is a ratio of two differences, so the noise floor is
-    /// what sets this. Over one second a die 40 °C from its equilibrium with
-    /// τ = 75 s moves ~0.53 °C, and the *difference between two such steps* is
-    /// under 0.01 °C — far below the ~0.25 °C the SMC reports in. Over ten
-    /// seconds the same die moves ~5 °C per step with ~0.6 °C between them,
-    /// which is measurable.
+    /// **The spacing chooses which pole gets measured, and that is the most
+    /// consequential decision in this type.**
     ///
-    /// Ten seconds also costs the same twenty seconds of steady machine that
-    /// ``CoolingEfficiency/settleWindow`` already asks for, so a stretch that
-    /// can produce an `R` can produce a τ.
-    public static let spacingSeconds: TimeInterval = 10
+    /// A laptop is not a first-order system. Silicon responds to the heat
+    /// spreader in seconds; the spreader, heatsink and chassis respond in
+    /// minutes. Fitting one pole to that lands wherever the sampling window
+    /// looks — short windows see the fast pole, long ones see the slow one.
+    ///
+    /// The forecast built on this claims where a load *settles* and how long
+    /// that takes, over minutes. That is governed by the slow pole, so the
+    /// window has to be long enough to see past the fast one.
+    ///
+    /// Swept against `MockSMCSimulation`, whose poles are 6 s and 75 s
+    /// (70/30), over an hour of its timeline — median recovered τ against
+    /// spacing:
+    ///
+    /// | Spacing | Estimates | p25 | **p50** | p75 |
+    /// | --- | --- | --- | --- | --- |
+    /// | 10 s | 81 | 18.6 | **31.1** | 51.2 |
+    /// | 20 s | 202 | 20.6 | **30.4** | 48.6 |
+    /// | 30 s | 291 | 25.4 | **40.6** | 68.1 |
+    /// | 60 s | 181 | 36.2 | **56.7** | 100.0 |
+    /// | 90 s | 167 | 49.1 | **80.7** | 148.1 |
+    ///
+    /// Ninety seconds recovers 80.7 s against a true slow pole of 75 — the
+    /// only spacing that lands near it. Ten seconds, the first value tried,
+    /// reported 31 s: not wrong about anything, just measuring a different
+    /// pole from the one the forecast needs.
+    ///
+    /// The cost is a triple spanning **180 s**, which the machine must hold
+    /// steady throughout. That is common at idle and during a long build, and
+    /// rare otherwise — the estimator reports how many it has rather than
+    /// pretending the wait away.
+    ///
+    /// The spread stays wide at every spacing (p25 to p75 spans 3×), because
+    /// a single pole fitted to two genuinely cannot be tighter. That is why
+    /// ``tau`` is a median over many estimates and not one measurement.
+    public static let spacingSeconds: TimeInterval = 90
 
     /// How far the real spacing may sit from ``spacingSeconds``, as a fraction.
     ///
@@ -95,18 +122,44 @@ public struct ThermalTimeConstant: Sendable, Equatable {
     public static let powerTolerance = CoolingEfficiency.powerTolerance
 
     /// How much the fans may drift across the three samples, as a fraction of
-    /// range. Borrowed from ``CoolingRecorder/fanSettleTolerance``: the fans
-    /// changing mid-fit changes the equilibrium the die is chasing, and the
-    /// three-point method assumes one asymptote throughout.
-    public static let fanTolerance = CoolingRecorder.fanSettleTolerance
+    /// range.
+    ///
+    /// The fans changing mid-fit changes the equilibrium the die is chasing,
+    /// and the three-point method assumes one asymptote throughout. Unlike the
+    /// airflow reference below, this bias does **not** cancel in the ratio.
+    ///
+    /// One ``FanBand/width``, because that is the resolution at which this app
+    /// claims cooling differs at all: ``CoolingLaw`` fits a separate line per
+    /// decile, so movement inside one decile is by construction the same
+    /// cooling regime. Borrowing ``CoolingRecorder/fanSettleTolerance`` (0.05)
+    /// instead was half a band and rejected ~65 % of windows on the simulated
+    /// machine for a distinction the rest of the design does not make.
+    public static let fanTolerance = FanBand.width
 
     /// How far airflow may drift across the three samples, °C.
     ///
-    /// `ΔT` is measured against airflow, and airflow climbs as the chassis
-    /// soaks. A rising reference eats into the die's apparent approach and
-    /// biases τ long. Half a degree over thirty seconds is slower than any
-    /// soak this machine has been measured doing.
-    public static let ambientDriftCelsius: Double = 0.5
+    /// Deliberately loose, for a reason that took a measurement to see. This
+    /// started at 0.5 °C on the reasoning that a rising reference eats into the
+    /// die's apparent approach — which sounds right and is mostly wrong.
+    ///
+    /// **A proportional airflow response cancels in the ratio.** Airflow rises
+    /// with the die rather than independently (in `MockSMCSimulation` it takes
+    /// a fixed share; on hardware the same coupling is why `docs/THERMAL.md`
+    /// warns airflow "is not room temperature"). If `ambient ≈ a₀ + k · rise`,
+    /// then `ΔT = die − ambient` is still the same exponential scaled by
+    /// `(1 − k)` — and this method divides one difference by another, so every
+    /// constant scale factor cancels. τ is unchanged.
+    ///
+    /// What does bias it is airflow moving on a *different* time constant from
+    /// the die, which is a second-order effect, and an outright step — a sensor
+    /// glitch, or a machine carried into another room. This catches those.
+    ///
+    /// Measured on the simulated machine over 20 s windows: airflow drifts
+    /// 1.22 °C at the median, 5.94 °C at p90. The original 0.5 °C therefore
+    /// refused **more than half of all windows**, including every genuine ramp
+    /// — `icecube-diag --forecast` accepted zero estimates in 150 s and named
+    /// this gate 44 times. That is what the refusal tally is for.
+    public static let ambientDriftCelsius: Double = 5
 
     /// The shortest τ this will believe.
     ///
@@ -382,5 +435,16 @@ public struct ThermalTimeConstant: Sendable, Equatable {
     /// copy layer shows against ``minimumEstimates``.
     public var estimateCount: Int {
         estimates.count
+    }
+
+    /// A percentile of the accepted estimates, ignoring ``minimumEstimates``.
+    ///
+    /// For the measurement runs that set ``minimumPlausible`` and
+    /// ``maximumPlausible``: a median alone cannot say whether the spread is
+    /// tight enough for those bounds to be doing useful work, and the bounds
+    /// are placeholders until hardware says otherwise. `icecube-diag
+    /// --forecast` prints the distribution; nothing user-facing reads this.
+    public func percentile(_ p: Double) -> TimeInterval? {
+        CoolingStatistics.percentile(estimates, p)
     }
 }
