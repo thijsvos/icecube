@@ -6,12 +6,26 @@ import Foundation
 ///
 /// A trend needs weeks and a simulated run has minutes, so an un-seeded
 /// launch could only ever demonstrate the "collecting" state — the same
-/// reason `seedSimulatedDecisions` exists for the decision timeline. And the
-/// live simulated recorder cannot fill in: the mock has no fan→temperature
-/// feedback, so its `R` *falls* at higher RPM where real hardware's rises,
-/// and a screenshot built from live simulated records would teach the
-/// opposite of THERMAL.md. The medians here are taken from that file's
-/// measured table instead, so the pictures are physically right.
+/// reason `seedSimulatedDecisions` exists for the decision timeline. That
+/// reason is unchanged and is why this file still exists.
+///
+/// CORRECTION (2026-09-01): the paragraph here used to give a *second*
+/// reason — that the live simulated recorder could not fill in because "the
+/// mock has no fan→temperature feedback". That is no longer true, and its
+/// arithmetic was backwards even when it was. The old model had `R` **rise**
+/// with fan speed (0.38 °C/W at rest, 0.89 at maximum, because temperature
+/// and power both read the workload envelope and the fans only followed),
+/// where real hardware's `R` **falls** — THERMAL.md measures 1.04–1.13 at
+/// 3550 RPM against 0.89–0.93 at 5950. The sentence named the right defect
+/// and swapped which side had which sign.
+///
+/// `MockSMCSimulation` now integrates a genuine closed loop, so its `R` falls
+/// with fan speed like the hardware's. Only the clock stands between this
+/// file and a recorder that fills its own history — see
+/// ``MockSMCProvider/equilibriumRise(watts:fanFraction:)``.
+///
+/// The medians below are still taken from THERMAL.md's measured table rather
+/// than from the model, so the pictures stay anchored to hardware.
 ///
 /// Deterministic (the `MockSMCSimulation` house rule): the same story always
 /// produces the same records, jittered by the same ±2 % the real hardware
@@ -71,7 +85,7 @@ public enum SimulatedCoolingHistory {
             // band's normal — enough count and span for the jump verdict.
             for step in 0 ..< 6 {
                 let at = now.addingTimeInterval(Double(step) * 1800 - 3 * 3600 - 1800)
-                let record = idleRecord(at: at, r: 0.62 * jitter(offset: 900 + step))
+                let record = idleRecord(at: at, r: 0.62 * jitter(offset: 900 + step), offset: 900 + step)
                 history.append(record, now: at)
             }
         }
@@ -103,7 +117,11 @@ public enum SimulatedCoolingHistory {
             for k in 0 ..< count {
                 let hour = 9.0 + Double(k) * 3 + noise(dayOffset, 10 + k) * 0.8
                 guard let date = timeIfPast(dayStart, hour: hour, now: now) else { continue }
-                records.append(idleRecord(at: date, r: idleBase * jitter(offset: dayOffset * 10 + k)))
+                records.append(idleRecord(
+                    at: date,
+                    r: idleBase * jitter(offset: dayOffset * 10 + k),
+                    offset: dayOffset * 10 + k
+                ))
             }
         }
 
@@ -118,7 +136,11 @@ public enum SimulatedCoolingHistory {
             }
             let hour = 13.0 + noise(dayOffset, 3) * 4
             if let date = timeIfPast(dayStart, hour: hour, now: now) {
-                records.append(loadedRecord(at: date, r: loadedBase * jitter(offset: dayOffset * 10 + 7)))
+                records.append(loadedRecord(
+                    at: date,
+                    r: loadedBase * jitter(offset: dayOffset * 10 + 7),
+                    offset: dayOffset * 10 + 7
+                ))
             }
         }
         return records.sorted { $0.date < $1.date }
@@ -126,14 +148,36 @@ public enum SimulatedCoolingHistory {
 
     // MARK: - Record shapes, from the measured table
 
-    /// Resting: ~2317 RPM (0.34 of maximum, band 3), 19.6 W idle draw.
-    private static func idleRecord(at date: Date, r: Double) -> CoolingRecord {
-        record(at: date, r: r, watts: 19.6, ambient: 39.5, fraction: 0.34)
+    /// How widely the draw varies within one band, as a fraction of its mean.
+    ///
+    /// A real machine does not sit at one wattage whenever its fans are in a
+    /// given decile — it wanders, and the wandering is what makes the band's
+    /// `(watts, rise)` pairs describe a *line* rather than a point. Seeded
+    /// records used to be a single wattage per band (19.6 and 48 exactly),
+    /// which is enough for a median but not for anything that has to separate
+    /// a slope from an offset.
+    ///
+    /// ±30 % of the mean, so a band spans a 60 % range — comfortably identifying
+    /// for a two-parameter fit, and still a narrower spread than the
+    /// 12 %-to-6× range THERMAL.md's own readings cover.
+    private static let wattsSpread = 0.30
+
+    /// Deterministic draw for one record: the band's mean, spread by
+    /// ``wattsSpread``. Varies **watts only** — the fan fraction stays put, so
+    /// the record cannot drift into a neighbouring band and cannot move the
+    /// epoch fan medians `CoolingTrend.maxWithinBandFanDrift` polices.
+    private static func watts(around mean: Double, offset: Int) -> Double {
+        mean * (1 + wattsSpread * 2 * (noise(offset, 5) - 0.5))
     }
 
-    /// Under sustained load: ~6460 RPM (0.95 of maximum, band 9), ~48 W.
-    private static func loadedRecord(at date: Date, r: Double) -> CoolingRecord {
-        record(at: date, r: r, watts: 48, ambient: 47, fraction: 0.95)
+    /// Resting: ~2317 RPM (0.34 of maximum, band 3), around the 19.6 W idle draw.
+    private static func idleRecord(at date: Date, r: Double, offset: Int) -> CoolingRecord {
+        record(at: date, r: r, watts: watts(around: 19.6, offset: offset), ambient: 39.5, fraction: 0.34)
+    }
+
+    /// Under sustained load: ~6460 RPM (0.95 of maximum, band 9), around 48 W.
+    private static func loadedRecord(at date: Date, r: Double, offset: Int) -> CoolingRecord {
+        record(at: date, r: r, watts: watts(around: 48, offset: offset), ambient: 47, fraction: 0.95)
     }
 
     private static func record(
