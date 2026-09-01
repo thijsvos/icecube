@@ -204,9 +204,42 @@ struct MockSMCProviderTests {
         }
     }
 
+    /// The first moment the fan target is pinned at minimum while the fan is
+    /// still well above it — a cooldown, where the target is *exactly*
+    /// constant and the gap decays by the lag law alone.
+    private static func firstPinnedCooldown() -> TimeInterval {
+        var t = epochSeconds
+        while t < epochSeconds + 3600 {
+            let fan = MockSMCProvider.fans(at: t)[0]
+            if abs(fan.targetRPM - fan.minRPM) < 0.5, fan.actualRPM - fan.targetRPM > 700 {
+                return t
+            }
+            t += 0.5
+        }
+        Issue.record("No pinned cooldown found in the first hour — spike model changed?")
+        return epochSeconds
+    }
+
+    /// Moved from the spike plateau to the cooldown on 2026-09-01, when the
+    /// die gained thermal mass.
+    ///
+    /// The old version measured the gap at `firstPlateauStart()` and its own
+    /// comment carried the premise: *"the envelope is flat here, so the target
+    /// is nearly constant."* That held only while temperature was a pure
+    /// function of the workload envelope. Now a flat envelope means constant
+    /// **power**, and the die keeps climbing toward the equilibrium that power
+    /// implies — so the target climbs with it, by ~2,900 RPM over the first ten
+    /// seconds of a plateau. The gap was no longer governed by the fan's lag at
+    /// all, and the test failed by 1,771 RPM against a 104 RPM tolerance.
+    ///
+    /// A cooldown has the property the plateau used to fake: once the die has
+    /// dropped back under the 60 °C demand floor the target is pinned at
+    /// `minRPM` and cannot move, while the fan still has hundreds of RPM to
+    /// coast. The target is now *exactly* constant rather than nearly, so the
+    /// tolerance tightens from 10 % of the gap to 2 %.
     @Test("actualRPM chases targetRPM with the documented ~10 s first-order lag")
     func actualFollowsTargetWithLag() async throws {
-        let start = Self.firstPlateauStart()
+        let start = Self.firstPinnedCooldown()
         let dt = 5.0
         let clock = TestClock(Date(timeIntervalSince1970: start))
         let provider = MockSMCProvider(now: clock.closure)
@@ -215,16 +248,18 @@ struct MockSMCProviderTests {
         clock.advance(by: dt)
         let after = try await provider.fans()[0]
 
-        // At plateau start the fan is still far behind its target.
-        let gapBefore = before.targetRPM - before.actualRPM
+        // The target is at the floor and stays there, so the whole of the gap
+        // is the fan coasting down.
+        #expect(abs(after.targetRPM - after.minRPM) < 0.5, "the target must not move during the measurement")
+        let gapBefore = before.actualRPM - before.targetRPM
         #expect(gapBefore > 500)
 
-        // The envelope is flat here, so the target is nearly constant and the
-        // gap must shrink by ~e^(−dt/τ). Allow 10 % of the starting gap for
-        // the sensors' background wander nudging the target.
-        let gapAfter = after.targetRPM - after.actualRPM
+        let gapAfter = after.actualRPM - after.targetRPM
         let expectedGap = gapBefore * exp(-dt / MockSMCProvider.fanTimeConstant)
-        #expect(abs(gapAfter - expectedGap) < 0.10 * gapBefore)
+        #expect(
+            abs(gapAfter - expectedGap) < 0.02 * gapBefore,
+            "gap \(gapBefore) → \(gapAfter), lag law predicts \(expectedGap)"
+        )
     }
 
     @Test("Consecutive reads move actualRPM toward targetRPM, never away")
