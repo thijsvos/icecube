@@ -309,7 +309,9 @@ Turned the readings into an answer. `ThermalDiagnosis` (pure, in IceCubeKit)
 takes a snapshot, the settled `R`, a per-process sample and the daemon's active
 curve, and answers four questions — how hot against the 104 °C ceiling, whether
 the power drawn explains it, what is producing it, and whether the curve has
-cooling left. Shown in its own window, opened from the popover.
+cooling left. Shown in its own window, opened from the popover. Two more
+questions were added to that window later and are answered by separate types
+that carry history: `CoolingTrend` (months) and `ThermalForecast` (minutes).
 
 **The one new primitive is `proc_pid_rusage`'s `ri_energy_nj`** — cumulative
 per-process energy in nanojoules, public SDK surface (`sys/resource.h`), no

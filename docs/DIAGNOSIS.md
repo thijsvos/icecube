@@ -1,9 +1,9 @@
 # Why is it hot? — what Ice Cube can tell you, and what it cannot
 
-Ice Cube's Diagnose window answers four questions about this moment, and a
-fifth about the months behind it. This file explains where each answer comes
-from, why the numbers on screen deliberately do not add up, and the things the
-app cannot see at all.
+Ice Cube's Diagnose window answers four questions about this moment, a fifth
+about the months behind it, and a sixth — opt-in — about the next few minutes.
+This file explains where each answer comes from, why the numbers on screen
+deliberately do not add up, and the things the app cannot see at all.
 
 Every figure quoted here was measured on real hardware. Where something has not
 been measured, it says so.
