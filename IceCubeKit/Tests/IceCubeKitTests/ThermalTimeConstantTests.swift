@@ -91,9 +91,10 @@ struct ThermalTimeConstantTests {
 
     /// The measurement's real limit, pinned rather than papered over.
     ///
-    /// The slower the machine, the less it moves in ten seconds, and at some
-    /// point the two differences are smaller than the sensor's own steps. A
-    /// 400 s machine swinging 30 °C moves 0.74 °C per step — under
+    /// The slower the machine and the smaller its swing, the less it moves
+    /// between samples, and at some point the two differences are smaller than
+    /// the sensor's own steps. A 400 s machine swinging only 4 °C moves under
+    /// a degree across the window — below
     /// ``ThermalTimeConstant/minimumDifferenceCelsius``, so it is refused.
     ///
     /// This is the correct answer, not a gap: the alternative is dividing two
@@ -102,8 +103,10 @@ struct ThermalTimeConstantTests {
     /// exactly when a forecast about it would matter.
     @Test("A very slow machine with a small swing is refused, not guessed at")
     func slowMachineWithSmallSwingIsRefused() throws {
-        guard case .tooStill = ThermalTimeConstant.estimate(Self.ramp(tau: 400)).refusal else {
-            Issue.record("0.74 °C per step is under the noise floor and must not be divided")
+        guard case .tooStill = ThermalTimeConstant.estimate(
+            Self.ramp(tau: 400, from: 14, asymptote: 10)
+        ).refusal else {
+            Issue.record("under a degree per step is beneath the noise floor and must not be divided")
             return
         }
         // The same machine, swinging hard enough to measure.
@@ -183,20 +186,48 @@ struct ThermalTimeConstantTests {
         }
     }
 
-    /// `rise` is measured against airflow, which climbs as the chassis soaks.
-    /// A moving reference eats into the apparent approach and biases τ long.
-    @Test("Airflow drifting under the measurement is refused")
-    func ambientDriftIsRefused() {
+    /// The gate catches a *step* in the airflow reference — a sensor glitch, or
+    /// a machine moved to a different room — not the ordinary correlated rise,
+    /// which cancels in the ratio. See ``ThermalTimeConstant/ambientDriftCelsius``.
+    @Test("A step in the airflow reference is refused")
+    func ambientStepIsRefused() {
         let samples = Self.ramp(tau: 75)
-        let drifted = Self.mutate(
+        let stepped = Self.mutate(
             samples, index: 2,
-            die: samples[2].dieCelsius + 2,
-            ambient: samples[2].ambientCelsius + 2
+            die: samples[2].dieCelsius + 8,
+            ambient: samples[2].ambientCelsius + 8
         )
-        guard case .ambientDrifted = ThermalTimeConstant.estimate(drifted).refusal else {
-            Issue.record("a 2 °C airflow shift must not pass")
+        guard case .ambientDrifted = ThermalTimeConstant.estimate(stepped).refusal else {
+            Issue.record("an 8 °C airflow step must not pass")
             return
         }
+    }
+
+    /// The property that let the gate be loosened from 0.5 °C to 5 °C, and the
+    /// reason it was wrong to be tight.
+    ///
+    /// Airflow does not drift independently — it rises *with* the die, taking a
+    /// share of the same heat. That makes `ΔT` the same exponential scaled by a
+    /// constant, and this method divides one difference by another, so the
+    /// scale cancels exactly. A tight gate bought nothing and refused every
+    /// genuine ramp: `icecube-diag --forecast` accepted zero estimates in 150 s
+    /// with the old value.
+    @Test("An airflow that rises with the die does not change the answer")
+    func proportionalAmbientCancels() throws {
+        let fixed = try Self.estimate(Self.ramp(tau: 75, from: 20, asymptote: 5))
+
+        // The same die, with airflow taking a fifth of its rise.
+        let coupled = Self.ramp(tau: 75, from: 20, asymptote: 5).map { sample in
+            ThermalTimeConstant.Observation(
+                date: sample.date,
+                dieCelsius: sample.dieCelsius,
+                ambientCelsius: sample.ambientCelsius + 0.2 * sample.rise,
+                watts: sample.watts,
+                fanFraction: sample.fanFraction
+            )
+        }
+        let scaled = try Self.estimate(coupled)
+        #expect(abs(scaled - fixed) < 0.01, "\(fixed) vs \(scaled) — a constant scale must cancel")
     }
 
     /// The denominator. Near equilibrium both differences vanish and the ratio
@@ -281,7 +312,7 @@ struct ThermalTimeConstantTests {
     @Test("One good ramp is not enough")
     func belowTheEvidenceBarThereIsNoAnswer() {
         var subject = ThermalTimeConstant()
-        Self.feed(&subject, tau: 75, ticks: 35)
+        Self.feed(&subject, tau: 75, ticks: 175)
         #expect(subject.estimateCount > 0, "the feed must actually produce estimates")
         #expect(subject.estimateCount < ThermalTimeConstant.minimumEstimates)
         #expect(subject.tau == nil)
@@ -290,7 +321,7 @@ struct ThermalTimeConstantTests {
     @Test("Enough clean estimates produce the time constant they were built from")
     func enoughEstimatesAnswer() throws {
         var subject = ThermalTimeConstant()
-        Self.feed(&subject, tau: 75, ticks: 120)
+        Self.feed(&subject, tau: 75, ticks: 300)
         let tau = try #require(subject.tau, "\(subject.estimateCount) estimates should have been enough")
         #expect(abs(tau - 75) / 75 < 0.05, "recovered \(tau) from a 75 s machine")
     }
@@ -310,7 +341,7 @@ struct ThermalTimeConstantTests {
     @Test("A run of wild estimates cannot move the answer, though it would move a mean")
     func medianResistsOutliers() throws {
         var subject = ThermalTimeConstant()
-        Self.feed(&subject, tau: 75, ticks: 200)
+        Self.feed(&subject, tau: 75, ticks: 380)
         let clean = try #require(subject.tau)
         #expect(abs(clean - 75) / 75 < 0.05)
 
@@ -320,7 +351,7 @@ struct ThermalTimeConstantTests {
         // noise floor, so it would have produced no estimates at all — the
         // limitation `slowMachineWithSmallSwingIsRefused` pins, met here by
         // accident on the first attempt.
-        Self.feed(&subject, tau: 300, ticks: 90, from: Self.epoch.addingTimeInterval(400))
+        Self.feed(&subject, tau: 300, ticks: 225, from: Self.epoch.addingTimeInterval(500))
         let poisoned = try #require(subject.tau)
         #expect(abs(poisoned - clean) < 5, "median moved \(clean) → \(poisoned)")
     }
@@ -347,13 +378,13 @@ struct ThermalTimeConstantTests {
     func loadStepIsCaughtWithoutASettleWindow() {
         var subject = ThermalTimeConstant()
         // 60 s of steady load, enough to be producing estimates.
-        Self.feed(&subject, tau: 75, ticks: 60)
+        Self.feed(&subject, tau: 75, ticks: 300)
         let before = subject.estimateCount
         #expect(before > 0, "the feed must be producing estimates before the step")
 
         // The draw halves. Every triple now straddles the step.
-        let stepStart = Self.epoch.addingTimeInterval(60)
-        for tick in 0 ..< 15 {
+        let stepStart = Self.epoch.addingTimeInterval(300)
+        for tick in 0 ..< 60 {
             subject.ingest(ThermalTimeConstant.Observation(
                 date: stepStart.addingTimeInterval(Double(tick)),
                 dieCelsius: 70 - Double(tick) * 0.4,
@@ -375,7 +406,7 @@ struct ThermalTimeConstantTests {
     @Test("A backward clock step cannot wedge the estimator permanently")
     func backwardClockRecovers() {
         var subject = ThermalTimeConstant()
-        Self.feed(&subject, tau: 75, ticks: 120)
+        Self.feed(&subject, tau: 75, ticks: 300)
         #expect(subject.tau != nil)
 
         var rewound = subject
@@ -385,7 +416,7 @@ struct ThermalTimeConstantTests {
         ))
         // The buffer resets, but the estimates already earned survive, and the
         // stream recovers rather than jamming.
-        Self.feed(&rewound, tau: 75, ticks: 120, from: Self.epoch.addingTimeInterval(-86400))
+        Self.feed(&rewound, tau: 75, ticks: 300, from: Self.epoch.addingTimeInterval(-86400))
         #expect(rewound.tau != nil, "the estimator must recover after a clock step")
     }
 
@@ -403,7 +434,7 @@ struct ThermalTimeConstantTests {
         _ subject: inout ThermalTimeConstant,
         tau: TimeInterval,
         ticks: Int,
-        stretch: Int = 150,
+        stretch: Int = 400, // must outlast a triple's 180 s span
         from start: Date = epoch
     ) {
         let ambient = 40.0
