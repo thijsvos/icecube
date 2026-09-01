@@ -161,6 +161,99 @@ the 19.6 W that [SMC-KEYS.md](SMC-KEYS.md) records for `PSTR` "at idle" — that
 figure was evidently captured with background work running. 7.9 W is close to
 the 5 W floor, so a deeply idle Mac may legitimately show `—`.
 
+## How fast this Mac heats
+
+`R` says where the die ends up. It says nothing about *when*, and "you are at
+79 °C" is a much less useful sentence than "you are heading for 91 °C, about two
+minutes out".
+
+The missing term is the **thermal time constant**, τ. A cooling path behaves as
+a first-order lag:
+
+```
+ΔT(t) = ΔT∞ + (ΔT₀ − ΔT∞) · e^(−t/τ)
+```
+
+### Measured on a Mac14,9
+
+`swift run icecube-diag --forecast 1800`, 28 minutes of ordinary use,
+89 accepted estimates:
+
+| p10 | p25 | **p50** | p75 | p90 |
+| --- | --- | --- | --- | --- |
+| 38.6 s | 49.0 s | **73.7 s** | 130.4 s | 207.8 s |
+
+Predicted beforehand from `R ≈ 0.9 °C/W` and a heatsink assembly of order
+50–150 J/°C: `τ = R·C` ≈ 45–135 s. The measurement landed near the middle of
+that, which is the rare case of a first-principles estimate surviving contact
+with hardware.
+
+**The answer is stable well before it is precise.** From the 23rd accepted
+estimate onward the reported median stayed within **68–75 s** across the next
+sixteen minutes — a 7 °C-equivalent spread of 7 seconds — which is why twenty
+estimates is the bar. About 5 % of samples are accepted in ordinary use, so the
+first answer arrives roughly twelve minutes after the app starts.
+
+### Why it is measured from the transients `R` throws away
+
+The settle rule rejects every sample where the die is still moving, and it is
+right to: a quotient taken mid-ramp describes neither the old state nor the new
+one. The 1.89 °C/W reading above is the example this file already keeps.
+
+But the ramp is the **only** place τ exists. A machine that has settled has no
+rate left to measure. So the same stream is read twice, for opposite reasons —
+`R` waits for the machine to stop moving, τ waits for it to start.
+
+### Three samples, not a rate of change
+
+τ is measured from three equally spaced readings rather than a derivative. For
+any first-order approach the ratio of successive differences is `e^(−h/τ)`, so
+the destination cancels:
+
+```
+(ΔT₂ − ΔT₁) / (ΔT₁ − ΔT₀) = e^(−h/τ)      ⇒      τ = −h / ln(ratio)
+```
+
+Two consequences worth stating. It works identically whether the die is rising
+or falling. And a **proportional** movement in the airflow reference cancels
+too — airflow rises *with* the die rather than independently, which scales `ΔT`
+by a constant, and a ratio is blind to constant scale.
+
+### The spacing chooses which pole you measure
+
+A laptop is not really first-order. Silicon responds to the heat spreader in
+seconds; the spreader, heatsink and chassis respond in minutes. Fitting one
+pole to that lands wherever the sampling window looks.
+
+Swept against the simulation, whose poles are 6 s and 75 s:
+
+| Spacing | p50 recovered |
+| --- | --- |
+| 10 s | 31.1 s |
+| 30 s | 40.6 s |
+| 60 s | 56.7 s |
+| **90 s** | **80.7 s** |
+
+Ice Cube samples at 90 s, because a forecast about the next few minutes is a
+claim about the slow pole. Ten seconds was not measuring anything *wrong* — it
+was measuring the die's own fast response, which is a different question from
+the one being asked.
+
+The cost is a triple spanning 180 s that the machine must hold steady
+throughout, which is why most samples are refused.
+
+### What the forecast is honest about
+
+- **One pole fitted to two.** Optimistic about the first few seconds of a load
+  step, accurate after.
+- **Airflow treated as fixed** over the horizon. Over two minutes a 2 °C rise in
+  the reference is a 2 °C error.
+- **Nothing past half an hour.** Beyond that the inputs have almost certainly
+  changed, and a figure with hours on it reads as precision the model has not
+  got.
+- **It never commands the fans.** The forecast is text. Letting a learned model
+  spin cooling up pre-emptively is a different feature with a different risk.
+
 ## What this number is not
 
 - **Not the chip's thermal resistance, despite the units.** The denominator is
@@ -173,7 +266,11 @@ the 5 W floor, so a deeply idle Mac may legitimately show `—`.
   without anything thermal changing. Compare it to **your own past readings**.
 - **Not a health score.** There is no threshold at which a value becomes "bad".
   What matters is the *trend on one machine at a comparable fan speed*.
-- **Not a prediction.** It describes the state it was measured in.
+- **Not a prediction.** `R` describes the state it was measured in. Ice Cube
+  *can* now forecast — see "How fast this Mac heats" below — but that is a
+  separate claim, built on a separate measurement, and it refuses far more
+  often than `R` does. Nothing in this section becomes a forecast; the two are
+  kept apart on screen for the same reason they are kept apart here.
 - **Not affected by room temperature in the obvious way.** A hotter room raises
   the die *and* the airflow reference, so `R` moves less than you would expect —
   which is a feature, but it means `R` is not a proxy for how hot your room is.
