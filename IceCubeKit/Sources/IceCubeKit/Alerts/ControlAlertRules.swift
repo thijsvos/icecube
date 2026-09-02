@@ -70,6 +70,12 @@ public enum ControlAlertRules {
 
     /// One thing worth interrupting someone for.
     public struct Alert: Sendable, Equatable, Identifiable {
+        /// What kind of thing an alert is about — and the unit the quiet period
+        /// applies to.
+        ///
+        /// Per category rather than global, so a chatty guardian can never
+        /// suppress a genuine safety event. ``lostControl`` gets the longer
+        /// ``safetyEpisodeQuiet``; see `State.maySpeak`.
         public enum Category: String, Sendable, Equatable, CaseIterable {
             /// Ice Cube lost fan control, or a safety rule overrode the user.
             case lostControl

@@ -83,6 +83,16 @@ actor SMCWritePort: SMCControlPort {
         return try SMCKeyCodec.decodeDouble(output.dataBytes(info.size), as: type, forKey: key)
     }
 
+    /// Writes one SMC key — the only path in the entire system that does.
+    ///
+    /// Audit-logged **before** the attempt, so a write the firmware rejects is
+    /// visible in the log too, and the firmware result byte is checked on return:
+    /// IOKit reports success on operations the SMC refused. The `bytes.count <= 32`
+    /// guard is defence in depth — today's encoder yields at most 4 bytes — so a
+    /// future wide type cannot silently write past the tuple.
+    ///
+    /// - Throws: ``IceCubeError/smcEncodingFailed(type:value:)`` when the value
+    ///   does not fit `type`, or the transport/firmware error from `call(_:key:)`.
     func writeDouble(_ key: String, value: Double, as type: SMCDataType) async throws {
         let bytes = try SMCKeyCodec.encode(value, as: type)
         // Defense in depth: the 32-byte wire buffer can't be overrun (the

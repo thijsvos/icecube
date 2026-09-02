@@ -36,6 +36,21 @@ public struct CurveFollower: Sendable, Equatable {
     private var effectiveTemp: Double?
     private var output: Double?
 
+    /// Builds a follower, clamping every tuning value into the range it is safe to
+    /// run at.
+    ///
+    /// **The clamps are not cosmetic and callers are not trusted.** A
+    /// `hysteresisCelsius` wider than the range a die actually moves through makes
+    /// this follower **inert**: `effectiveTemp` never updates and the output stays
+    /// wherever the first tick put it while the die climbs. It is the one tuning
+    /// value here that can silently disable a curve, so it is bounded 0…20 —
+    /// deliberately far above the editor's 0…8 slider, because the values this
+    /// exists for never came from the editor. A hand-edited presets file, or a
+    /// `FanConfig` off the wire, decodes through `decodeIfPresent ?? 4` and applies
+    /// no bound at all. See ``HelperConstants/protocolVersion`` v24.
+    ///
+    /// The ramps and alpha are clamped to 0.01…1 for the milder reason that a zero
+    /// there freezes the output rather than disabling the deadband.
     public init(
         hysteresisCelsius: Double = 4,
         rampUpPerTick: Double = 0.1,

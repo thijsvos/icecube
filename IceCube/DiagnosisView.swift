@@ -1,22 +1,22 @@
-// DiagnosisView.swift — "why is it hot?", laid out. Every word it says lives in DiagnosisCopy.
+// DiagnosisView.swift — "why is it hot?", laid out. Its sentences come from the Copy files, never from here.
 
 import IceCubeKit
 import SwiftUI
 
-/// The Diagnose window: five verdicts, their numbers, and nothing else.
+/// The Diagnose window: the snapshot verdicts, the projection, and the trend.
 ///
 /// Its own window rather than a section of the Sensors browser. That window is
 /// sized to a computed ceiling (`SensorsWindowMetrics`) that two earlier
 /// additions broke, and this content is a different job: Sensors answers *what
 /// are the numbers*, this answers *what do they mean*.
 ///
-/// Four of the five describe *this moment* and wait for the first sample; the
-/// fifth — the cooling trend — is read from months of history and renders
-/// outside the `if let`, so it answers the instant the window opens. It is
-/// the one section that never says "measuring".
+/// Everything inside the `if let` describes *this moment* and waits for the
+/// first sample — heat, charging, the forecast, load, processes, cooling. The
+/// trend renders outside it, read from months of history, so it answers the
+/// instant the window opens; it is the one section that never says "measuring".
 ///
 /// **This view holds no copy.** Every string comes from ``DiagnosisCopy``,
-/// which is pure and tested — a `switch` inside a `View` body cannot be
+/// ``ForecastCopy`` or ``CoolingTrendCopy``, all pure and tested — a `switch` inside a `View` body cannot be
 /// exercised by anything, and the wording here carries obligations (a refusal
 /// must stay distinguishable from an answer; the two power figures must never
 /// read as two slices of one pie) that deserve tests rather than review.

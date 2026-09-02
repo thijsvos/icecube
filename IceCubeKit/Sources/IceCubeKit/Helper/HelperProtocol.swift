@@ -226,6 +226,14 @@ public enum HelperConstants {
 
 /// What the daemon reports about itself (JSON over XPC).
 public struct HelperStatus: Codable, Sendable, Equatable {
+    /// The version of the daemon that produced this status, for the app's
+    /// handshake.
+    ///
+    /// Defaulted to ``HelperConstants/protocolVersion`` at the point of encoding,
+    /// so it always names the **running daemon** rather than the app that decodes
+    /// it. That is the whole point of the field: launchd keeps an old daemon alive
+    /// across an app update, and this is how a new app notices it is talking to
+    /// stale code — the rule the v21 entry above sets out at length.
     public var protocolVersion: String
     /// The mode currently enforced by the daemon (not merely requested).
     public var mode: FanConfig.Mode
@@ -294,6 +302,12 @@ public struct HelperStatus: Codable, Sendable, Equatable {
         self.recentDecisions = recentDecisions
     }
 
+    /// Encodes this status for the `getStatus` reply.
+    ///
+    /// - Throws: whatever `JSONEncoder` throws. `HelperService` swallows it and
+    ///   replies with empty `Data`, which the app's ``decode(_:)`` then rejects —
+    ///   the same "treat it as a dead connection" path a version mismatch takes,
+    ///   and the reason nothing here tries to be cleverer.
     public func jsonData() throws -> Data {
         try JSONEncoder().encode(self)
     }

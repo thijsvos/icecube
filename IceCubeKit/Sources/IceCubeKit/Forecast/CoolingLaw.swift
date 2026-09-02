@@ -141,7 +141,11 @@ public struct CoolingLaw: Sendable, Equatable {
     /// The fitted bands, keyed by fan-speed band. Absent means not measurable.
     public private(set) var bands: [FanBand: Band]
 
-    /// Bands that produced a fit, coolest first at a representative load.
+    /// Bands that produced a fit, in fan-speed order — slowest fans first.
+    ///
+    /// Sorted by ``FanBand/sortKey``, not by temperature: this is a stable
+    /// iteration order for the fixed-point search, not a ranking. For "which
+    /// band runs coolest", ask ``coolestBand(atWatts:)``, which needs a draw.
     public var measuredBands: [FanBand] {
         bands.keys.sorted { $0.sortKey < $1.sortKey }
     }

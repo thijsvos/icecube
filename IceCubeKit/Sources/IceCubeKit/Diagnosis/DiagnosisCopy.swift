@@ -25,7 +25,12 @@ import Foundation
 /// title bar asks "Why is it hot?" once; four section headings re-asking it and
 /// then answering twice each is what made the old design dense.
 public enum DiagnosisCopy {
-    /// One section's words.
+    /// One section of the diagnosis window: a headline, optionally a metric, a
+    /// note and hover text.
+    ///
+    /// Finished prose rather than a number and a unit tag, which is why this file
+    /// takes a ``TemperatureStyle`` at all — the charts emit values and let the
+    /// axis carry the unit; this composes sentences and has to bake it in.
     public struct Row: Sendable, Equatable {
         /// The headline — states the verdict, never a question.
         public let title: String
@@ -201,7 +206,15 @@ public enum DiagnosisCopy {
 
     // MARK: - Processes
 
-    /// The process-section headline.
+    /// The process-section row: which silicon leads, what is drawing, and how much
+    /// of the machine could not be read.
+    ///
+    /// The only one of these four that can be asked to *rank* rather than state a
+    /// measurement — and therefore the only one that refuses. Without
+    /// `comparedBoth`, proof that a CPU-class **and** a GPU-class sensor were
+    /// actually read, "the CPU is leading the GPU" is a verdict derived from no
+    /// data at all: the comparison used to substitute `-.infinity` for a missing
+    /// class, and `-.infinity > -.infinity` is `false`.
     public static func source(_ source: ThermalDiagnosis.Source) -> Row {
         switch source {
         case .measuring:

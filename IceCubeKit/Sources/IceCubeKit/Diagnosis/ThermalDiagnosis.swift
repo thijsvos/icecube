@@ -92,6 +92,17 @@ public enum ThermalDiagnosis {
         case unknown
         case measured(celsius: Double, label: String, band: Band, headroom: Double)
 
+        /// Which of four headroom bands a die reading falls in.
+        ///
+        /// Bands rather than degrees, because the limit is per sensor class: the
+        /// boundaries are ``coolHeadroom`` (30 °C), ``warmHeadroom`` (15 °C) and
+        /// ``hotHeadroom`` (5 °C) **below** the ceiling ``SafetyMonitor`` enforces —
+        /// so `cool` is under ~74 °C and `nearCeiling` is the band in which the
+        /// daemon is about to force maximum cooling.
+        ///
+        /// `hot` is deliberately not `critical`. CLAUDE.md records that die sensors
+        /// legitimately run 95–105 °C under load, and alarming there would train the
+        /// reader to ignore the one band that matters.
         public enum Band: Sendable, Equatable {
             case cool, warm, hot, nearCeiling
         }

@@ -122,12 +122,6 @@ final class PowerSourceMonitor: PowerSourceObserving {
         }
     }
 
-    /// Reads the current source.
-    ///
-    /// Defaults to `.wall` when IOKit reports nothing usable — a desktop Mac
-    /// has no battery at all, and that is the honest answer for one, not a
-    /// failure. It also means a machine that cannot be unplugged never sees a
-    /// transition, so the rule simply never fires there.
     /// What one pass over the power-source list yields.
     ///
     /// Both facts come from the same `IOPSGetPowerSourceDescription`
@@ -139,6 +133,12 @@ final class PowerSourceMonitor: PowerSourceObserving {
         var isCharging = false
     }
 
+    /// Reads the current source.
+    ///
+    /// Defaults to `.wall` when IOKit reports nothing usable — a desktop Mac
+    /// has no battery at all, and that is the honest answer for one, not a
+    /// failure. It also means a machine that cannot be unplugged never sees a
+    /// transition, so the rule simply never fires there.
     private static func read() -> Reading {
         guard let blob = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
               let sources = IOPSCopyPowerSourcesList(blob)?.takeRetainedValue()

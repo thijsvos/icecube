@@ -287,6 +287,18 @@ public enum CoolingEfficiency {
             CoolingEfficiency.isSettled(samples)
         }
 
+        /// Feeds one poll into the trailing window.
+        ///
+        /// A snapshot missing any of the three inputs — no power key, no airflow
+        /// sensor, a failed die read — **clears** the window rather than being
+        /// skipped. Skipping would stitch two sides of a gap together and call the
+        /// result steady, the exact lie the settle rule exists to prevent.
+        ///
+        /// A sample dated *after* the snapshot is dropped along with everything
+        /// older than twice ``settleWindow``. A backwards clock step leaves a
+        /// future-dated sample at the end of the buffer where an age-only trim can
+        /// never reach it; the window's span then reads negative and `R` shows `—`
+        /// for the rest of the process with no error and no log line.
         public mutating func ingest(_ snapshot: SMCSnapshot) {
             guard
                 let watts = snapshot.power,

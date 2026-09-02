@@ -71,15 +71,40 @@ public struct CoolingRecorder: Sendable {
     /// Why the last tick produced nothing — the app refuses out loud.
     public private(set) var lastRefusal: Refusal?
 
+    /// Why the last tick produced no record — one case per gate above, each
+    /// carrying the measurement that failed it.
+    ///
+    /// Named rather than collapsed to `nil` for the same reason
+    /// ``ThermalTimeConstant/Refusal`` is: a window that says "no reading" is far
+    /// less useful than one that says which of seven conditions the machine has
+    /// not met. Every gate here is deliberately stricter than the live
+    /// ``CoolingEfficiency/isSettled(_:)`` rule, so a user watching a settled
+    /// readout **will** see records refused and is owed the reason.
+    ///
+    /// Each associated value is the measured quantity that failed its own gate, in
+    /// that gate's units, so the app can say "fans 0.14 apart, tolerance 0.10"
+    /// rather than printing a bare label.
     public enum Refusal: Sendable, Equatable {
+        /// The live tracker has no settled window at all.
         case unsettled
         /// Fans present but none readable — not the same as fanless.
         case fansUnreadable
+        /// Per-fan fractions spread wider than ``maximumFanDisagreement``; carries
+        /// the spread. Two fans at 0.9 and 0.0 are an incident, not "0.45 of
+        /// maximum".
         case fansDisagree(Double)
+        /// The fan fraction swung more than ``fanSettleTolerance`` across the
+        /// window; carries the swing. The settle rule bounds power and die and
+        /// never looks at the fans — the exact axis records are banded on.
         case fansMoving(Double)
+        /// Mean draw below ``minimumWatts``; carries the wattage. A datum whose own
+        /// noise is 9 % cannot support a 10 % claim.
         case lowPower(Double)
         /// The window was too sparse to trust (throttled poll loop).
         case sparseWindow(samples: Int, widestGap: TimeInterval)
+        /// Inside ``minimumSpacing`` of the last emitted record. Global, not
+        /// per-episode: "never more than 288 records a day" is the whole retention
+        /// budget.
         case tooSoon
     }
 
