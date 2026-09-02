@@ -1,4 +1,4 @@
-// SettingsFanControlTab.swift — fan-control status, the power rule, and the advanced helper controls.
+// SettingsFanControlTab.swift — fan-control status, the power and away rules, and the advanced helper controls.
 
 import IceCubeKit
 import SwiftUI
@@ -39,6 +39,7 @@ struct SettingsFanControlTab: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 powerProfileRule
+                awayRule
 
                 Toggle("Keep the curve running when Ice Cube quits", isOn: $state.persistsCurveWithoutApp)
                     .onChange(of: state.persistsCurveWithoutApp) { _, on in
@@ -145,6 +146,44 @@ struct SettingsFanControlTab: View {
                 + "any time and it stays until you next plug in or unplug.")
                 .font(.caption2).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private var awayRule: some View {
+        let rule = Binding(
+            get: { state.helper.presenceRule },
+            set: { state.helper.presenceRule = $0 }
+        )
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle("Switch presets while I'm away", isOn: rule.isEnabled)
+            HStack(spacing: 6) {
+                Text("While away, run").font(.callout)
+                // Built-ins only, for the reason the power rule gives above:
+                // the rule persists a `Preset.Kind`.
+                Picker("", selection: rule.whileAway) {
+                    ForEach(PresetStore.builtins) { Text($0.name).tag($0.kind) }
+                }
+                .labelsHidden().fixedSize()
+            }
+            .controlSize(.small)
+            .disabled(!state.helper.presenceRule.isEnabled)
+            // Names the three signals, the hand-back, and the one interaction
+            // with the power rule — everything someone needs to predict what
+            // their fans will do while they are not there to check.
+            Text("When the screen locks, the screensaver starts or the display goes to sleep, "
+                + "nobody can hear the fans — so Ice Cube runs this preset until you're back, "
+                + "then puts back what was running. If you plug in or unplug while you're away, "
+                + "the power rule's choice is what you come back to. Does nothing while the Mac is asleep.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            // The one line the user can actually check after the fact —
+            // they are, by definition, not looking while it acts.
+            if state.helper.presenceRule.isEnabled {
+                Text(state.helper.awayReport)
+                    .font(.caption2).foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 

@@ -69,6 +69,72 @@ enum SimulatedEnvironment {
         func start() {}
     }
 
+    /// A user who never leaves — unless the run is told to script a trip.
+    ///
+    /// Fixed at `.present` and never fires, for the reason ``PowerSource`` is
+    /// fixed at `.wall`: a simulated instance reading the real session's lock
+    /// and display-sleep signals would turn a real lock into a preset on real
+    /// fans by the same route the power rule once did.
+    ///
+    /// Demonstrable all the same (CLAUDE.md rule 3):
+    /// `ICECUBE_SIMULATED_PRESENCE=away-after:20` makes the user leave 20 s
+    /// after launch and come back 20 s later, one round trip, so the away
+    /// preset and the hand-back can both be watched in the log with no lock
+    /// screen involved.
+    final class Presence: PresenceObserving {
+        private(set) var current: PresencePolicy.Presence = .present
+        var onChange: (@MainActor () -> Void)?
+        private let delay: Duration?
+
+        var reason: String {
+            current == .away ? "scripted trip" : "here"
+        }
+
+        init(script: String? = ProcessInfo.processInfo.environment["ICECUBE_SIMULATED_PRESENCE"]) {
+            delay = Self.delay(fromScript: script)
+        }
+
+        /// Whether a trip is scripted for this run.
+        var isScripted: Bool {
+            delay != nil
+        }
+
+        /// Turns the away rule on in a simulated store when a trip is
+        /// scripted. Asking for a trip is asking to watch the rule act; a
+        /// simulated run's preferences start empty, so without this the trip
+        /// would log a presence change and the rule would do nothing. Only a
+        /// simulated store is ever handed in, so no real preference moves.
+        func seedRule(into defaults: any KeyValueStore) {
+            guard isScripted,
+                  let data = try? JSONEncoder().encode(PresencePolicy.Rule(isEnabled: true, whileAway: .cold))
+            else { return }
+            defaults.set(data, forKey: HelperManager.presenceRuleKey)
+        }
+
+        /// `away-after:N` → N seconds; anything else → no trip.
+        static func delay(fromScript script: String?) -> Duration? {
+            guard let script, script.hasPrefix("away-after:"),
+                  let seconds = Int(script.dropFirst("away-after:".count)), seconds > 0
+            else { return nil }
+            return .seconds(seconds)
+        }
+
+        func start() {
+            guard let delay else { return }
+            Task { [weak self] in
+                try? await Task.sleep(for: delay)
+                self?.flip(to: .away)
+                try? await Task.sleep(for: delay)
+                self?.flip(to: .present)
+            }
+        }
+
+        private func flip(to presence: PresencePolicy.Presence) {
+            current = presence
+            onChange?()
+        }
+    }
+
     /// Preferences that live and die with the process.
     ///
     /// Not merely tidiness. `HelperManager` persists the last curve, the startup

@@ -758,6 +758,84 @@ only appears when the popover copy is on would hide a live setting.
 Protocol stays at **28**: nothing daemon-side changed, so the daemon binary
 would behave identically. Stated rather than assumed, per docs/RELEASING.md.
 
+### The away preset (2026-09-01)
+
+- [x] Switch presets while nobody is at the Mac, and hand back on return —
+      app-side, opt-in, built-ins only, mirrors the power rule. Deviation from
+      the sketch: the away preset is applied with `remembering: false`, a flag
+      `apply`/`applyPreset` did not have before, because the first
+      implementation persisted it as the user's last curve and a crash while
+      away would have relaunched into Cold.
+
+Fan noise is a cost only while someone can hear it; every preset the user can
+pick assumes they are in the room. `PresencePolicy` is `PowerProfilePolicy`'s
+twin — transitions only, never continuous — with one addition the power rule
+does not need: a memory of what it displaced, spent on return, and honoured
+only if the fans are still on what it set or on the daemon's resting state.
+Anything else that chose in between wins. Manual mode is left alone both ways.
+
+**What counts as away is macOS's verdict, not ours.** Lock, screensaver,
+display sleep — six notifications, no polling, and deliberately no idle timer:
+the display-sleep timer already honours a film or a screen share and a second
+timer in Ice Cube would not. Lock state is re-read from the session dictionary
+at start and on every system wake so a notification missed during sleep cannot
+leave "locked" stuck on.
+
+**Two things the first cut got wrong**, both found by tests rather than by
+reading:
+
+- A transition found while the daemon is unreachable must be left
+  *unconsumed*, so the next 5 s pass — which reconnects first and polls
+  presence last — sees it again. And that handler must never call
+  `maintainOnce()` itself: it runs inside one, and joining the pass in flight
+  from within it waits forever.
+- `apply` remembered whatever it sent as the user's last curve. Right for a
+  person or the power rule, wrong for a preset that is borrowed.
+
+The simulated graph gets `SimulatedEnvironment.Presence`, fixed at present and
+never firing, for the reason the simulated power source is fixed at wall —
+`ICECUBE_SIMULATED_PRESENCE=away-after:20` scripts one round trip so the
+feature is demonstrable with no lock screen. `SimulatedIsolationTests` asserts
+the seam.
+
+Mutation results (runner exits non-zero on a patch that did not apply, and
+reports a mutant that failed to compile as its own outcome — two runner-side
+misses were redone before this table was final):
+
+| Mutation | Result |
+| --- | --- |
+| K1 `rule.isEnabled` guard inverted | killed |
+| K2 disabled rule keeps its memory | killed |
+| K3 transition guard removed | killed |
+| K4 curve-only guard weakened to non-nil | killed |
+| K5 `appliedWhileAway` pre-filled on departure | killed |
+| K6 return does not clear the memory | killed |
+| K7 unrecorded apply still restores | killed |
+| K8 still-ours guard always passes | killed |
+| K9 resting state no longer counts as ours | killed |
+| K10 whole-config equality instead of choice | killed |
+| A1 power rule takes over while away | killed |
+| A2 apply not recorded as ours | killed |
+| A3 departure sent while disconnected | killed |
+| A4 failed departure still arms a return | killed |
+| A5 poll does not check presence | killed |
+| A6 `start()` does not wire presence | killed |
+| A7 away preset remembered as the user's choice | killed |
+| A8 return consumed while disconnected | **survived**, then killed — no test covered an unlock arriving before the reconnect; `returnRetriesAfterReconnect` now does |
+
+**Verified on Mac14,9, 2026-09-02, signed build installed via
+`scripts/install.sh`:** ⌃⌘Q at 09:53:32.79 → `away (screen locked): switching
+to Cold` → daemon `curve engaged` at 09:53:33.34 (**624 ms** lock-to-fans);
+unlock at 09:53:41.44 → `back: restoring Balanced` → engaged at 09:53:42.70.
+Left behind on Balanced at 4,200 RPM, 30.9 W, hottest core 66.9 °C; no safety
+or error line in the trip. The install itself tripped the known live-swap
+self-heal (20 s unreachable → reinstall → "Operation not permitted" → service
+back on its own five seconds later on the persisted curve) — pre-existing, not
+this feature, and the reason the "quit before replacing the app bundle" rule exists.
+
+Protocol stays at **28**: nothing daemon-side changed. Stated rather than
+assumed, per docs/RELEASING.md. Science and limits for users: docs/AWAY.md.
+
 ## 7. Risks & mitigations
 - **SMC keys vary wildly per model** → curated map + fallback enumeration + community diagnostics pipeline (§3.3). Biggest ongoing cost; design for it.
 - **Free-Apple-ID helper approval unproven** → Phase 0.5 spike with the fallback documented *before* it runs (manual `sudo launchctl bootstrap` install for Phases 3–5).

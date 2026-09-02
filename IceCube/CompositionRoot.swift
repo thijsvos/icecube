@@ -114,6 +114,12 @@ enum CompositionRoot {
         let story = SimulatedCoolingHistory.story(
             fromEnvironment: ProcessInfo.processInfo.environment["ICECUBE_SIMULATED_HISTORY"]
         )
+        // One scripted trip away and back, or a user who never leaves:
+        //   ICECUBE_SIMULATED_PRESENCE=away-after:20
+        // Scripting a trip also switches the away rule on in this run's
+        // in-memory preferences, so there is something to watch.
+        let presence = SimulatedEnvironment.Presence()
+        presence.seedRule(into: defaults)
 
         return Graph(
             provider: MockSMCProvider(),
@@ -126,7 +132,8 @@ enum CompositionRoot {
                 // code signature to explain why registration would fail, and in
                 // simulated mode there is nothing to register.
                 blocker: { nil },
-                powerSource: SimulatedEnvironment.PowerSource()
+                powerSource: SimulatedEnvironment.PowerSource(),
+                presence: presence
             ),
             presets: PresetStore(file: sandbox.appendingPathComponent("presets.json")),
             history: CoolingHistoryStore(

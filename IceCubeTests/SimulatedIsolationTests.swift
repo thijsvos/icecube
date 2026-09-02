@@ -50,6 +50,10 @@ struct SimulatedIsolationTests {
             "the power watcher must be a stand-in — a real charger change is what triggered the incident"
         )
         #expect(
+            graph.helper.usesSimulatedPresence,
+            "the presence watcher must be a stand-in — a real lock screen would reach the fans by the same route"
+        )
+        #expect(
             graph.processes is MockProcessSampler,
             "the process sampler must be a stand-in — a simulated run has no business reading real process names"
         )
@@ -224,6 +228,43 @@ struct SimulatedIsolationTests {
         #expect(power.current == .wall)
         power.start()
         #expect(power.onChange == nil, "nothing may subscribe it to a real IOKit notification")
+    }
+
+    /// The away rule is the power rule's twin, and would fire on the same kind
+    /// of real event: a lock screen instead of a charger.
+    @Test("The simulated presence never changes on its own, so the away rule cannot fire on a real lock")
+    func simulatedPresenceIsFixed() {
+        let presence = SimulatedEnvironment.Presence(script: nil)
+        #expect(presence.current == .present)
+        presence.start()
+        #expect(presence.onChange == nil, "nothing may subscribe it to a real session notification")
+        // The scripted trip is the demonstrability half — parsed, never
+        // guessed. Anything but the documented form means no trip.
+        #expect(SimulatedEnvironment.Presence.delay(fromScript: "away-after:20") == .seconds(20))
+        #expect(SimulatedEnvironment.Presence.delay(fromScript: "away-after:0") == nil)
+        #expect(SimulatedEnvironment.Presence.delay(fromScript: "away") == nil)
+        #expect(SimulatedEnvironment.Presence.delay(fromScript: nil) == nil)
+
+        // A scripted trip switches the rule on — in the store it is handed,
+        // which in the simulated graph is never the real one. An unscripted
+        // run leaves the rule exactly as empty preferences leave it: off.
+        let scripted = SimulatedEnvironment.Defaults()
+        SimulatedEnvironment.Presence(script: "away-after:5").seedRule(into: scripted)
+        #expect(
+            scripted.data(forKey: HelperManager.presenceRuleKey) != nil,
+            "a scripted trip must have a rule to act on"
+        )
+        let plain = SimulatedEnvironment.Defaults()
+        SimulatedEnvironment.Presence(script: nil).seedRule(into: plain)
+        #expect(
+            plain.data(forKey: HelperManager.presenceRuleKey) == nil,
+            "an ordinary simulated run must not turn the rule on"
+        )
+        #expect(
+            CompositionRoot.makeSimulatedForTesting().helper.presenceRule.isEnabled == false
+                || ProcessInfo.processInfo.environment["ICECUBE_SIMULATED_PRESENCE"] != nil,
+            "the graph a test builds must not carry the rule unless the environment scripted a trip"
+        )
     }
 
     /// The second route into simulated mode, and the one an environment-variable

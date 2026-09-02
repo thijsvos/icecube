@@ -149,6 +149,22 @@ of 20 — its only silicon input the two GPU dies — and ran that way for 13 ho
       abrupt-change verdict with the warning triangle, and the real
       `cooling-history.json` is untouched afterwards.
 
+## Away preset
+
+- [ ] Settings → Fan Control → *Switch presets while I'm away* on, *While
+      away, run* Cold. Lock the screen (⌃⌘Q), wait 30 s, unlock: the log shows
+      `away (screen locked): switching to Cold` then `back: restoring
+      <preset>`, the popover highlights the preset you had, and the report
+      line under the rule reads "Last time you were away (…) Ice Cube ran
+      Cold and put <preset> back."
+- [ ] With the rule on, take manual control, lock and unlock: nothing changes
+      and the log says `away: leaving the fans alone — manual mode is your
+      call`.
+- [ ] `ICECUBE_SIMULATED=1 ICECUBE_SIMULATED_PRESENCE=away-after:20` shows the
+      same two log lines 20 s and 40 s after launch (the rule arrives switched
+      on for a scripted run), and the real preferences and daemon are
+      untouched.
+
 ---
 
 ## Recording the result
