@@ -37,6 +37,7 @@ dependencies**; small footprint is a design goal, not an accident.
 | Presets: Quiet · Balanced · Cold · Max, plus your own saved curves — selectable everywhere a built-in is, and deletable | ✅ |
 | Manual per-fan sliders (watchdogged, never persisted) | ✅ |
 | Switch presets automatically when you plug in or unplug | ✅ |
+| **Away preset** *(opt-in)* — run a cooler preset while the screen is locked or the display asleep, and get yours back the moment you return | ✅ |
 | ⌥-click the menu bar icon to jump to the next preset | ✅ |
 | Curve keeps running at boot, app closed — daemon-side, opt-in | ✅ |
 | Sensors browser (every SMC key, live) + JSON diagnostics export | ✅ |
@@ -139,6 +140,22 @@ fighting you. Off until you turn it on, and both sides are your own choices.
 
 Being app-side, it does not fire while a persisted curve runs with Ice Cube
 closed — that curve keeps running exactly as configured.
+
+### Cooler while you're away
+
+Fan noise is a cost only while someone can hear it. Lock the screen, or let the
+display go to sleep, and Ice Cube can switch to a preset you named for those
+hours — Cold by default — because the export, build or backup you left running
+is the one job nobody minds being loud. Unlock, and the preset you had is
+running again before you have sat down.
+
+It uses macOS's own verdict that nobody is looking (lock, screensaver, display
+sleep) and deliberately has no idle timer of its own: the display-sleep timer
+already knows to stay awake for a film, and a second timer would not. It hands
+back only what it took — a preset you or the power rule chose in the meantime
+stands — and it never touches manual mode. **Off until you turn it on**, in
+Settings → Fan Control. [docs/AWAY.md](docs/AWAY.md) has the measured numbers
+behind it, what it is not, and its limits.
 
 ### Cooling efficiency
 

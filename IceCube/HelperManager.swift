@@ -180,6 +180,8 @@ final class HelperManager {
     private let blocker: () -> String?
     /// Where the Mac is drawing power, for ``PowerProfilePolicy``.
     private let powerSource: any PowerSourceObserving
+    /// Whether anyone is at the Mac, for ``PresencePolicy``.
+    private let presenceSource: any PresenceObserving
     // `HelperConstants.logSubsystem`, not the literal: under test this resolves
     // to a separate subsystem. These files are compiled into the test bundle, so
     // without it a `swift`/`xcodebuild test` run writes lines like "startup:
@@ -215,6 +217,12 @@ final class HelperManager {
         powerSource is SimulatedEnvironment.PowerSource
     }
 
+    /// Whether the presence watcher is a stand-in rather than the real
+    /// session's lock and display-sleep signals.
+    var usesSimulatedPresence: Bool {
+        presenceSource is SimulatedEnvironment.Presence
+    }
+
     init(
         service: any DaemonRegistering = SMAppServiceRegistrar(),
         client: any HelperChanneling = HelperClient(),
@@ -225,7 +233,8 @@ final class HelperManager {
                 bundlePath: Bundle.main.bundleURL.resolvingSymlinksInPath().path
             )
         },
-        powerSource: any PowerSourceObserving = PowerSourceMonitor()
+        powerSource: any PowerSourceObserving = PowerSourceMonitor(),
+        presence: any PresenceObserving = PresenceMonitor()
     ) {
         self.service = service
         self.client = client
@@ -233,6 +242,7 @@ final class HelperManager {
         memory = FanControlMemory(defaults: defaults)
         self.blocker = blocker
         self.powerSource = powerSource
+        presenceSource = presence
         self.client.onDisconnect = { [weak self] in
             self?.connection = .disconnected
             self?.status = nil
@@ -256,6 +266,13 @@ final class HelperManager {
             Task { await self.powerSourceChanged(to: self.powerSource.current) }
         }
         powerSource.start()
+        // Same shape for presence: the session notification is the fast path,
+        // the poll below is the floor.
+        presenceSource.onChange = { [weak self] in
+            guard let self else { return }
+            Task { await self.presenceChanged(to: self.presenceSource.current) }
+        }
+        presenceSource.start()
         // One maintenance loop: keeps registration fresh (approval happens in
         // System Settings, outside our process), reconnects when enabled, and
         // drives heartbeat + status while connected.
@@ -535,8 +552,12 @@ final class HelperManager {
     /// Guards the once-per-session auto-resume of the last curve on launch.
     @ObservationIgnored private var didAutoResume = false
 
+    /// - Parameter remembering: whether a successful curve becomes the one a
+    ///   later launch resumes. True for every choice a person or the power
+    ///   rule makes; false for the away preset, which is borrowed rather than
+    ///   chosen — a crash while away must not relaunch into it.
     @discardableResult
-    func apply(_ config: FanConfig) async -> CommandOutcome {
+    func apply(_ config: FanConfig, remembering: Bool = true) async -> CommandOutcome {
         let outcome = await run {
             try await self.client.apply(config)
             self.lastAppliedConfig = config
@@ -579,7 +600,9 @@ final class HelperManager {
         // the next launch. The user would get fan control they never
         // successfully engaged, resumed without any interaction, after being
         // shown an error saying it failed.
-        memory.remember(applied: config)
+        if remembering {
+            memory.remember(applied: config)
+        }
         return .ok
     }
 
@@ -616,7 +639,9 @@ final class HelperManager {
     ///   queued for wake. `@discardableResult` because most callers are buttons
     ///   whose feedback is the UI re-rendering from `status`.
     @discardableResult
-    func applyPreset(_ preset: Preset, persistCurve: Bool) async -> CommandOutcome {
+    func applyPreset(
+        _ preset: Preset, persistCurve: Bool, remembering: Bool = true
+    ) async -> CommandOutcome {
         var config = preset.config
         if config.mode == .curve {
             config.persistsWithoutApp = persistCurve
@@ -627,7 +652,7 @@ final class HelperManager {
         // is exactly the ambiguity that made "is it slow?" unanswerable.
         let started = ContinuousClock.now
         log.notice("preset: sending \(preset.name, privacy: .public)")
-        let outcome = await apply(config)
+        let outcome = await apply(config, remembering: remembering)
         let ms = (ContinuousClock.now - started).components.attoseconds / 1_000_000_000_000_000
         // Report what HAPPENED, not merely that we got here. This line used to
         // say "applied" whatever came back, so a preset the daemon refused —
@@ -825,8 +850,180 @@ final class HelperManager {
         guard case let .apply(kind) = decision,
               let preset = PresetStore.builtins.first(where: { $0.kind == kind })
         else { return }
+        // While the user is away the away preset holds; the power rule's pick
+        // becomes what they come back to instead of taking over now. Either
+        // order of precedence is defensible — this one is what the Settings
+        // caption promises, and it keeps "away ⇒ this preset" a sentence with
+        // no exceptions.
+        if presenceMemory.appliedWhileAway != nil {
+            var config = preset.config
+            config.persistsWithoutApp = memory.persistsCurveWithoutApp
+            presenceMemory.restoreTo = config
+            log.notice("power rule: noted \(preset.name, privacy: .public) for when you're back")
+            return
+        }
         log.notice("power rule: switching to \(preset.name, privacy: .public)")
         await applyPreset(preset, persistCurve: memory.persistsCurveWithoutApp)
+    }
+
+    // MARK: - Away-aware profiles
+
+    /// Internal rather than private so a scripted simulated trip can arrive
+    /// with the rule on — see `SimulatedEnvironment.Presence.seedRule`.
+    static let presenceRuleKey = "presenceRule"
+    /// Presence at the last decision. `nil` until the first one, so launching
+    /// to a locked screen still counts as leaving.
+    @ObservationIgnored private var lastPresence: PresencePolicy.Presence?
+    /// What the away rule displaced and what it set — the return trip's
+    /// evidence. In-process only, as ``PresencePolicy/Memory`` explains.
+    @ObservationIgnored private var presenceMemory = PresencePolicy.Memory.empty
+
+    /// The user's away preset. Off until they configure it.
+    var presenceRule: PresencePolicy.Rule {
+        get {
+            guard let data = defaults.data(forKey: Self.presenceRuleKey),
+                  let rule = try? JSONDecoder().decode(
+                      PresencePolicy.Rule.self, from: data
+                  )
+            else { return .suggested }
+            return rule
+        }
+        set {
+            if let data = try? JSONEncoder().encode(newValue) {
+                defaults.set(data, forKey: Self.presenceRuleKey)
+            }
+        }
+    }
+
+    /// One trip away, as the Settings pane reports it afterwards.
+    ///
+    /// The user is, by definition, not looking while the rule acts, so this
+    /// is the one place they can check that it did — without reading a log.
+    struct AwayTrip: Equatable {
+        var began: Date
+        /// Why the rule considered them gone, in the monitor's words.
+        var reason: String
+        /// The preset it ran.
+        var ran: String
+        var ended: Date?
+        /// What happened on return, or why the departure failed.
+        var outcome: String?
+    }
+
+    private(set) var lastAwayTrip: AwayTrip?
+
+    /// The sentence under the away rule in Settings.
+    var awayReport: String {
+        guard let trip = lastAwayTrip else {
+            return "Nothing to report yet — lock the screen to try it."
+        }
+        let began = trip.began.formatted(date: .omitted, time: .shortened)
+        guard let ended = trip.ended else {
+            return "Away since \(began) (\(trip.reason)) — running \(trip.ran)."
+        }
+        let until = ended.formatted(date: .omitted, time: .shortened)
+        return "Last time you were away (\(began)–\(until), \(trip.reason)) Ice Cube ran "
+            + "\(trip.ran) and \(trip.outcome ?? "put nothing back")."
+    }
+
+    /// What the app believes is running, for the away rule to hand back.
+    ///
+    /// The app's own record first; failing that, the saved curve — but only
+    /// when the daemon says a curve is what it is enforcing, which is the same
+    /// identity ``reconcileHighlight`` rebuilds from.
+    private var runningConfig: FanConfig? {
+        if let lastAppliedConfig {
+            return lastAppliedConfig
+        }
+        return status?.mode == .curve ? storedCurveConfig() : nil
+    }
+
+    /// Switches to the away preset when the user leaves and hands back when
+    /// they return — on transitions only, as ``PresencePolicy`` insists.
+    ///
+    /// A transition found while the daemon is unreachable is left
+    /// **unconsumed**: neither `lastPresence` nor the memory moves, so the
+    /// next 5 s pass — which reconnects first — sees the same transition and
+    /// acts on it. That pass is also why this must never call
+    /// `maintainOnce()` itself: it runs *inside* one, and joining the pass in
+    /// flight from within it would wait forever.
+    func presenceChanged(to presence: PresencePolicy.Presence) async {
+        let previous = lastPresence
+        let reason = presenceSource.reason
+        if previous != presence {
+            log.notice(
+                "presence: \(previous?.rawValue ?? "unknown", privacy: .public) -> \(presence.rawValue, privacy: .public) (\(reason, privacy: .public))"
+            )
+        }
+        let running = runningConfig
+        var memory = presenceMemory
+        let decision = PresencePolicy.decide(
+            presence: presence, previous: previous, rule: presenceRule,
+            applied: running, memory: &memory
+        )
+
+        switch decision {
+        case .leaveAlone:
+            lastPresence = presence
+            presenceMemory = memory
+            guard previous != nil, previous != presence, presenceRule.isEnabled else { return }
+            if presence == .away {
+                // Say why, because a rule that silently does nothing on the
+                // one event it exists for reads as broken.
+                let why = running?.mode == .manual
+                    ? "manual mode is your call"
+                    : "nothing known to hand back"
+                log.notice("away: leaving the fans alone — \(why, privacy: .public)")
+            } else if lastAwayTrip?.ended == nil, lastAwayTrip != nil {
+                let name = PresetHighlight.matching(PresetStore.builtins, applied: running)?.name ?? "your curve"
+                log.notice("back: leaving \(name, privacy: .public) alone — something else chose it meanwhile")
+                lastAwayTrip?.ended = Date()
+                lastAwayTrip?.outcome = "left \(name) alone — something else chose it while you were away"
+            }
+        case let .apply(kind):
+            guard let preset = PresetStore.builtins.first(where: { $0.kind == kind }) else {
+                lastPresence = presence
+                return
+            }
+            guard isConnected else {
+                log.notice("away: the daemon is unreachable — will retry on the next pass")
+                return
+            }
+            lastPresence = presence
+            log.notice("away (\(reason, privacy: .public)): switching to \(preset.name, privacy: .public)")
+            let began = Date()
+            let outcome = await applyPreset(
+                preset, persistCurve: self.memory.persistsCurveWithoutApp, remembering: false
+            )
+            if outcome == .failed {
+                presenceMemory = .empty
+                let error = lastError ?? "unknown error"
+                lastAwayTrip = AwayTrip(
+                    began: began, reason: reason, ran: preset.name, ended: began,
+                    outcome: "could not switch: \(error)"
+                )
+                return
+            }
+            // Recorded only now: a memory of a preset that never reached the
+            // daemon would restore over a choice it never displaced.
+            memory.appliedWhileAway = lastAppliedConfig
+            presenceMemory = memory
+            lastAwayTrip = AwayTrip(began: began, reason: reason, ran: preset.name)
+        case let .restore(config):
+            guard isConnected else {
+                log.notice("back: the daemon is unreachable — will retry on the next pass")
+                return
+            }
+            lastPresence = presence
+            presenceMemory = memory
+            let name = PresetHighlight.matching(PresetStore.builtins, applied: config)?.name ?? "your curve"
+            log.notice("back: restoring \(name, privacy: .public)")
+            let outcome = await apply(config)
+            lastAwayTrip?.ended = Date()
+            lastAwayTrip?.outcome = outcome == .failed
+                ? "could not put \(name) back: \(lastError ?? "unknown error")"
+                : "put \(name) back"
+        }
     }
 
     // MARK: - Write-path self-test (PLAN.md §4.3.6)
@@ -1005,6 +1202,10 @@ final class HelperManager {
         await retryDeferredApply()
         await autoResumeIfNeeded()
         await powerSourceChanged(to: powerSource.current)
+        // After the power rule, deliberately: a launch to a locked screen
+        // should first land on the power rule's preset and then leave from it,
+        // so that preset is what the user comes back to.
+        await presenceChanged(to: presenceSource.current)
         await selfTestAfterOSChangeIfNeeded()
         reconcileHighlight()
     }

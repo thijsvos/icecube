@@ -197,6 +197,25 @@ private final class FakePowerSource: PowerSourceObserving {
     }
 }
 
+/// A user the test can send away and bring back — no lock screen, and no
+/// dependence on what state the CI runner's session happens to be in.
+@MainActor
+private final class FakePresence: PresenceObserving {
+    var current: PresencePolicy.Presence
+    var reason: String
+    var onChange: (@MainActor () -> Void)?
+    private(set) var startCalls = 0
+
+    init(_ initial: PresencePolicy.Presence = .present, reason: String = "here") {
+        current = initial
+        self.reason = reason
+    }
+
+    func start() {
+        startCalls += 1
+    }
+}
+
 /// `DaemonRegistering` is a protocol, not a class, so a value copy would lose
 /// the fake's recorded calls. This forwards to a shared reference.
 @MainActor
@@ -240,14 +259,16 @@ struct HelperManagerTests {
         channel: FakeChannel,
         defaults: MemoryDefaults,
         blocker: String? = nil,
-        power: FakePowerSource = FakePowerSource()
+        power: FakePowerSource = FakePowerSource(),
+        presence: FakePresence = FakePresence()
     ) -> HelperManager {
         HelperManager(
             service: RegistrarProxy(inner: registrar),
             client: channel,
             defaults: defaults,
             blocker: { blocker },
-            powerSource: power
+            powerSource: power,
+            presence: presence
         )
     }
 
@@ -1055,6 +1076,256 @@ struct HelperManagerTests {
             registrar: FakeRegistrar(), channel: FakeChannel(), defaults: makeDefaults()
         )
         #expect(manager.powerRule.isEnabled == false)
+    }
+
+    // MARK: - Away-aware profiles
+
+    private func awayRule() -> PresencePolicy.Rule {
+        PresencePolicy.Rule(isEnabled: true, whileAway: .cold)
+    }
+
+    /// A connected manager running Balanced, with the away rule on.
+    private func awayFixture(
+        presence: FakePresence = FakePresence()
+    ) async -> (HelperManager, FakeChannel) {
+        let registrar = FakeRegistrar(); registrar.status = .enabled
+        let channel = FakeChannel()
+        let manager = makeManager(
+            registrar: registrar, channel: channel, defaults: makeDefaults(), presence: presence
+        )
+        manager.presenceRule = awayRule()
+        await manager.maintainOnce()
+        await manager.applyPreset(PresetStore.builtins[1], persistCurve: false) // Balanced
+        return (manager, channel)
+    }
+
+    @Test("Leaving switches to the away preset")
+    func leavingAppliesAwayPreset() async {
+        let (manager, channel) = await awayFixture()
+        let before = channel.appliedConfigs.count
+
+        await manager.presenceChanged(to: .away)
+
+        #expect(channel.appliedConfigs.count == before + 1)
+        #expect(channel.appliedConfigs.last?.sharedCurve == FanCurve.cold)
+    }
+
+    @Test("Coming back puts the previous preset back")
+    func returningRestores() async {
+        let (manager, channel) = await awayFixture()
+
+        await manager.presenceChanged(to: .away)
+        await manager.presenceChanged(to: .present)
+
+        #expect(channel.appliedConfigs.last?.sharedCurve == FanCurve.balanced)
+        #expect(manager.lastAwayTrip?.outcome == "put Balanced back")
+    }
+
+    /// THE test for the interaction the Settings caption promises: while the
+    /// user is away the away preset holds, and a charger change becomes what
+    /// they come back to rather than taking over now.
+    @Test("A power change while away is noted for the return, not applied")
+    func powerChangeWhileAwayIsDeferredToReturn() async {
+        let (manager, channel) = await awayFixture()
+        manager.powerRule = PowerProfilePolicy.Rule(isEnabled: true, onBattery: .quiet, onWall: .max)
+        await manager.powerSourceChanged(to: .wall) // first decision: applies Max
+        await manager.applyPreset(PresetStore.builtins[1], persistCurve: false) // user picks Balanced
+
+        await manager.presenceChanged(to: .away)
+        let afterLeaving = channel.appliedConfigs.count
+        await manager.powerSourceChanged(to: .battery)
+
+        #expect(channel.appliedConfigs.count == afterLeaving, "the away preset must keep holding")
+        #expect(channel.appliedConfigs.last?.sharedCurve == FanCurve.cold)
+
+        await manager.presenceChanged(to: .present)
+        #expect(
+            channel.appliedConfigs.last?.sharedCurve == FanCurve.quiet,
+            "the power rule's pick is what you come back to"
+        )
+    }
+
+    @Test("Coming back leaves alone a preset the user picked in the meantime")
+    func returningYieldsToHandPick() async {
+        let (manager, channel) = await awayFixture()
+
+        await manager.presenceChanged(to: .away)
+        await manager.applyPreset(PresetStore.builtins[3], persistCurve: false) // Max, by hand
+        let afterHandPick = channel.appliedConfigs.count
+        await manager.presenceChanged(to: .present)
+
+        #expect(channel.appliedConfigs.count == afterHandPick)
+        #expect(channel.appliedConfigs.last?.sharedCurve == FanCurve.max)
+        #expect(manager.lastAwayTrip?.outcome?.hasPrefix("left Max alone") == true)
+    }
+
+    @Test("Polling while away or present changes nothing")
+    func pollingIsInert() async {
+        let (manager, channel) = await awayFixture()
+        await manager.presenceChanged(to: .away)
+        let whileAway = channel.appliedConfigs.count
+        for _ in 0 ..< 5 {
+            await manager.presenceChanged(to: .away)
+        }
+        #expect(channel.appliedConfigs.count == whileAway)
+
+        await manager.presenceChanged(to: .present)
+        let whileBack = channel.appliedConfigs.count
+        for _ in 0 ..< 5 {
+            await manager.presenceChanged(to: .present)
+        }
+        #expect(channel.appliedConfigs.count == whileBack)
+    }
+
+    @Test("A disabled away rule ignores the lock screen entirely")
+    func disabledAwayRuleDoesNothing() async {
+        let (manager, channel) = await awayFixture()
+        manager.presenceRule = .suggested
+        let before = channel.appliedConfigs.count
+
+        await manager.presenceChanged(to: .away)
+        await manager.presenceChanged(to: .present)
+
+        #expect(channel.appliedConfigs.count == before, "off means off")
+    }
+
+    @Test("Manual mode is never taken over by the away rule")
+    func manualIsLeftAlone() async {
+        let (manager, channel) = await awayFixture()
+        await manager.applyManual(targets: [0: 3000, 1: 3000])
+        let before = channel.appliedConfigs.count
+
+        await manager.presenceChanged(to: .away)
+        await manager.presenceChanged(to: .present)
+
+        #expect(channel.appliedConfigs.count == before)
+        #expect(channel.appliedConfigs.last?.mode == .manual)
+    }
+
+    /// The instant path arrives before the reconnect on a wake. Left
+    /// unconsumed, the next pass — which reconnects first and polls presence
+    /// last — must act on it.
+    @Test("A departure found while disconnected is retried once the daemon is back")
+    func departureRetriesAfterReconnect() async {
+        let presence = FakePresence()
+        let (manager, channel) = await awayFixture(presence: presence)
+        // What an XPC invalidation looks like from the app: the client drops
+        // the connection and tells the manager so through `onDisconnect`.
+        channel.disconnect()
+        channel.onDisconnect?()
+        #expect(manager.connection == .disconnected)
+        let before = channel.appliedConfigs.count
+
+        presence.current = .away
+        await manager.presenceChanged(to: .away) // the notification, too early
+        #expect(channel.appliedConfigs.count == before, "nothing can be sent while disconnected")
+
+        await manager.maintainOnce() // reconnects, then polls presence
+        #expect(channel.appliedConfigs.last?.sharedCurve == FanCurve.cold, "the transition was consumed too early")
+    }
+
+    /// The mirror image, and the one a mutation found untested: a return that
+    /// arrives while the daemon is unreachable must not be consumed either —
+    /// the memory of what to hand back has to survive until the reconnect.
+    @Test("A return found while disconnected is retried once the daemon is back")
+    func returnRetriesAfterReconnect() async {
+        let presence = FakePresence()
+        let (manager, channel) = await awayFixture(presence: presence)
+        presence.current = .away
+        await manager.presenceChanged(to: .away)
+        #expect(channel.appliedConfigs.last?.sharedCurve == FanCurve.cold)
+        channel.disconnect()
+        channel.onDisconnect?()
+        let before = channel.appliedConfigs.count
+
+        presence.current = .present
+        await manager.presenceChanged(to: .present) // the unlock, too early
+        #expect(channel.appliedConfigs.count == before, "nothing can be sent while disconnected")
+
+        await manager.maintainOnce() // reconnects, then polls presence
+        #expect(channel.appliedConfigs.last?.sharedCurve == FanCurve.balanced, "the hand-back was lost")
+        #expect(manager.lastAwayTrip?.outcome == "put Balanced back")
+    }
+
+    /// The notification is the fast path; the 5 s pass is the guarantee.
+    @Test("The maintenance pass notices a departure the notification missed")
+    func pollNoticesDeparture() async {
+        let presence = FakePresence()
+        let (manager, channel) = await awayFixture(presence: presence)
+
+        presence.current = .away
+        await manager.maintainOnce()
+        #expect(channel.appliedConfigs.last?.sharedCurve == FanCurve.cold)
+
+        presence.current = .present
+        await manager.maintainOnce()
+        #expect(channel.appliedConfigs.last?.sharedCurve == FanCurve.balanced)
+    }
+
+    /// The away preset is borrowed, not chosen. If it were remembered as the
+    /// user's last curve, a crash while away would relaunch into it.
+    @Test("The away preset is not remembered as the user's choice")
+    func awayPresetIsNotRemembered() async {
+        let defaults = makeDefaults()
+        let registrar = FakeRegistrar(); registrar.status = .enabled
+        let channel = FakeChannel()
+        let manager = makeManager(registrar: registrar, channel: channel, defaults: defaults)
+        manager.presenceRule = awayRule()
+        await manager.maintainOnce()
+        await manager.applyPreset(PresetStore.builtins[1], persistCurve: false) // Balanced
+
+        await manager.presenceChanged(to: .away)
+
+        #expect(channel.appliedConfigs.last?.sharedCurve == FanCurve.cold, "the fans did move")
+        #expect(
+            FanControlMemory(defaults: defaults).lastCurve?.sharedCurve == FanCurve.balanced,
+            "but the remembered curve is still the user's"
+        )
+    }
+
+    /// A daemon that refuses the away preset outright must not arm a return
+    /// that would restore over a choice it never displaced.
+    @Test("A refused departure leaves nothing to restore")
+    func refusedDepartureRestoresNothing() async {
+        let (manager, channel) = await awayFixture()
+        channel.applyFailure = FakeChannel.NotConnected()
+        await manager.presenceChanged(to: .away)
+        channel.applyFailure = nil
+        let before = channel.appliedConfigs.count
+
+        await manager.presenceChanged(to: .present)
+
+        #expect(channel.appliedConfigs.count == before)
+        #expect(manager.lastAwayTrip?.outcome?.hasPrefix("could not switch") == true)
+    }
+
+    @Test("start() wires the presence instant path")
+    func startWiresPresence() {
+        let registrar = FakeRegistrar(); registrar.status = .enabled
+        let presence = FakePresence()
+        let manager = makeManager(
+            registrar: registrar, channel: FakeChannel(), defaults: makeDefaults(), presence: presence
+        )
+
+        manager.start()
+
+        #expect(presence.startCalls == 1, "the monitor was never told to begin observing")
+        #expect(presence.onChange != nil, "nothing is listening — detection would wait for the poll")
+    }
+
+    @Test("The away rule survives a manager rebuild")
+    func awayRulePersists() {
+        let defaults = makeDefaults()
+        let first = makeManager(registrar: FakeRegistrar(), channel: FakeChannel(), defaults: defaults)
+        first.presenceRule = awayRule()
+
+        let second = makeManager(registrar: FakeRegistrar(), channel: FakeChannel(), defaults: defaults)
+        #expect(second.presenceRule == awayRule())
+        #expect(
+            makeManager(registrar: FakeRegistrar(), channel: FakeChannel(), defaults: makeDefaults())
+                .presenceRule.isEnabled == false,
+            "nothing is configured until the user turns it on"
+        )
     }
 
     // MARK: - Errors

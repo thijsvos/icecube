@@ -132,6 +132,7 @@ targets:
       - IceCube/HelperClient.swift
       - IceCube/PresetStore.swift
       - IceCube/PowerSourceMonitor.swift
+      - IceCube/PresenceMonitor.swift
       - IceCube/UpdateChecker.swift
       - IceCube/MenuBarMode.swift
       - IceCube/WindowOpener.swift
