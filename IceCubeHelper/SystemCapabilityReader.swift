@@ -34,6 +34,13 @@ enum SystemCapabilityReader {
         return unsafeBitCast(symbol, to: GetCapabilities.self)
     }()
 
+    /// Reads the live power capability bits, preferring the private symbol and
+    /// falling back to the registry.
+    ///
+    /// The two sources agree on ``PowerCapabilities/video``, the only bit the
+    /// dark-wake gate acts on, and disagree above it — measured `0x0F` from the
+    /// registry where the `dlsym` path said `0x1F`. Returns `nil` when both fail,
+    /// which ``WakeClassifier`` reads as `.unknown` and never as a full wake.
     static func current() -> PowerCapabilities? {
         if let getCapabilities {
             return PowerCapabilities(rawValue: getCapabilities())

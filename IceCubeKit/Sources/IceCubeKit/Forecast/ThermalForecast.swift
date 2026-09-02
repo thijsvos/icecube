@@ -32,7 +32,9 @@ import Foundation
 /// T* = T_airflow + law(band(curve(T*))).rise(atWatts: P)
 /// ```
 ///
-/// solved by iteration from where the die is now. That is what lets the window
+/// solved by searching the bands this Mac has actually been measured in — see
+/// `solve`, which explains why iterating from the current temperature was the
+/// wrong shape. That is what lets the window
 /// say *"your Balanced curve will take the fans to 5,150 RPM as it climbs"* —
 /// a sentence built from the user's own curve and their own machine's measured
 /// cooling, which is the whole claim of this feature.
@@ -71,6 +73,12 @@ public enum ThermalForecast {
 
     // MARK: - The verdict
 
+    /// What the forecast can say about where the die is heading.
+    ///
+    /// Three cases rather than an optional projection, because "no forecast" and
+    /// "settles safely" are different answers and the window must not render them
+    /// the same way. ``Gap`` carries which input is missing; ``CoolingTrend/Verdict``
+    /// is the same shape at the months scale.
     public enum Verdict: Sendable, Equatable {
         /// No answer, and which input is missing.
         case unavailable(Gap)
@@ -99,6 +107,14 @@ public enum ThermalForecast {
         case beyondHorizon
     }
 
+    /// Where a load is heading and how long it takes to get there.
+    ///
+    /// Every field is an **equilibrium** claim, not an instantaneous one: it is
+    /// what the fitted ``CoolingLaw`` and the measured ``ThermalTimeConstant``
+    /// imply if the inputs hold still. That is why ``project`` is *told*
+    /// `isLoadSteady` rather than inferring it — a snapshot cannot know, and a
+    /// projection from a moving load heads toward an equilibrium that is itself
+    /// moving.
     public struct Projection: Sendable, Equatable {
         /// Where the die ends up, °C.
         public let settlesAtCelsius: Double

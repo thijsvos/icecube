@@ -113,13 +113,13 @@ func showProcesses(_ provider: any SMCProviding, sampler: any ProcessSampling) a
 /// Samples the SMC for `seconds`, feeding every tick to ``ThermalTimeConstant``,
 /// and prints the distribution of τ it accepted plus why it refused the rest.
 ///
-/// **This is an instrument, not a feature.** `ThermalTimeConstant`'s plausible
-/// band is reasoning from `R ≈ 0.9 °C/W` and a heatsink of order 50–150 J/°C —
-/// nobody has measured τ on real hardware. The last constant in this project
-/// set from first principles alone was `ChargingWarmth.onsetCelsius`, which
-/// shipped a degree inside the noise it was meant to clear and was corrected
-/// the same day. So the bounds stay placeholders until a run of this prints a
-/// distribution, and no user-facing copy ships before that.
+/// **This is an instrument, not a feature.** It is what measured τ on the
+/// reference Mac14,9 on 2026-09-01: 1800 s of ordinary use, 89 accepted
+/// estimates, median **73.7 s** — inside the 45–135 s that `R ≈ 0.9 °C/W` and a
+/// 50–150 J/°C heatsink predicted. ``ThermalTimeConstant/minimumPlausible``
+/// carries the distribution and the reason the bounds did not move. Re-run it
+/// on new hardware; the forecast row that ships on top of it is behind
+/// Settings → General → Experimental.
 ///
 /// The refusal tally matters as much as the median. A gate that rejects
 /// everything is indistinguishable, from the outside, from a machine that
@@ -173,7 +173,7 @@ func forecast(_ provider: any SMCProviding, seconds: Double) async {
         let reported = subject.tau.map { String(format: "%.0f s", $0) } ?? "— (below the evidence bar)"
         print("  reported:  \(reported)")
         print(
-            "  band:      \(Int(ThermalTimeConstant.minimumPlausible))–\(Int(ThermalTimeConstant.maximumPlausible)) s (placeholder — this run is what replaces it)"
+            "  band:      \(Int(ThermalTimeConstant.minimumPlausible))–\(Int(ThermalTimeConstant.maximumPlausible)) s (plausibility bounds, kept after the 2026-09-01 run)"
         )
     }
 

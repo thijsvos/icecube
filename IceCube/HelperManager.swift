@@ -19,10 +19,11 @@ import ServiceManagement
 /// timer — and is why this type had no tests at all until 2026-07-27, despite
 /// being where two real bugs had already been found by hand.
 ///
-/// The three system seams are injected for the same reason and default to the
+/// The five system seams are injected for the same reason and default to the
 /// production wiring, so `HelperManager()` still means the real daemon:
 /// ``DaemonRegistering`` (SMAppService), ``HelperChanneling`` (the XPC
-/// channel), and `UserDefaults` for the startup preference.
+/// channel), `UserDefaults` for the startup preference, ``PowerSourceObserving``
+/// and ``PresenceObserving``.
 @Observable
 final class HelperManager {
     /// Where the helper stands with launchd/Background Task Management.
@@ -198,7 +199,7 @@ final class HelperManager {
 
     /// Whether the XPC channel is a stand-in rather than the real one.
     ///
-    /// These three exist for `SimulatedIsolationTests`, which guards the defect
+    /// These four exist for `SimulatedIsolationTests`, which guards the defect
     /// that let a simulated launch drive the owner's real fans. Asserting on
     /// the seam's identity is the only way to prove the property — the manager
     /// deliberately cannot tell the difference in its own logic, and that is
@@ -223,6 +224,17 @@ final class HelperManager {
         presenceSource is SimulatedEnvironment.Presence
     }
 
+    /// Builds a manager over its six system seams, each defaulting to the real one.
+    ///
+    /// Every parameter exists so `SimulatedIsolationTests` can prove the property
+    /// this type is most dangerous without: that a simulated launch drives no real
+    /// fan, writes no real preference domain, and reads no real power source. The
+    /// manager deliberately cannot tell the difference in its own logic — see
+    /// ``usesSimulatedChannel`` and friends — which is what makes the guarantee
+    /// testable rather than asserted.
+    ///
+    /// Does no background work: `refreshRegistration()` is the only side effect
+    /// here, and the timers live in ``start()`` for the reason its doc gives.
     init(
         service: any DaemonRegistering = SMAppServiceRegistrar(),
         client: any HelperChanneling = HelperClient(),
@@ -705,9 +717,9 @@ final class HelperManager {
     /// Switches to the next preset in `cycle` — the ⌥-click quick-switch
     /// (PLAN.md §1.1).
     ///
-    /// Goes through ``applyPreset(_:persistCurve:)`` rather than `apply` so the
-    /// gesture cannot become a second path with its own idea of the persist
-    /// rule; it is the same call the popover's buttons make.
+    /// Goes through ``applyPreset(_:persistCurve:remembering:)`` rather than
+    /// `apply` so the gesture cannot become a second path with its own idea of
+    /// the persist rule; it is the same call the popover's buttons make.
     ///
     /// - Returns: the preset applied, or `nil` — which covers two different
     ///   things, and the caller has to be willing to treat them alike. The first
@@ -828,9 +840,11 @@ final class HelperManager {
         }
     }
 
-    /// Applies the mapped preset when — and only when — the power source
-    /// actually changed. See ``PowerProfilePolicy`` for why that distinction is
-    /// the whole safety of the feature rather than an optimisation.
+    /// Applies the mapped preset on a real power-source transition — unless the
+    /// away rule is currently holding the fans, in which case the pick is
+    /// recorded as what to restore on return rather than applied now.
+    /// See ``PowerProfilePolicy`` for why "only on a transition" is the whole
+    /// safety of the feature, and ``PresencePolicy`` for the precedence.
     func powerSourceChanged(to source: PowerProfilePolicy.PowerSource) async {
         let decision = PowerProfilePolicy.decide(
             source: source, previous: lastPowerSource, rule: powerRule

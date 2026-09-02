@@ -37,8 +37,8 @@ public enum HeatFlow {
     /// Warm enough that something ought to be cooling it, °C.
     ///
     /// 68 °C is not a new number: it is ``FanGuardian``'s own engage floor,
-    /// lowered to this value in `12f63aa` after the original 92 °C proved to be
-    /// far above where a user starts minding. Reusing it means the picture and
+    /// lowered to this value in `12f63aa` (75 → 68 °C) after macOS was observed
+    /// holding both fans at 0 RPM with the die at 69.9 °C. Reusing it means the picture and
     /// the daemon agree about what "warm" means, which they would not if this
     /// file picked its own.
     public static let warmCelsius = 68.0

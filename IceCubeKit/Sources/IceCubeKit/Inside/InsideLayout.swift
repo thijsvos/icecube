@@ -30,7 +30,12 @@ public enum InsideLayout {
         case outflow
     }
 
-    /// One drawn element.
+    /// One block on the schematic: a heat source, a component, or the air.
+    ///
+    /// A block may stand for several sensors — ``sensorCount`` is what lets the
+    /// view say "hottest of 8" rather than implying a single reading — and it names
+    /// its own SF Symbol as a string, so the layout decision lives here and
+    /// `IceCubeKit` still imports no SwiftUI.
     public struct Block: Sendable, Equatable, Identifiable {
         /// The SMC key for a component, or the class name for a grouped source.
         public let id: String

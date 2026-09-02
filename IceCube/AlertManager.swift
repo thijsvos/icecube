@@ -109,12 +109,11 @@ final class AlertManager {
         // one event class the user most needs to see", and it was silent until
         // now, so a user who has never opened Settings should still be told.
         //
-        // The key stores the *negation* for that reason. `KeyValueStore` has no
-        // `object(forKey:)`, so `bool` cannot distinguish "never set" from
-        // "deliberately false" — and widening a protocol that exists to keep
-        // tests off the real preferences system, for one default, is the wrong
-        // trade. Storing "disabled" makes the missing-key default fall out of
-        // `bool`'s own `false`.
+        // The key stores the *negation* for that reason: storing "disabled"
+        // makes the missing-key default fall out of `bool`'s own `false`.
+        // `KeyValueStore` has since grown `object(forKey:)` (for `ChartSettings`),
+        // so an absent/present check is available now — the negation is kept
+        // because it is already on disk, not because it is the only option.
         reportsControlLoss = !defaults.bool(forKey: Self.controlKey)
     }
 

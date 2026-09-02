@@ -4,7 +4,7 @@ import Foundation
 
 /// Where a drawn blower's blades point at a given moment.
 ///
-/// A pure function of fan speed and a time value, in the ``MockSMCSimulation``
+/// A pure function of fan speed and a time value, in the `MockSMCSimulation`
 /// idiom: same inputs, same angle, so the drawing is testable without a window
 /// and a window that stopped redrawing resumes exactly where it left off
 /// instead of jumping.
@@ -86,9 +86,7 @@ public enum FanRotation {
         displayRPM(rpm: rpm, maxRPM: maxRPM) / 60
     }
 
-    /// How far to fade discrete blades into a spinning disc, 0…1.
-    ///
-    /// Ramps to ``maximumBlur`` across the fan's range.
+    /// The ceiling this fade ramps to, 0…1.
     ///
     /// Capped below 1 on purpose. Blur used to reach full opacity at 70 % of
     /// range, which erased the blades exactly when the fan was spinning
@@ -96,6 +94,11 @@ public enum FanRotation {
     /// is a speed cue layered over visible motion, never a replacement for it.
     public static let maximumBlur = 0.55
 
+    /// How far to fade discrete blades into a spinning disc, 0…``maximumBlur``.
+    ///
+    /// Ramps linearly across the fan's range. Returns 0 for a stopped fan and for
+    /// any non-finite or zero-`maxRPM` input, so a half-failed `F{i}Mx` read draws
+    /// crisp blades rather than a NaN.
     public static func blur(rpm: Double, maxRPM: Double) -> Double {
         guard maxRPM > 0, rpm.isFinite, rpm > 0 else { return 0 }
         return ((rpm / maxRPM) * maximumBlur).clamped(to: 0 ... maximumBlur)

@@ -12,6 +12,11 @@ public struct RingBuffer<Element: Sendable>: Sendable {
     public private(set) var count = 0
     public let capacity: Int
 
+    /// A ring holding the newest `capacity` elements.
+    ///
+    /// - Precondition: `capacity > 0`. A zero-capacity ring stores nothing, and its
+    ///   `head` arithmetic divides by zero — so this traps loudly rather than
+    ///   silently becoming a black hole for every sample the charts append.
     public init(capacity: Int) {
         precondition(capacity > 0, "a zero-capacity ring buffer stores nothing")
         self.capacity = capacity

@@ -140,6 +140,16 @@ public struct SleepLatch: Sendable, Equatable {
         return true
     }
 
+    /// Records whether the pre-sleep hand-back actually reached the firmware.
+    ///
+    /// The single input that decides between ``TickAction/stayParked`` and
+    /// ``TickAction/retryPark`` on every dark wake. `false` means the fans are
+    /// **audibly still forced inside a closed laptop** and the next dark wake is
+    /// the first chance to fix it — so a caller that passes `true` for an
+    /// unverified write reproduces the 16 min 34 s closed-lid run that
+    /// ``HelperConstants/protocolVersion`` v20 exists for.
+    ///
+    /// A no-op when the latch is not set: an unparked machine has nothing to land.
     public mutating func noteParkLanded(_ landed: Bool) {
         state?.parkLanded = landed
     }

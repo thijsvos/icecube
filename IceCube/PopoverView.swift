@@ -110,8 +110,9 @@ struct PopoverView: View {
     }
 
     /// What the scrolling half measured, and what the pinned half measured.
-    /// Both start at 0, which `PopoverLayout.scrollHeight` reads as "no
-    /// decision yet" and answers with no constraint.
+    /// `contentHeight` starts at 0, which
+    /// `PopoverLayout.presentation(contentHeight:footerHeight:availableHeight:)`
+    /// reads as "no measurement yet" and answers with `.natural`.
     @State private var contentHeight: CGFloat = 0
     @State private var footerHeight: CGFloat = 0
 

@@ -43,7 +43,9 @@ public enum ForecastCopy {
         }
     }
 
-    /// The row, or `nil` when the feature is switched off.
+    /// The row for this verdict — an answer, a ceiling warning, or a named
+    /// refusal. Always returns a row; whether it is *shown* is the caller's
+    /// switch (`AppState.isForecastEnabled` leaves `forecast` nil when off).
     public static func row(
         _ verdict: ThermalForecast.Verdict,
         style: TemperatureStyle

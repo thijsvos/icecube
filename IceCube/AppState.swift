@@ -947,10 +947,11 @@ final class AppState: PopoverLifecycleObserving {
     /// directly, because the App's scene body is what consumes it: observing
     /// `snapshot` there would re-evaluate the whole scene graph — `MenuBarExtra`
     /// label included — once a second, forever, to answer a question whose
-    /// answer changes at most once. Discovery fixes the sensor list at the first
-    /// poll and `SensorStabilizer` guarantees every discovered sensor stays in
-    /// every published reading, so this goes `nil` → *n* on that first snapshot
-    /// and then holds for the life of the process.
+    /// answer changes only a handful of times. Membership is fixed at discovery
+    /// but the *published* list is only monotone: a power-gated cluster reports
+    /// nothing for up to ~85 s, so this grows over the first minute and a half
+    /// before it settles — and it is assigned only on change, which is why a
+    /// growing count costs no extra scene evaluations.
     ///
     /// It must stay an **observed** property read inside the scene body: that
     /// registration is what makes SwiftUI re-evaluate `App.body` when the count

@@ -42,7 +42,11 @@ public actor ChartStore {
             rawValue
         }
 
-        /// The window's span.
+        /// How far back this window looks, in seconds.
+        ///
+        /// Paired with ``title`` in one `switch` so the two can never drift; the
+        /// seconds used to live here while the human labels lived in the app target,
+        /// indexed by a bare `Int` that three call sites each clamped differently.
         public var seconds: TimeInterval {
             switch self {
             case .oneMinute: 60
@@ -106,7 +110,12 @@ public actor ChartStore {
     public struct Row: Sendable, Equatable, Identifiable {
         public let id: String
         public let title: String
-        /// Displayed unit.
+        /// The unit every value in this row's series is expressed in.
+        ///
+        /// The row's contract with the view, not a caption: the app target switches
+        /// on this to decide whether to convert to Fahrenheit, so a row tagged
+        /// ``Unit/celsius`` whose series carried RPM would be silently converted. It
+        /// is why ``Unit`` is an enum and not a free-form `String`.
         public let unit: Unit
         /// Fixed axis range — never rescales while you watch (anti-jump).
         public let yDomainMin: Double

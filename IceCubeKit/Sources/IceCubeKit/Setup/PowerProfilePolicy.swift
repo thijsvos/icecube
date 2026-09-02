@@ -50,6 +50,10 @@ public enum PowerProfilePolicy {
         }
     }
 
+    /// What a change of power source should do to the fans.
+    ///
+    /// Two cases, and ``leaveAlone`` is by far the common one: this type answers
+    /// "did the power source just *change*?", never "what should be running?".
     public enum Decision: Sendable, Equatable {
         /// Change nothing — the rule is off, or the power source did not change.
         ///

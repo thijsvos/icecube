@@ -41,8 +41,8 @@ import Foundation
 ///
 /// **What it is not.** A single pole fitted to a machine that has two. Silicon
 /// responds in seconds and the chassis in minutes; this lands on whichever
-/// dominates the stretch it sampled. `stepSettleSeconds` biases it toward the
-/// slow pole, which is the one that governs where a sustained load ends up,
+/// dominates the stretch it sampled. The 180 s span of a triple
+/// (``spacingSeconds``) biases it toward the slow pole, which is the one that governs where a sustained load ends up,
 /// and the consequence is stated where it shows: a forecast built on this is
 /// optimistic about the first few seconds of a load step.
 public struct ThermalTimeConstant: Sendable, Equatable {
@@ -101,10 +101,10 @@ public struct ThermalTimeConstant: Sendable, Equatable {
     //
     // One was written, and mutation testing showed it could be deleted with
     // every test still green. It was redundant by construction: an estimate's
-    // three samples span `spacingSeconds * 2` = 20 s, and the power gate below
+    // three samples span `spacingSeconds * 2` = 180 s, and the power gate below
     // rejects any triple whose draw moved — so a fit can only ever run on a
     // window lying entirely after the step, by which point the die's own fast
-    // pole is largely spent. The 20 s span *is* the bias toward the slow pole,
+    // pole is largely spent. The 180 s span *is* the bias toward the slow pole,
     // and a second constant asserting the same thing over a shorter horizon
     // only looked like a safeguard.
 
@@ -154,7 +154,9 @@ public struct ThermalTimeConstant: Sendable, Equatable {
     /// the die, which is a second-order effect, and an outright step — a sensor
     /// glitch, or a machine carried into another room. This catches those.
     ///
-    /// Measured on the simulated machine over 20 s windows: airflow drifts
+    /// Measured on the simulated machine over 20 s windows — at the 10 s spacing
+    /// first tried, and not re-measured since ``spacingSeconds`` became 90 s (a
+    /// 180 s span, over which this p90 is a lower bound): airflow drifted
     /// 1.22 °C at the median, 5.94 °C at p90. The original 0.5 °C therefore
     /// refused **more than half of all windows**, including every genuine ramp
     /// — `icecube-diag --forecast` accepted zero estimates in 150 s and named
@@ -467,8 +469,8 @@ public struct ThermalTimeConstant: Sendable, Equatable {
     ///
     /// For the measurement runs that set ``minimumPlausible`` and
     /// ``maximumPlausible``: a median alone cannot say whether the spread is
-    /// tight enough for those bounds to be doing useful work, and the bounds
-    /// are placeholders until hardware says otherwise. `icecube-diag
+    /// tight enough for those bounds to be doing useful work. They were confirmed
+    /// rather than moved by the 2026-09-01 run — see ``minimumPlausible``. `icecube-diag
     /// --forecast` prints the distribution; nothing user-facing reads this.
     public func percentile(_ p: Double) -> TimeInterval? {
         CoolingStatistics.percentile(estimates, p)

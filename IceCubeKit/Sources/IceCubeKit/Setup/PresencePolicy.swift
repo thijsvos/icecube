@@ -81,6 +81,13 @@ public enum PresencePolicy {
         }
     }
 
+    /// What a change of presence should do to the fans.
+    ///
+    /// ``restore(_:)`` carries a whole ``FanConfig`` rather than a `Preset.Kind`
+    /// like ``apply(_:)`` does, and that asymmetry is the design: a departure
+    /// applies one of the user's named built-ins, while a return has to put back
+    /// exactly what was displaced — which may be a hand-edited curve no preset
+    /// names.
     public enum Decision: Sendable, Equatable {
         /// Change nothing — the rule is off, presence did not change, there is
         /// nothing known to hand back, or something else chose since.

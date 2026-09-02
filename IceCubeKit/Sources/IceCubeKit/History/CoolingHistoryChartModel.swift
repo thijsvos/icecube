@@ -53,6 +53,13 @@ public enum CoolingHistoryChartModel {
             .sorted { ($0.readings, $1.band.sortKey) > ($1.readings, $0.band.sortKey) }
     }
 
+    /// Turns a band's day-aggregates into chart points, preserving their order.
+    ///
+    /// The order is a contract, not an incidental: ``medianRuns(_:)`` breaks a run
+    /// wherever more than three days pass between consecutive points, so a
+    /// mis-ordered series would render as one run per point — a chart of
+    /// disconnected dots with no error anywhere. Callers pass the ascending series
+    /// ``CoolingTrend/seriesByBand(_:now:)`` returns.
     public static func points(_ series: [CoolingDayAggregate]) -> [DayPoint] {
         series.map(DayPoint.init)
     }

@@ -608,6 +608,15 @@ public actor DaemonCore {
 
     // MARK: - XPC entry points
 
+    /// Feeds the watchdog — the app's proof that somebody is still supervising the
+    /// fans.
+    ///
+    /// Monotonic on purpose: the stamp is a `ContinuousClock` instant, never a
+    /// `Date`. A backwards NTP step used to yield a *negative* `heartbeatAge()`,
+    /// which is never greater than the timeout, silently deferring the revert the
+    /// watchdog exists to guarantee. Silence for
+    /// ``HelperConstants/watchdogTimeout`` reverts to auto — always in manual mode,
+    /// and in curve mode unless persistence is on.
     public func heartbeat() {
         lastHeartbeatAt = ContinuousClock().now
     }
@@ -850,8 +859,8 @@ public actor DaemonCore {
     /// about to do to their machine.
     ///
     /// SAFETY: goes through ``engage(targets:fans:since:)`` and
-    /// ``revertEverything(reason:)`` rather than touching the sequencer
-    /// directly, so it inherits every guard already built — the write lock, the
+    /// ``revertEverything(reason:clearsPersistence:)`` rather than touching the
+    /// sequencer directly, so it inherits every guard already built — the write lock, the
     /// intent counter, the revert-race generation check, and the clamp. A probe
     /// that reached around those would be the one piece of write code in the
     /// daemon that could strand the fans.
@@ -961,6 +970,13 @@ public actor DaemonCore {
         await revertEverything(reason: "app requested revert")
     }
 
+    /// The daemon's live self-report, for `getStatus` over XPC.
+    ///
+    /// Returns the `status` the tick mutates in place, so it describes what the
+    /// daemon is **enforcing** rather than what was last requested — the
+    /// distinction ``HelperStatus/mode`` and ``HelperStatus/appliedTargets`` both
+    /// rest on. Side-effect free and reads no SMC key, which is why the app may
+    /// poll it at the chart cadence.
     public func currentStatus() -> HelperStatus {
         status
     }

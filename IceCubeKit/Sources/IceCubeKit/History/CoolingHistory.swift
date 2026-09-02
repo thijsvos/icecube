@@ -101,9 +101,10 @@ public struct CoolingHistory: Sendable, Codable, Equatable {
     // MARK: - Retention constants, and why each has its value
 
     /// Raw records live in the youngest seven UTC day-buckets, today
-    /// included. Raw exists for two jobs only — building the current days'
-    /// aggregates and feeding the jump detector, which needs sub-day
-    /// resolution. Nothing else reads it.
+    /// included. Raw has three readers: the day aggregates, the jump detector
+    /// (which needs sub-day resolution), and ``CoolingLaw/fit(_:)``, which fits
+    /// its per-band lines through raw records — so the fitted law describes
+    /// only the last week, which is the window a forecast wants.
     ///
     /// Pruning is **whole days only**, never by timestamp: a day whose raw
     /// has been partially pruned would re-fold to an aggregate built from
@@ -170,6 +171,14 @@ public struct CoolingHistory: Sendable, Codable, Equatable {
         compact(now: now)
     }
 
+    /// Records that the machine was physically serviced — cleaned, repasted, a fan
+    /// replaced — on `date`.
+    ///
+    /// A boundary, not an annotation: ``CoolingTrend`` never lets a baseline span
+    /// one, so a repaste stops reading as `improved` forever and the comparison
+    /// restarts from the machine as it now is. Marks are kept sorted, and the trend
+    /// filters to `<= now` before using them, so a mark dated in the future by an
+    /// unsynced clock cannot silently truncate every baseline.
     public mutating func markServiced(at date: Date) {
         serviceMarks.append(date)
         serviceMarks.sort()
@@ -241,9 +250,19 @@ public struct CoolingHistory: Sendable, Codable, Equatable {
         /// is not.
         case readOnly(Reason)
 
+        /// Why a history file could not simply be loaded.
+        ///
+        /// Three causes with three different costs, which is why they are not one
+        /// Bool: the first two quarantine and begin again, while `schemaTooNew` must
+        /// **not** write this launch — overwriting would destroy months of history
+        /// to save one launch of recording.
         public enum Reason: Sendable, Equatable {
+            /// The JSON did not decode at all.
             case unreadable
+            /// The fingerprint names a different Mac. `R` is not comparable between
+            /// machines, so the readings answer no question this file exists for.
             case machineChanged
+            /// The file's `schemaVersion`, which this build has never heard of.
             case schemaTooNew(Int)
         }
     }

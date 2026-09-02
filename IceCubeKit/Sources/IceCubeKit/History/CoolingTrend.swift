@@ -93,12 +93,32 @@ public enum CoolingTrend {
     /// Why a comparison could not be made, for copy that names what is
     /// missing rather than shrugging.
     public enum Gap: Sendable, Equatable {
+        /// No single fan-speed band has both a recent and a baseline epoch.
+        /// Cross-band comparison is what the physics forbids, so this is a
+        /// refusal, not a fallback.
         case noBandHasBothEpochs
+        /// Fewer settled days in the recent window than a comparison needs;
+        /// carries both counts so the copy can say how far off it is.
         case tooFewRecentDays(have: Int, need: Int)
+        /// Fewer settled days in the baseline window than a comparison needs;
+        /// same shape as the recent case.
         case tooFewBaselineDays(have: Int, need: Int)
+        /// The two epochs' median fan fractions differ by more than
+        /// ``maxWithinBandFanDrift``, so a band-edge artefact could fake a ~4.6 %
+        /// improvement. Carries both medians.
         case fanSpeedDrifted(recent: Double, baseline: Double)
     }
 
+    /// What months of settled readings say about this Mac's cooling.
+    ///
+    /// Ordered from "cannot say" to "say it loudly", and the first three cases are
+    /// all refusals: this type would rather name what is missing than produce a
+    /// verdict from evidence that does not support one.
+    ///
+    /// Every non-refusal carries its ``Comparison`` whole, `stable` included — with
+    /// a 10 % threshold a real 9 % drift reports stable, and the copy layer needs
+    /// the numbers to choose between "unchanged" and "slightly higher, not enough
+    /// to call".
     public enum Verdict: Sendable, Equatable {
         /// Nothing has ever been recorded. Distinct from collecting: this
         /// Mac may have no power key or no airflow sensor, and the copy
