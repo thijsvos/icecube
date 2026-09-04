@@ -149,6 +149,14 @@ of 20 — its only silicon input the two GPU dies — and ran that way for 13 ho
       abrupt-change verdict with the warning triangle, and the real
       `cooling-history.json` is untouched afterwards.
 
+## Menu bar width
+
+- [ ] With the menu bar showing the temperature, nothing to the left of the ice
+      cube moves for a minute while the reading changes — in °C, and then again
+      after Settings → General → °F (where "99°" ↔ "100°" flips at 37.8 °C).
+- [ ] Switch Settings → Menu to fan speed and to both; same check. The fan speed
+      always reads as N.Nk ("0.5k" below 1000 RPM).
+
 ## Away preset
 
 - [ ] Settings → Fan Control → *Switch presets while I'm away* on, *While

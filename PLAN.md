@@ -836,6 +836,60 @@ this feature, and the reason the "quit before replacing the app bundle" rule exi
 Protocol stays at **28**: nothing daemon-side changed. Stated rather than
 assumed, per docs/RELEASING.md. Science and limits for users: docs/AWAY.md.
 
+### The menu bar item stops moving (2026-09-02)
+
+- [x] The status item is a constant width in every display mode and both
+      units, so the menu bar no longer slides as the digits change. Owner's
+      report: "51°" and "58°" rendered at different widths — the popover's "no
+      reflow on a data change" rule broken in the app's most visible number.
+      Deviation from the first plan: the SwiftUI-side fix (hidden widest-string
+      placeholders under the live text) shipped, was installed, and did
+      nothing; what follows is what a probe found and what replaced it.
+
+**What `MenuBarExtra` actually does with the label — measured.** A temporary
+probe walked the status-bar window every second for 45 s in simulated mode.
+The item's view tree was a bare `NSStatusBarButton` with `image` set and the
+reading as its `title`; no hosting view. `MenuBarExtra` copies the image and
+the text out of the label and discards everything else — the hidden
+placeholders, and `.monospacedDigit()` (the button's font was the plain system
+font). Width: 59 pt for "--°", then 61–63 pt following the digits. That is why
+neither the existing modifier nor the first fix had any effect.
+
+**The two levers that remain, both applied.** The font on that button, which
+`StatusItemShim` (already reaching it for right-click) now sets to the system
+font with tabular digits — measured to survive every title SwiftUI writes
+afterwards; and the string itself, which `MenuBarLabel` now gives a fixed
+shape: the temperature padded with U+2007 FIGURE SPACE to three digit cells,
+"--" as U+2012 FIGURE DASH (both exactly one tabular digit wide), and the fan
+speed always "N.Nk". Second probe run: **45 of 45 ticks at 71 pt.** The
+padding goes on the **right**: the first install padded on the left and the
+owner saw a gap between the ice cube and the number; on the right the spare
+cell sits at the far edge, and in "both" mode between the reading and the fan
+speed, which keeps the fan speed's position fixed as well.
+The vendored `NSStatusItem` gets the same font and the same strings and needs
+nothing else; the measured-`length` machinery from the first plan came out.
+
+**Fahrenheit is the case that matters.** Celsius reaches three digits only
+past 99 °C under load; Fahrenheit passes "100°" at 37.8 °C, many times an hour.
+Three cells covers both (105 °C is 221 °F), a unit switch never changes the
+shape, and the tests sweep −20…110 °C through both units.
+
+**One visible change.** Fan speed below 1000 RPM reads "0.9k" instead of
+"999": the bare number was one cell narrower and there is no way to give two
+shapes one width. Sub-1000 readings are rare on a Mac, and the popover shows
+the exact figure.
+
+| Mutation | Result |
+| --- | --- |
+| temperature padding count forced to zero | killed (the °F sweep) — the first form, deleting the padding line, left a variable unused and did not compile under the warnings gate; reported as its own outcome, then redone |
+| fan speed back to the bare number below 1000 | killed |
+| placeholder left as ASCII dashes | killed |
+| padding moved back to the icon side | killed |
+
+Not verifiable from a shell without the probe: whether the *installed* item
+holds its width. The probe measured it on the build; the owner confirms it on
+the install, in °C and then in °F.
+
 ## 7. Risks & mitigations
 - **SMC keys vary wildly per model** → curated map + fallback enumeration + community diagnostics pipeline (§3.3). Biggest ongoing cost; design for it.
 - **Free-Apple-ID helper approval unproven** → Phase 0.5 spike with the fallback documented *before* it runs (manual `sudo launchctl bootstrap` install for Phases 3–5).
