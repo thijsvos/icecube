@@ -64,8 +64,18 @@ struct IceCubeApp: App {
                 // label's view structure never changes. Structurally removing
                 // views from a MenuBarExtra label is a known way to glitch
                 // the status item on macOS.
+                //
+                // No font modifier and no layout tricks, on purpose. MenuBarExtra
+                // does not host this label as a view: it copies the image and
+                // the text into the native status-bar button (measured
+                // 2026-09-02 — the button's view tree was empty and its font was
+                // the plain system font with `.monospacedDigit()` applied here;
+                // hidden placeholder Texts were discarded too). What keeps the
+                // item from resizing is the tabular-digit font `StatusItemShim`
+                // sets on that button plus the fixed shape `MenuBarLabel` gives
+                // every reading — the popover's "no reflow on a data change"
+                // rule, applied to the most visible number in the app.
                 Text(appState.menuBarText ?? "")
-                    .monospacedDigit()
             }
             .accessibilityLabel("Ice Cube, hottest sensor \(appState.hottestText)")
             .task {
@@ -119,14 +129,15 @@ struct IceCubeApp: App {
                 WindowOpener.open(WindowOpener.ID.setup, using: openWindow)
             }
             .task {
-                // Widen the status item's click mask so right-click opens the
-                // popover too. Polled rather than guessed: 500 ms was a bet on
+                // Configure the status item's button — right-click opens the
+                // popover too, and the digits get equal widths (see
+                // StatusItemShim). Polled rather than guessed: 500 ms was a bet on
                 // when NSStatusBarWindow materializes during a cold launch that
                 // also builds the provider, the helper manager and the first XPC
                 // connection. `try?` on a sleep also swallows CancellationError,
                 // so the old code ran the shim even after the task was cancelled.
                 for _ in 0 ..< 20 {
-                    if StatusItemShim.enableRightClick() {
+                    if StatusItemShim.configureButton() {
                         return
                     }
                     try? await Task.sleep(for: .milliseconds(100))

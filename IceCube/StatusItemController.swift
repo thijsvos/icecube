@@ -55,6 +55,12 @@ final class StatusItemController: NSObject, MenuBarHosting, NSPopoverDelegate {
         // is the brand mark (see MenuBarGlyph), so nothing here tints it.
         button.image = MenuBarGlyph.iceCube
         button.imagePosition = .imageLeading
+        // Equal-width digits. With every reading padded to a fixed shape by
+        // `MenuBarLabel`, this is what makes the item a constant width — the
+        // same pair of levers `StatusItemShim` applies to the SwiftUI item.
+        button.font = NSFont.monospacedDigitSystemFont(
+            ofSize: button.font?.pointSize ?? NSFont.systemFontSize, weight: .regular
+        )
         button.target = self
         button.action = #selector(buttonClicked)
         // Right-click opens the popover too, matching what `StatusItemShim`
