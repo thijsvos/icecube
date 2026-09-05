@@ -311,4 +311,41 @@ struct CoolingLawTests {
         let coolest = try #require(law.coolestBand(atWatts: 40))
         #expect(coolest.law.slope > 0)
     }
+
+    // MARK: - The fan speed a band was measured at
+
+    @Test("A band reports the fan speed its records were taken at, not its decile's midpoint")
+    func theBandCarriesTheMeasuredFanSpeed() throws {
+        // Pinned at 0.91: deep inside decile 9, whose midpoint is 0.95. A Mac
+        // that idles against its own RPM floor lives at one edge of a band all
+        // day, and the midpoint would name a fan speed it never runs at.
+        let law = CoolingLaw.fit(records: Self.records(fraction: 0.91))
+        let band = try #require(law.band(.decile(9)))
+        #expect(band.medianFanFraction == 0.91)
+    }
+
+    @Test("A band that cannot say what its fans were doing is refused, not guessed")
+    func anUnreadableFanSpeedDropsTheBand() {
+        // Identical readings on an identical line — only the fan fraction is
+        // unreadable. Guessing it at the decile midpoint would be guessing
+        // *low* for a band recorded near the top of its decile, and a derived
+        // curve built on that commands less fan than the readings were taken
+        // with: the machine then settles hotter than the number it promised.
+        let poisoned = Self.records(fraction: 0.91).map { record in
+            CoolingRecord(
+                date: record.date,
+                resistance: record.resistance,
+                dieCelsius: record.dieCelsius,
+                ambientCelsius: record.ambientCelsius,
+                watts: record.watts,
+                band: record.band,
+                fanFraction: .nan,
+                fanRPM: record.fanRPM,
+                sampleCount: record.sampleCount,
+                durationSeconds: record.durationSeconds
+            )
+        }
+        #expect(CoolingLaw.fit(records: Self.records(fraction: 0.91)).band(.decile(9)) != nil)
+        #expect(CoolingLaw.fit(records: poisoned).band(.decile(9)) == nil)
+    }
 }

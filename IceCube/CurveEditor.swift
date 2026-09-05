@@ -65,8 +65,11 @@ struct CurveEditorView: View {
                 .foregroundStyle(Theme.warning)
                 .fixedSize(horizontal: false, vertical: true)
             }
-            CurveCanvas(model: model, hottestDie: state.hottestDie)
+            CurveCanvas(model: model, hottestDie: state.hottestDie, measured: measuredSpans)
                 .frame(minHeight: 240)
+            if state.isMeasuredCurveEnabled {
+                CurveFitRow(state: state, model: model)
+            }
             footer
         }
         .padding(Theme.Metrics.popoverPadding)
@@ -103,6 +106,13 @@ struct CurveEditorView: View {
                 model.updatePreview(die: die)
             }
         }
+    }
+
+    /// What this Mac has measured, in the plot's own coordinates — empty when
+    /// the feature is off, and empty on its own when there is no evidence yet.
+    private var measuredSpans: [CurveDerivation.MeasuredSpan] {
+        guard state.isMeasuredCurveEnabled, let ambient = state.derivationAmbient else { return [] }
+        return CurveDerivation.measuredSpans(law: state.coolingLaw, ambientCelsius: ambient)
     }
 
     // MARK: - Header: load presets into the editor

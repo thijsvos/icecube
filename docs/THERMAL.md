@@ -461,6 +461,96 @@ given fan speed buys *on your Mac* — is now a matter of drawing it rather
 than measuring it again: every record already carries the fan speed it was
 taken at.
 
+## Running it backwards
+
+Everything above runs the model **forwards**: given the curve the user drew,
+where does this load settle? `ThermalForecast` answers that on a two-second
+tick and puts a sentence in the Diagnose window.
+
+The opposite question was answerable the whole time and nobody had asked it.
+
+```
+forwards:   curve + load           →  settling temperature
+backwards:  settling temperature + load  →  the fan speed that holds it
+```
+
+The second line **is a curve point.** A `FanCurve` maps die temperature to fan
+speed; a fitted band maps load to a die temperature at one fan speed. So
+`(ambient + band.rise(atWatts:), band.medianFanFraction)` is a point this
+machine has *demonstrated*: run the fans there under that load and it sits
+there. Sweep the load range, take the slowest band that still holds the target
+at each step, and you have the quietest curve the evidence supports.
+
+That is `CurveDerivation`, behind **Settings → General → Experimental → Made to
+measure**. It draws every measured band as a bar in the curve editor's own
+coordinates — at that fan speed, across the temperatures it was measured at —
+and offers a curve fitted to them.
+
+### The cliff, and why the curve is capped at 0.05 per °C
+
+The first version was correct and useless. "The quietest fan speed that holds
+the target" is a *hard cap*, and the optimal answer to a hard cap is bang-bang.
+Against the simulated plant at a target of 80 °C the raw sweep produced:
+
+```
+(78.4 °C, 5 %)  (79.0 °C, 85 %)
+```
+
+Eighty percentage points of fan across **0.6 °C**. `CurveFollower` carries a
+4 °C hysteresis deadband, so that curve is a step function that hunts — and
+the discrete band search downstream could not find a self-consistent band
+inside it either, reporting settling points up to 20 °C above the truth.
+
+The escape is that the sweep produces a **lower bound**, not a prescription:
+any curve at or above it holds the target. So the steepness is capped at 0.05
+per °C — floor to full in 20 °C — and paid for by starting the ramp earlier.
+That is more fan at cooler temperatures and never less, which keeps the promise
+intact. For scale the shipped presets ramp at 0.025 (Balanced), 0.033 (Quiet)
+and 0.0147 (Cold's steepest segment).
+
+With the cap in place the forward solver and the plant agree to within 0.5 °C
+at every load in the sweep, where before they differed by up to 20.
+
+### What it refuses
+
+The same three things the rest of this file refuses, for the same reasons.
+
+- **One measured fan speed is not a comparison.** What a faster fan buys is
+  exactly the thing a single-band machine has never shown. Two bands minimum.
+- **A hole in the load coverage contributes no point.** `Band.covers(watts:)`
+  still governs; the failure it was written for — an idle band's line
+  extrapolated to 48 W advising *slower* fans — is the same failure seen from
+  the other side, and it would be baked into a curve rather than shown in a row.
+- **Past the evidence there is no fitted answer.** The curve does not
+  extrapolate. It ramps to full fans by 94 °C, ten degrees under the ceiling
+  the daemon enforces. That anchor is the one point in a derived curve that is
+  not a measurement, and it is deliberately the safe direction.
+
+### The finding worth the feature
+
+On the reference machine, sweeping load at a target of 85 °C:
+
+| Load | Slowest fan speed that holds 85 °C | Settles at |
+| --- | --- | --- |
+| 25 W | fan minimum | 55 °C |
+| 35 W | fan minimum | 77 °C |
+| 45 W | ~64 % | 85 °C |
+| 52 W | **full — and still 87 °C** | 87 °C |
+
+The last row is the point. At this Mac's measured peak draw, *even full fans*
+land above 85 °C, so the request is not available on this hardware — and the
+panel says so, in those terms, rather than handing over a curve that quietly
+misses. No fan tool has told anyone the actual thermal limit of the laptop in
+front of them, because none of them measured it.
+
+### What it is still not
+
+A vote on the cooling. The rule above stands: a model that has never run on
+hardware does not get to spin the fans. This produces **points in an editor**
+that a person drags, judges and applies, and every clamp, ceiling and watchdog
+in the daemon sits under a derived curve exactly as it sits under a hand-drawn
+one. The distance between a proposal and a command is the whole design.
+
 ## Contributing a reading
 
 The measurements above cover exactly one Mac. If you want to add yours:

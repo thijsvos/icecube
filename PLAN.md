@@ -890,6 +890,49 @@ Not verifiable from a shell without the probe: whether the *installed* item
 holds its width. The probe measured it on the build; the owner confirms it on
 the install, in °C and then in °F.
 
+- **The cooling law, run backwards (2026-09-05).** Everything Ice Cube had
+  learned about this Mac stopped at the edge of the one window where the user
+  decides anything. `ThermalForecast` runs the fitted `CoolingLaw` forwards —
+  *given your curve, where does this load settle* — and the curve editor drew a
+  blue line on an empty grid. The inverse needed no new measurement, no new
+  file, no new permission and no daemon change: `(ambient + band.rise(atWatts:),
+  band.medianFanFraction)` is a point the machine has demonstrated, so sweeping
+  the load range and taking the slowest band that still holds a target produces
+  the quietest curve the evidence supports. New: `CurveDerivation` (IceCubeKit,
+  pure), `CurveDerivationCopy`, `CurveFitRow`, measured-band bars in
+  `CurveCanvas`, opt-in behind `experimental.measuredCurve`. Full reasoning in
+  `docs/THERMAL.md` §"Running it backwards".
+
+  **Three findings worth recording.** (1) *The first version was correct and
+  useless.* A hard temperature cap has a bang-bang optimum: against the
+  simulated plant the raw sweep produced `(78.4 °C, 5 %) (79.0 °C, 85 %)` —
+  80 points of fan across **0.6 °C**, inside a follower whose deadband is 4 °C.
+  The fix rests on the sweep being a *lower bound* rather than a prescription,
+  so steepness is capped at 0.05/°C and paid for by starting the ramp earlier —
+  more fan sooner, never less. With the cap the forward solver and the plant
+  agree within 0.5 °C at every swept load, where before they differed by up to
+  20 °C; that disagreement is what found the defect, and it is the reason the
+  suite checks the inverse *against the forward solver* and then against the
+  plant itself. (2) *`FanCurve.normalized` could not be trusted to cap the
+  points.* It caps with `prefix(8)`, which keeps the coolest eight and deletes
+  the ramp to full fans — so the derivation thins its own points, keeping the
+  ends and the corners, and repairs any requirement thinning flattened.
+  (3) *A real bug, found on the way and fixed.* `coolingTrend` was recomputed at
+  launch, on clear and on "mark as cleaned"; `coolingLaw` only ever at the
+  record *append* — at most one per five minutes and only while the machine
+  sits settled. So on every launch, on a Mac with months of history, the law was
+  empty and the shipped forecast stayed silent for minutes about a machine it
+  already knew. Both now move together in `AppState.rebuildFromHistory(now:)`;
+  pinned by two app-target tests, both confirmed to fail against the old code.
+
+  29 new tests (809 in IceCubeKit, 328 in the app target). Ten mutations run
+  across the new rules, all killed: no steepness cap, repair as a no-op, thin
+  as `prefix`, no coverage filter, no quiet anchor, no loud anchor, one band
+  accepted, fastest-band-first, decile midpoint instead of a refused band, mean
+  instead of median. Demonstrable with no hardware — every seeded simulated
+  history story derives a curve and `sparse` reaches the refusal, which is the
+  only way CI sees this feature at all.
+
 ## 7. Risks & mitigations
 - **SMC keys vary wildly per model** → curated map + fallback enumeration + community diagnostics pipeline (§3.3). Biggest ongoing cost; design for it.
 - **Free-Apple-ID helper approval unproven** → Phase 0.5 spike with the fallback documented *before* it runs (manual `sudo launchctl bootstrap` install for Phases 3–5).
