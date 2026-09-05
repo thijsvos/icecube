@@ -61,6 +61,19 @@ codesign -dv "$APP" 2>&1 | grep -E "TeamIdentifier|Authority" || {
 
 echo "==> Installing to /Applications (quitting any running copy)"
 pkill -x "Ice Cube" 2>/dev/null || true
+# pkill returns when the signal is *sent*, not when the process is gone.
+# Replacing the bundle under a copy still tearing down, then asking Launch
+# Services to open it in the same breath, is how this produced
+# "_LSOpenURLsWithCompletionHandler() failed with error -600" and left
+# nothing running (2026-09-05). Wait for the exit, bounded at 5 s.
+for _ in $(seq 1 50); do
+    pgrep -x "Ice Cube" >/dev/null 2>&1 || break
+    sleep 0.1
+done
+if pgrep -x "Ice Cube" >/dev/null 2>&1; then
+    echo "error: the running copy of Ice Cube did not quit within 5 s — quit it and re-run." >&2
+    exit 1
+fi
 rm -rf "/Applications/Ice Cube.app"
 ditto "$APP" "/Applications/Ice Cube.app"
 

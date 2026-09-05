@@ -42,7 +42,8 @@ struct ForecastAccuracyTests {
                 intercept: low - slope * 30,
                 residual: 0.1,
                 records: 40,
-                wattsRange: 10 ... 60
+                wattsRange: 10 ... 60,
+                medianFanFraction: fraction
             )
         }
         return CoolingLaw(bands: bands)

@@ -180,6 +180,62 @@ struct AppStateTests {
         #expect(!graph.defaults.bool(forKey: AppState.forecastEnabledKey), "and it must switch back off again")
     }
 
+    /// Same contract again, on the switch that hands over a curve rather than
+    /// reporting a number.
+    @Test("A store nobody has written reports the measured curve as off")
+    func measuredCurveIsOffUntilAskedFor() {
+        let graph = CompositionRoot.makeSimulatedForTesting()
+        #expect(graph.defaults.object(forKey: AppState.measuredCurveKey) == nil, "nothing may have written it")
+        let state = AppState(graph: graph, menuBarHost: { _ in SpyHost() })
+        #expect(!state.isMeasuredCurveEnabled, "an experimental feature must not arrive switched on")
+    }
+
+    @Test("Turning the measured curve on writes to the injected store")
+    func measuredCurveTogglePersistsThroughTheSeam() {
+        let graph = CompositionRoot.makeSimulatedForTesting()
+        let state = AppState(graph: graph, menuBarHost: { _ in SpyHost() })
+
+        state.isMeasuredCurveEnabled = true
+        #expect(graph.defaults.bool(forKey: AppState.measuredCurveKey))
+        #expect(!(graph.defaults is UserDefaults), "and the store it landed in must not be the real one")
+
+        state.isMeasuredCurveEnabled = false
+        #expect(!graph.defaults.bool(forKey: AppState.measuredCurveKey), "and it must switch back off again")
+    }
+
+    // MARK: - What the history file is worth at launch
+
+    /// The asymmetry `rebuildFromHistory` exists to remove, pinned from the
+    /// outside.
+    ///
+    /// `coolingTrend` was re-evaluated at launch; `coolingLaw` was refitted
+    /// only when a *record was appended* — at most one per five minutes, and
+    /// only while the machine sits settled. So on every launch, on a Mac with
+    /// months of history, the law was empty for the first several minutes and
+    /// everything built on it stayed silent about a machine it already knew.
+    /// A simulated graph is seeded with months of records, so a freshly
+    /// constructed `AppState` is exactly the case that used to be empty.
+    @Test("The cooling law is fitted from the stored history at launch")
+    func theLawIsReadyBeforeTheFirstRecordOfTheSession() {
+        let state = AppState(graph: CompositionRoot.makeSimulatedForTesting(), menuBarHost: { _ in SpyHost() })
+        #expect(state.coolingLaw.measuredBands.count >= 2, "seeded history must produce a law at launch")
+        #expect(state.derivationAmbient != nil, "and the airflow reference it is measured against")
+    }
+
+    /// And the derivation is reachable from it with no hardware, no root and no
+    /// helper — ground rule 3, which is also the only way CI ever sees this
+    /// feature run.
+    @Test("A curve can be derived in simulated mode")
+    func theDerivationIsReachableWithoutHardware() {
+        let state = AppState(graph: CompositionRoot.makeSimulatedForTesting(), menuBarHost: { _ in SpyHost() })
+        guard case let .derived(derivation) = state.deriveCurve(holdingAt: 85) else {
+            Issue.record("simulated mode could not derive a curve")
+            return
+        }
+        #expect(derivation.curve.isUsable)
+        #expect(derivation.records > 0)
+    }
+
     /// Switching it off must clear the row, not leave the last projection on
     /// screen. A stale forecast is worse than none: it keeps making a claim
     /// about a machine it is no longer watching.

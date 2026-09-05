@@ -106,6 +106,19 @@ struct SettingsGeneralTab: View {
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                Toggle(
+                    "Made to measure — a curve fitted to this Mac",
+                    isOn: $state.isMeasuredCurveEnabled
+                )
+                .help("Draws what your Mac has measured behind the curve editor, and offers a curve built from it.")
+                Text(
+                    "Ice Cube records how much cooling each fan speed buys on your machine. "
+                        + "This draws those readings behind the curve editor and can turn them "
+                        + "into a curve. It needs about a week of ordinary use before it has "
+                        + "seen enough fan speeds to compare."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
                 if state.isInsideEnabled {
                     Toggle("Animate the fans and airflow", isOn: Binding(
                         get: { state.insideAnimation ?? !systemReducesMotion },

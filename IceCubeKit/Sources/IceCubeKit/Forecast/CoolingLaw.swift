@@ -94,6 +94,18 @@ public struct CoolingLaw: Sendable, Equatable {
         /// The range of draw the fit was built from, watts. Outside it the line
         /// is extrapolation.
         public let wattsRange: ClosedRange<Double>
+        /// The fan speed this band's readings were actually taken at, as a
+        /// fraction of maximum — the median of their `fanFraction`.
+        ///
+        /// A band is a decile, so its midpoint is free and is what a caller
+        /// reaches for otherwise. It is a guess. Records do not spread evenly
+        /// inside a decile: a Mac that idles at its 2317 RPM floor spends the
+        /// whole of band 0 pinned against the bottom edge, and the midpoint
+        /// names a fan speed it never runs at. The median names one it did.
+        ///
+        /// The line fit does not need this. ``CurveDerivation`` does: it turns
+        /// a band back into a curve point, and a curve point is a fan speed.
+        public let medianFanFraction: Double
 
         /// Predicted die rise above airflow at a given draw, never negative.
         ///
@@ -225,9 +237,22 @@ public struct CoolingLaw: Sendable, Equatable {
         // `records`, so the later check subsumes it. A band of twenty records
         // of which fifteen have an unreadable draw is a band of five.
         let points = records
-            .map { (watts: $0.watts, rise: $0.dieCelsius - $0.ambientCelsius) }
+            .map { (watts: $0.watts, rise: $0.dieCelsius - $0.ambientCelsius, fraction: $0.fanFraction) }
             .filter { $0.watts.isFinite && $0.rise.isFinite && $0.watts > 0 }
         guard points.count >= minimumRecordsPerBand else { return nil }
+
+        // The fan speed the readings were taken at, held to the same bar as
+        // the line itself and **refused rather than defaulted**. The fraction
+        // is not filtered in `points` above because the line does not use it,
+        // and losing a record with a good draw would weaken a fit that was
+        // fine. But a band that cannot say what its fans were doing has to be
+        // dropped, not guessed at the decile midpoint: guessing *low* makes a
+        // derived curve command less fan than the readings were taken with,
+        // and the machine then settles hotter than the number it promised.
+        let fractions = points.map(\.fraction).filter { $0.isFinite && (0 ... 1).contains($0) }
+        guard fractions.count >= minimumRecordsPerBand,
+              let medianFraction = CoolingStatistics.median(fractions)
+        else { return nil }
 
         let n = Double(points.count)
         let meanWatts = points.reduce(0) { $0 + $1.watts } / n
@@ -263,7 +288,8 @@ public struct CoolingLaw: Sendable, Equatable {
             intercept: intercept,
             residual: residual,
             records: points.count,
-            wattsRange: lowest ... highest
+            wattsRange: lowest ... highest,
+            medianFanFraction: medianFraction
         )
     }
 }
