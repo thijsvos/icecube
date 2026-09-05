@@ -14,6 +14,13 @@ struct CurveCanvas: View {
     let model: CurveEditorModel
     /// The hottest die reading, for the live marker; `nil` before the first poll.
     let hottestDie: Double?
+    /// What this Mac has actually measured, in these same coordinates. Empty
+    /// unless the feature is switched on, or before there is any evidence.
+    ///
+    /// Handed in already reduced to spans rather than as a `CoolingLaw`, so the
+    /// arithmetic that turns a fitted band into a rectangle is testable in
+    /// IceCubeKit and this file stays what its header says it is.
+    var measured: [CurveDerivation.MeasuredSpan] = []
 
     /// The plotted temperature range. Lives here because every user of it —
     /// coordinate mapping, the grid, the curve, the marker — is in this file.
@@ -28,6 +35,10 @@ struct CurveCanvas: View {
             ZStack {
                 Canvas { context, _ in
                     drawGrid(context, rect)
+                    // Between the grid and the curve on purpose: the evidence
+                    // is the ground the curve is drawn on, and the curve is the
+                    // thing being edited, so nothing may sit on top of it.
+                    drawMeasured(context, rect)
                     drawCurve(context, rect)
                     drawLiveMarker(context, rect)
                     drawHandles(context, rect)
@@ -130,6 +141,34 @@ struct CurveCanvas: View {
             context.draw(
                 Text("\(Int(fraction * 100))%").font(.caption2).foregroundStyle(.tertiary),
                 at: CGPoint(x: rect.minX - 16, y: y)
+            )
+        }
+    }
+
+    /// Where this Mac actually settles: one bar per measured fan speed, laid
+    /// at that speed and spanning the temperatures it was measured across.
+    ///
+    /// Coloured by heat rather than by ``Theme/accent`` for two reasons. The
+    /// accent is the curve's colour and the bars must not read as part of it;
+    /// and a bar *is* a temperature claim, so it wears the same scale the live
+    /// marker and the temperature cards do. What is left uncoloured is the far
+    /// larger half of the story — every part of this plot the machine has
+    /// never been in.
+    private func drawMeasured(_ context: GraphicsContext, _ rect: CGRect) {
+        for span in measured {
+            let low = span.celsius.lowerBound.clamped(to: Self.tempRange)
+            let high = span.celsius.upperBound.clamped(to: Self.tempRange)
+            guard high > low else { continue }
+            let left = position(of: CurvePoint(celsius: low, fraction: 0), in: rect).x
+            let right = position(of: CurvePoint(celsius: high, fraction: 0), in: rect).x
+            let y = position(of: CurvePoint(celsius: low, fraction: span.fanFraction), in: rect).y
+            let heat = Theme.temperatureColor((low + high) / 2)
+            context.fill(
+                Path(
+                    roundedRect: CGRect(x: left, y: y - 3, width: right - left, height: 6),
+                    cornerRadius: 3
+                ),
+                with: .color(heat.opacity(0.30))
             )
         }
     }
