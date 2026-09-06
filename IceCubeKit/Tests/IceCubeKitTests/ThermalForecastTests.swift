@@ -46,6 +46,13 @@ struct ThermalForecastTests {
         }
     }
 
+    /// The decile's midpoint — what a synthetic band means when it is written
+    /// as a slope and an intercept rather than fitted from records that carry
+    /// the fan speed they were taken at.
+    private static func midFraction(_ band: FanBand) -> Double {
+        band.fractionRange.map { ($0.lowerBound + $0.upperBound) / 2 } ?? 0
+    }
+
     /// A law with a chosen line in each named band, measured over `range`.
     private static func law(
         _ entries: [(FanBand, slope: Double, intercept: Double)],
@@ -55,7 +62,8 @@ struct ThermalForecastTests {
         for entry in entries {
             bands[entry.0] = CoolingLaw.Band(
                 slope: entry.slope, intercept: entry.intercept,
-                residual: 0.5, records: 40, wattsRange: range
+                residual: 0.5, records: 40, wattsRange: range,
+                medianFanFraction: midFraction(entry.0)
             )
         }
         return CoolingLaw(bands: bands)
@@ -69,7 +77,8 @@ struct ThermalForecastTests {
         for entry in entries {
             bands[entry.0] = CoolingLaw.Band(
                 slope: entry.slope, intercept: entry.intercept,
-                residual: 0.5, records: 40, wattsRange: entry.range
+                residual: 0.5, records: 40, wattsRange: entry.range,
+                medianFanFraction: midFraction(entry.0)
             )
         }
         return CoolingLaw(bands: bands)

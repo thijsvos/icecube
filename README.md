@@ -46,6 +46,7 @@ dependencies**; small footprint is a design goal, not an accident.
 | **"Why is it hot?"** — per-process watts, which silicon leads, and whether your curve has anything left | ✅ |
 | **Forecast** *(opt-in)* — where this load settles, roughly when, and what a different fan speed would buy, from your own Mac's measured cooling | ✅ |
 | Decision timeline: the charts mark *why* the fans moved, in the daemon's words | ✅ |
+| **Made to measure** *(opt-in)* — draws what your Mac has actually measured behind the curve editor, and fits a curve to it: the quietest fan speeds that hold the temperature you pick, or the honest news that nothing on this Mac holds it | 🧪 experimental |
 | CSV history export, temperature alerts, launch at login, °C/°F | ✅ |
 | Update check via GitHub Releases — once a day, link only, never auto-install, switchable off | ✅ |
 | **Inside** — a live drawing of the cooling path: silicon at its own temperature, blowers turning at their real speed, air moving at fan speed | 🧪 experimental |

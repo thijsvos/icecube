@@ -263,7 +263,11 @@ public enum ThermalForecast {
     ///   edge between them. Resolved to the warmer, for the same reason.
     /// - **None at all** — the fixed point lies in a band this machine has
     ///   never run in. Refuse, and name it, rather than borrow a neighbour's.
-    private static func solve(
+    ///
+    /// Internal rather than private so ``CurveDerivation`` can check its own
+    /// answer against it: the derivation runs this relationship backwards, and
+    /// a backwards answer that the forward solver disagrees with is wrong.
+    static func solve(
         from _: Double,
         ambient: Double,
         watts: Double,

@@ -44,6 +44,7 @@ final class AppState: PopoverLifecycleObserving {
     static let insideAnimationKey = "experimental.inside.animates"
     static let insideInPopoverKey = "experimental.inside.popover"
     static let forecastEnabledKey = "experimental.forecast"
+    static let measuredCurveKey = "experimental.measuredCurve"
 
     /// The app-wide "keep the curve running when Ice Cube quits" toggle.
     ///
@@ -284,26 +285,82 @@ final class AppState: PopoverLifecycleObserving {
     /// the row should not then wait twelve minutes for it to say anything.
     @ObservationIgnored private var timeConstant = ThermalTimeConstant()
 
-    /// What each fan speed buys on this Mac, refitted **only when a record is
-    /// appended** — the same reasoning as ``coolingTrend`` directly above.
-    /// It is a pure function of the record set, so recomputing between records
-    /// would burn cycles to produce an identical answer.
-    @ObservationIgnored private var coolingLaw = CoolingLaw()
+    /// What each fan speed buys on this Mac, refitted whenever the record set
+    /// changes — the same reasoning as ``coolingTrend`` directly above, and now
+    /// genuinely the same *code*: see ``rebuildFromHistory(now:)``.
+    ///
+    /// Observed rather than `@ObservationIgnored`, because the curve editor
+    /// draws it. The record set changes at most once every five minutes, so
+    /// this invalidates a view about as often as the trend does.
+    private(set) var coolingLaw = CoolingLaw()
+
+    /// The airflow reading a derived curve is measured against: the median of
+    /// the history the law was fitted from.
+    ///
+    /// Cached here rather than computed per call because it is a pure function
+    /// of the same record set, and the curve editor asks for a fresh
+    /// derivation on every drag of the target slider.
+    private(set) var derivationAmbient: Double?
+
+    /// Whether the curve editor may draw what this Mac has measured, and offer
+    /// a curve fitted to it.
+    ///
+    /// Off by default, behind the same injected `defaults` seam as the switches
+    /// above. Opt-in for the reason ``isForecastEnabled`` is, one step further
+    /// along: the forecast *reports* a projection and this *hands over a
+    /// curve*. `docs/THERMAL.md` parks a model that commands the fans; a model
+    /// that proposes points a person drags and applies is the near side of that
+    /// line, and it stays behind a switch while it earns its keep.
+    var isMeasuredCurveEnabled: Bool {
+        didSet { defaults.set(isMeasuredCurveEnabled, forKey: Self.measuredCurveKey) }
+    }
+
+    /// The quietest curve this Mac's own readings say will hold `celsius`.
+    ///
+    /// Computed on demand rather than published: the answer depends on a target
+    /// the curve editor owns, and its inputs only move when a record lands.
+    func deriveCurve(holdingAt celsius: Double) -> CurveDerivation.Verdict {
+        guard let ambient = derivationAmbient else {
+            return .unavailable(.tooFewBands(measured: 0, need: CurveDerivation.minimumBands))
+        }
+        return CurveDerivation.derive(holdingAt: celsius, law: coolingLaw, ambientCelsius: ambient)
+    }
+
+    /// Recomputes everything derived from the history file, in one place.
+    ///
+    /// **The asymmetry this exists to remove.** Both values are pure functions
+    /// of the record set and both have to move with it. `coolingTrend` did:
+    /// re-evaluated at launch, on clear and on "mark as cleaned". `coolingLaw`
+    /// only ever refitted at the *append*. So on every launch, on a Mac with
+    /// months of history, the law was empty until that session produced its
+    /// first record — at most one per five minutes and only while the machine
+    /// sits settled — and the forecast built on it stayed silent for all of it
+    /// about a machine it already knew. Three call sites that had to be kept in
+    /// step and were not; now one that cannot drift.
+    private func rebuildFromHistory(now: Date) {
+        guard let loaded = history.history else {
+            coolingTrend = .noHistory
+            coolingLaw = CoolingLaw()
+            derivationAmbient = nil
+            return
+        }
+        coolingTrend = CoolingTrend.evaluate(loaded, now: now)
+        coolingLaw = CoolingLaw.fit(loaded)
+        derivationAmbient = CurveDerivation.ambient(from: loaded.records)
+    }
 
     /// Clears the history and re-evaluates at once — the verdict must not
     /// keep claiming "worse than June" about readings that no longer exist.
     func clearCoolingHistory() {
         history.clear()
-        coolingTrend = history.history
-            .map { CoolingTrend.evaluate($0, now: Date()) } ?? .noHistory
+        rebuildFromHistory(now: Date())
     }
 
     /// Records an "I cleaned it" boundary and re-evaluates: the baseline
     /// moves, so the sentence built on it must move in the same breath.
     func markCoolingServiced() {
         history.markServiced(at: Date())
-        coolingTrend = history.history
-            .map { CoolingTrend.evaluate($0, now: Date()) } ?? .noHistory
+        rebuildFromHistory(now: Date())
     }
 
     // MARK: - Diagnosis ("why is it hot?")
@@ -523,6 +580,7 @@ final class AppState: PopoverLifecycleObserving {
         isInsideEnabled = defaults.bool(forKey: Self.insideEnabledKey)
         showsInsideInPopover = defaults.bool(forKey: Self.insideInPopoverKey)
         isForecastEnabled = defaults.bool(forKey: Self.forecastEnabledKey)
+        isMeasuredCurveEnabled = defaults.bool(forKey: Self.measuredCurveKey)
         insideAnimation = defaults.object(forKey: Self.insideAnimationKey) as? Bool
         // Defaulted to the mock rather than to `SystemProcessSampler`, so a
         // caller that forgets the argument reads fiction instead of the user's
@@ -558,9 +616,7 @@ final class AppState: PopoverLifecycleObserving {
         helper.start()
         // Once at launch; thereafter only when a record lands (see
         // `coolingTrend`). An empty store honestly reads `.noHistory`.
-        if let loaded = history.history {
-            coolingTrend = CoolingTrend.evaluate(loaded, now: Date())
-        }
+        rebuildFromHistory(now: Date())
     }
 
     /// Rebuilds the polling stream with the effective cadence.
@@ -761,10 +817,7 @@ final class AppState: PopoverLifecycleObserving {
                         new, settled: cooling.settledWindow, elapsed: ContinuousClock().now
                     ) {
                         history.append(record, fans: new.fans, now: new.date)
-                        if let loaded = history.history {
-                            coolingTrend = CoolingTrend.evaluate(loaded, now: new.date)
-                            coolingLaw = CoolingLaw.fit(loaded)
-                        }
+                        rebuildFromHistory(now: new.date)
                     }
                     await refreshDiagnosis(new)
                     // Assigned only on a change: see `sensorRowCount`. Writing
