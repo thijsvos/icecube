@@ -298,7 +298,7 @@ jobs:
         # tag means whatever it points at tomorrow runs with write access to the
         # repo. Dependabot updates the SHA and rewrites the comment, so the pin
         # does not rot. (v2 -> v3 is purely Node 20 -> Node 24; no input changes.)
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: Ice Cube ${{ steps.version.outputs.version }}
